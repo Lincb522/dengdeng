@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -113,5 +114,27 @@ func TestAccountQuotaAPIKeyUsesLocalUsageAndRateLimitHeaders(t *testing.T) {
 	}
 	if snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 25 {
 		t.Fatalf("window = %#v", snapshot.Windows[0])
+	}
+}
+
+func TestAccountSubscriptionExpiryComesFromSubscriptionClaim(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_subscription_active_until":"2026-08-15T02:50:12+00:00"}}`))
+	extra, err := model.EncodeExtra(map[string]any{"id_token": "x." + payload + ".x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenExpiry := time.Date(2026, 10, 15, 5, 44, 15, 0, time.UTC)
+	account := model.UpstreamAccount{ExpiresAt: &tokenExpiry, Extra: extra}
+	got := accountSubscriptionExpiresAt(&account)
+	if got == nil || got.UTC().Format(time.RFC3339) != "2026-08-15T02:50:12Z" {
+		t.Fatalf("subscription expiry = %v", got)
+	}
+}
+
+func TestQuotaResetAtAcceptsMilliseconds(t *testing.T) {
+	want := time.Date(2026, 7, 18, 1, 2, 3, 0, time.UTC)
+	got := quotaResetAt(want.UnixMilli(), 0)
+	if got == nil || !got.Equal(want) {
+		t.Fatalf("reset at = %v, want %v", got, want)
 	}
 }

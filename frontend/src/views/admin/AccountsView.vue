@@ -418,11 +418,19 @@ function authBadge(a: UpstreamAccount): { label: string; cls: string } {
     : { label: 'API Key', cls: 'tag-gray' }
 }
 
-function expiryInfo(a: UpstreamAccount): { text: string; cls: string } | null {
+function tokenExpiryInfo(a: UpstreamAccount): { text: string; cls: string } | null {
   if (a.auth_type !== 'oauth' || !a.expires_at) return null
   const t = new Date(a.expires_at)
   const expired = t.getTime() < Date.now()
 	return { text: t.toLocaleString(), cls: expired ? 'text-signal-red' : 'text-slate-500' }
+}
+
+function subscriptionExpiryInfo(a: UpstreamAccount): { text: string; cls: string } | null {
+	if (!a.quota?.subscription_expires_at) return null
+	const expiry = new Date(a.quota.subscription_expires_at)
+	if (Number.isNaN(expiry.getTime())) return null
+	const expired = expiry.getTime() < Date.now()
+	return { text: expiry.toLocaleString(), cls: expired ? 'text-signal-red' : 'text-slate-500' }
 }
 
 function quotaPercent(value: number) {
@@ -476,7 +484,16 @@ function formatQuotaNumber(value: number) {
 
 function quotaResetText(window: AccountQuotaWindow) {
 	if (!window.reset_at) return ''
-	return `重置 ${new Date(window.reset_at).toLocaleString()}`
+	const reset = new Date(window.reset_at)
+	if (Number.isNaN(reset.getTime())) return ''
+	const remainingMs = reset.getTime() - Date.now()
+	const absolute = reset.toLocaleString()
+	if (remainingMs <= 0) return `已于 ${absolute} 重置`
+	const totalMinutes = Math.ceil(remainingMs / 60_000)
+	if (totalMinutes < 60) return `${totalMinutes} 分钟后重置（${absolute}）`
+	const hours = Math.floor(totalMinutes / 60)
+	const minutes = totalMinutes % 60
+	return `${hours} 小时${minutes ? ` ${minutes} 分` : ''}后重置（${absolute}）`
 }
 
 function accountQuotaExhausted(quota?: AccountQuotaSnapshot) {
@@ -500,7 +517,7 @@ function quotaCheckedAt(quota?: AccountQuotaSnapshot) {
 
 function availability(a: UpstreamAccount): { score: number; label: string; cls: string; reason: string } {
 	if (a.status !== 'active') return { score: 0, label: '已停用', cls: 'tag-gray', reason: '管理员已停用该账号' }
-	if (a.auth_type === 'oauth' && a.expires_at && new Date(a.expires_at) <= new Date()) return { score: 0, label: '凭据到期', cls: 'tag-red', reason: 'OAuth 凭据已过期，需重新授权' }
+	if (a.auth_type === 'oauth' && a.expires_at && new Date(a.expires_at) <= new Date() && a.quota?.state === 'error') return { score: 0, label: '续期失败', cls: 'tag-red', reason: 'OAuth Token 过期且自动续期失败，需重新授权' }
 	if (accountQuotaExhausted(a.quota)) return { score: 0, label: '额度用尽', cls: 'tag-red', reason: '上游返回该账号的额度窗口已用尽' }
 	if (a.cooldown_until && new Date(a.cooldown_until) > new Date()) return { score: 10, label: '冷却中', cls: 'tag-red', reason: `预计 ${new Date(a.cooldown_until).toLocaleTimeString()} 后恢复调度` }
 	if (a.error_count >= 4) return { score: 45, label: '需关注', cls: 'tag-amber', reason: `近期连续失败 ${a.error_count} 次` }
@@ -671,6 +688,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         <section class="account-card-quota">
           <template v-if="a.quota">
             <div class="account-quota-head"><strong>{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
+			<p v-if="subscriptionExpiryInfo(a)" class="account-quota-message" :class="subscriptionExpiryInfo(a)!.cls">套餐到期 {{ subscriptionExpiryInfo(a)!.text }}</p>
             <div v-for="window in a.quota.windows || []" :key="window.key" class="account-card-quota-window">
               <span>{{ quotaWindowText(window) }}</span>
               <div v-if="window.used_percent !== undefined"><i class="bg-amber" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></i></div>
@@ -720,8 +738,8 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             </td>
             <td>
               <span :class="authBadge(a).cls">{{ authBadge(a).label }}</span>
-              <div v-if="expiryInfo(a)" class="mt-1 text-xs" :class="expiryInfo(a)!.cls" :title="'access token 过期时间'">
-                到期 {{ expiryInfo(a)!.text }}
+			  <div v-if="subscriptionExpiryInfo(a)" class="mt-1 whitespace-nowrap text-xs" :class="subscriptionExpiryInfo(a)!.cls" title="上游套餐到期时间">
+				套餐到期 {{ subscriptionExpiryInfo(a)!.text }}
               </div>
             </td>
             <td class="max-w-[200px] truncate font-mono text-xs text-slate-400" :title="a.base_url">{{ a.base_url || '官方默认' }}</td>
@@ -732,6 +750,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 			<td class="min-w-56">
 				<div v-if="a.quota" class="space-y-2">
 					<div class="flex items-center gap-2 whitespace-nowrap"><strong class="text-xs text-slate-200">{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
+					<div v-if="subscriptionExpiryInfo(a)" class="whitespace-nowrap text-[11px]" :class="subscriptionExpiryInfo(a)!.cls">套餐到期 {{ subscriptionExpiryInfo(a)!.text }}</div>
 					<div v-for="window in a.quota.windows || []" :key="window.key" class="min-w-52">
 						<div class="num whitespace-nowrap text-xs text-slate-300">{{ quotaWindowText(window) }}</div>
 						<div v-if="window.used_percent !== undefined" class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-amber transition-[width] duration-200" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></span></div>
@@ -896,6 +915,8 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 									<p v-if="quotaResetText(window)" class="mt-1 text-xs text-slate-500">{{ quotaResetText(window) }}</p>
 								</div>
 								<p class="mt-2 text-xs text-slate-500">{{ observedUsageText(primaryObservedUsage(diagnostic.quota)) }}</p>
+								<p v-if="subscriptionExpiryInfo(diagnostic)" class="mt-1 text-xs" :class="subscriptionExpiryInfo(diagnostic)!.cls">套餐到期：{{ subscriptionExpiryInfo(diagnostic)!.text }}</p>
+								<p v-if="tokenExpiryInfo(diagnostic)" class="mt-1 text-xs text-slate-500">Token 有效至：{{ tokenExpiryInfo(diagnostic)!.text }}（会自动续期）</p>
 								<p v-if="diagnostic.quota.last_credential_refresh" class="mt-1 text-xs text-slate-500">凭证已自动续期：{{ new Date(diagnostic.quota.last_credential_refresh).toLocaleString() }}</p>
 								<p v-if="diagnostic.quota.message" class="mt-2 text-xs leading-5 text-slate-500">{{ diagnostic.quota.message }}</p>
 							</template>

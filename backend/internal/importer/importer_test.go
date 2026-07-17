@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -125,5 +126,23 @@ func TestParseGeminiOAuthRetainsRefreshClientMetadata(t *testing.T) {
 		if got, _ := extra[key].(string); got != want {
 			t.Fatalf("extra[%q] = %q, want %q", key, got, want)
 		}
+	}
+}
+
+func TestParseOpenAISeparatesTokenAndSubscriptionExpiry(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"https://api.openai.com/auth":{"chatgpt_subscription_active_until":"2026-08-15T02:50:12Z"}}`))
+	raw := []byte(`{"accounts":[{"platform":"openai","type":"oauth","credentials":{"access_token":"access","refresh_token":"refresh","expires_at":"2026-07-25T11:33:52Z","id_token":"x.` + payload + `.x"}}]}`)
+	accounts, err := Parse("sub2api", raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(accounts) != 1 || accounts[0].ExpiresAt == nil {
+		t.Fatalf("account token expiry missing: %#v", accounts)
+	}
+	if got := accounts[0].ExpiresAt.UTC().Format(time.RFC3339); got != "2026-07-25T11:33:52Z" {
+		t.Fatalf("token expiry = %q", got)
+	}
+	if got, _ := accounts[0].Extra["subscription_expires_at"].(string); got != "2026-08-15T02:50:12Z" {
+		t.Fatalf("subscription expiry = %q", got)
 	}
 }

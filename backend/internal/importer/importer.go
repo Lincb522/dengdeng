@@ -205,6 +205,11 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 	putIf(extra, "project_id", get("project_id", "projectId"))
 	putIf(extra, "oauth_type", get("oauth_type", "oauthType"))
 	putIf(extra, "plan_type", get("plan_type", "planType", "subscription_type", "subscriptionType"))
+	if subscriptionExpiry := firstTime(getAny("subscription_expires_at", "subscriptionExpiresAt", "subscription_active_until", "subscriptionActiveUntil")); subscriptionExpiry != nil {
+		extra["subscription_expires_at"] = subscriptionExpiry.UTC().Format(time.RFC3339)
+	} else if subscriptionExpiry := subscriptionExpiryFromIDToken(idToken); subscriptionExpiry != nil {
+		extra["subscription_expires_at"] = subscriptionExpiry.UTC().Format(time.RFC3339)
+	}
 	putIf(extra, "organization_id", get("organization_id", "organizationId"))
 	putIf(extra, "token_type", get("token_type", "tokenType"))
 
@@ -400,16 +405,8 @@ func epochToTime(n int64) *time.Time {
 }
 
 func identityFromIDToken(token string) (email, accountID string) {
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return "", ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", ""
-	}
-	var claims map[string]any
-	if json.Unmarshal(payload, &claims) != nil {
+	claims := jwtClaims(token)
+	if claims == nil {
 		return "", ""
 	}
 	email, _ = claims["email"].(string)
@@ -423,4 +420,38 @@ func identityFromIDToken(token string) (email, accountID string) {
 		}
 	}
 	return strings.TrimSpace(email), strings.TrimSpace(accountID)
+}
+
+func subscriptionExpiryFromIDToken(token string) *time.Time {
+	claims := jwtClaims(token)
+	if claims == nil {
+		return nil
+	}
+	for _, source := range []map[string]any{claims, object(claims["https://api.openai.com/auth"])} {
+		if source == nil {
+			continue
+		}
+		for _, key := range []string{"subscription_expires_at", "chatgpt_subscription_active_until", "subscription_active_until"} {
+			if expiry := anyToTime(source[key]); expiry != nil {
+				return expiry
+			}
+		}
+	}
+	return nil
+}
+
+func jwtClaims(token string) map[string]any {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var claims map[string]any
+	if json.Unmarshal(payload, &claims) != nil {
+		return nil
+	}
+	return claims
 }

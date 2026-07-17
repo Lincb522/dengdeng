@@ -271,6 +271,7 @@ export interface AccountQuotaSnapshot {
 	source: 'codex_subscription' | 'claude_subscription' | 'grok_billing' | 'rate_limit_headers' | 'local_observed' | string
 	state: 'ready' | 'partial' | 'local_only' | 'error'
 	plan_type: string
+	subscription_expires_at?: string | null
 	message: string
 	windows: AccountQuotaWindow[]
 	observed_usage: AccountObservedUsage[]

@@ -280,6 +280,7 @@ type AccountQuotaSnapshot struct {
 	Source                string                 `gorm:"size:32;not null" json:"source"`
 	State                 string                 `gorm:"size:16;not null;default:local_only" json:"state"`
 	PlanType              string                 `gorm:"size:64" json:"plan_type"`
+	SubscriptionExpiresAt *time.Time             `json:"subscription_expires_at,omitempty"`
 	Message               string                 `gorm:"size:512" json:"message"`
 	Windows               []AccountQuotaWindow   `gorm:"serializer:json;type:text" json:"windows"`
 	ObservedUsage         []AccountObservedUsage `gorm:"serializer:json;type:text" json:"observed_usage"`

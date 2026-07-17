@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,6 +85,7 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 	snapshot.UpstreamAccountID = account.ID
 	snapshot.Platform = account.Platform
 	snapshot.PlanType = accountPlanType(account)
+	snapshot.SubscriptionExpiresAt = accountSubscriptionExpiresAt(account)
 	snapshot.LastAttemptAt = now
 	snapshot.ObservedUsage = s.observedUsage(account.ID, now)
 	snapshot.Message = ""
@@ -118,6 +120,7 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 		refreshed := now
 		snapshot.LastCredentialRefresh = &refreshed
 	}
+	snapshot.SubscriptionExpiresAt = accountSubscriptionExpiresAt(account)
 
 	switch account.Platform {
 	case model.PlatformOpenAI:
@@ -582,6 +585,93 @@ func accountPlanType(account *model.UpstreamAccount) string {
 	return ""
 }
 
+func accountSubscriptionExpiresAt(account *model.UpstreamAccount) *time.Time {
+	if account == nil {
+		return nil
+	}
+	extra := account.DecodeExtra()
+	for _, key := range []string{"subscription_expires_at", "subscription_active_until", "chatgpt_subscription_active_until"} {
+		if expiry := quotaTimeValue(extra[key]); expiry != nil {
+			return expiry
+		}
+	}
+	for _, tokenKey := range []string{"id_token", "access_token"} {
+		token, _ := extra[tokenKey].(string)
+		if tokenKey == "access_token" && token == "" {
+			token = string(account.AccessToken)
+		}
+		claims := quotaJWTClaims(token)
+		if claims == nil {
+			continue
+		}
+		for _, source := range []map[string]any{claims, quotaMap(claims["https://api.openai.com/auth"])} {
+			for _, key := range []string{"subscription_expires_at", "subscription_active_until", "chatgpt_subscription_active_until"} {
+				if expiry := quotaTimeValue(source[key]); expiry != nil {
+					return expiry
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func quotaJWTClaims(token string) map[string]any {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) < 2 {
+		return nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil
+	}
+	var claims map[string]any
+	if json.Unmarshal(payload, &claims) != nil {
+		return nil
+	}
+	return claims
+}
+
+func quotaMap(value any) map[string]any {
+	result, _ := value.(map[string]any)
+	return result
+}
+
+func quotaTimeValue(value any) *time.Time {
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+			if parsed, err := time.Parse(layout, text); err == nil {
+				utc := parsed.UTC()
+				return &utc
+			}
+		}
+		if unix, err := strconv.ParseInt(text, 10, 64); err == nil {
+			return quotaUnixTime(unix)
+		}
+	case float64:
+		return quotaUnixTime(int64(typed))
+	case json.Number:
+		if unix, err := typed.Int64(); err == nil {
+			return quotaUnixTime(unix)
+		}
+	}
+	return nil
+}
+
+func quotaUnixTime(value int64) *time.Time {
+	if value <= 0 {
+		return nil
+	}
+	var parsed time.Time
+	if value > 1e12 {
+		parsed = time.UnixMilli(value).UTC()
+	} else {
+		parsed = time.Unix(value, 0).UTC()
+	}
+	return &parsed
+}
+
 func chatGPTAccountID(account *model.UpstreamAccount) string {
 	if account == nil {
 		return ""
@@ -621,8 +711,7 @@ func providerWindowLabel(seconds int64, fallback string) string {
 
 func quotaResetAt(unixSeconds, afterSeconds int64) *time.Time {
 	if unixSeconds > 0 {
-		value := time.Unix(unixSeconds, 0).UTC()
-		return &value
+		return quotaUnixTime(unixSeconds)
 	}
 	if afterSeconds > 0 {
 		value := time.Now().UTC().Add(time.Duration(afterSeconds) * time.Second)
