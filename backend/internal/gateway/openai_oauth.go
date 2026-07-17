@@ -478,9 +478,9 @@ func imageGenerationToOAuthResponses(body []byte) ([]byte, string, error) {
 			tool[field] = value
 		}
 	}
-	if n, ok := request["n"]; ok {
-		tool["n"] = n
-	}
+	// Responses' image_generation tool always produces one image. Unlike the
+	// public Images API it rejects an `n` field (tools[0].n), even when n is 1.
+	// Do not forward it or a normal Studio request fails before generation.
 	// The Responses host model orchestrates the image_generation tool. The
 	// tool deliberately carries no public API Platform image-model override.
 	responses := map[string]any{

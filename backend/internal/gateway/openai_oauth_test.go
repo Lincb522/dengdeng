@@ -211,7 +211,7 @@ func TestNormalizeOAuthResponsesAssistantContent(t *testing.T) {
 
 func TestImageGenerationToOAuthResponsesOmitsUnsupportedImageModel(t *testing.T) {
 	body, responseFormat, err := imageGenerationToOAuthResponses([]byte(`{
-        "model":"gpt-image-2", "prompt":"draw a lantern", "size":"1024x1024", "quality":"high", "response_format":"b64_json"
+        "model":"gpt-image-2", "prompt":"draw a lantern", "size":"1024x1024", "quality":"high", "n":1, "response_format":"b64_json"
     }`))
 	if err != nil {
 		t.Fatal(err)
@@ -229,6 +229,9 @@ func TestImageGenerationToOAuthResponsesOmitsUnsupportedImageModel(t *testing.T)
 	tool := got["tools"].([]any)[0].(map[string]any)
 	if _, exists := tool["model"]; exists {
 		t.Fatalf("OAuth image tool must not carry a public image model: %#v", tool)
+	}
+	if _, exists := tool["n"]; exists {
+		t.Fatalf("OAuth image tool must not carry Images API n: %#v", tool)
 	}
 	if tool["size"] != "1024x1024" || tool["quality"] != "high" {
 		t.Fatalf("image controls = %#v", tool)
