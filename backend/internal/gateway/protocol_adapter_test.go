@@ -84,6 +84,34 @@ func TestOpenAIResponsesToAnthropic(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToAnthropicAcceptsEasyInputMessages(t *testing.T) {
+	converted, name, stream, err := openAIResponsesToAnthropic([]byte(`{
+		"model":"claude-opus-4-8",
+		"stream":true,
+		"input":[
+			{"role":"user","content":[{"type":"input_text","text":"hello"}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("convert easy-input Responses request: %v", err)
+	}
+	if name != "claude-opus-4-8" || !stream {
+		t.Fatalf("model=%q stream=%v", name, stream)
+	}
+	messages, _ := converted["messages"].([]any)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %#v", converted["messages"])
+	}
+	message := messages[0].(map[string]any)
+	if stringValue(message["role"]) != "user" {
+		t.Fatalf("role = %q", stringValue(message["role"]))
+	}
+	content := message["content"].([]any)
+	if len(content) != 1 || stringValue(content[0].(map[string]any)["text"]) != "hello" {
+		t.Fatalf("content = %#v", content)
+	}
+}
+
 func TestStreamOpenAIResponsesAsAnthropic(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

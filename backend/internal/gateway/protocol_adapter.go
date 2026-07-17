@@ -410,6 +410,12 @@ func responsesInputToAnthropicMessages(raw any) ([]any, string) {
 		}
 		typ := strings.ToLower(stringValue(item["type"]))
 		role := strings.ToLower(stringValue(item["role"]))
+		// Responses clients such as Chatbox/AI SDK emit easy-input message
+		// objects with role + content but omit the optional outer
+		// `type:"message"` discriminator.
+		if typ == "" && role != "" {
+			typ = "message"
+		}
 		switch typ {
 		case "function_call_output":
 			appendAnthropicMessage(&messages, "user", map[string]any{"type": "tool_result", "tool_use_id": stringValue(item["call_id"]), "content": contentText(item["output"])})
