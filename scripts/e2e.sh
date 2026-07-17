@@ -24,8 +24,8 @@ ADMIN_TOKEN=$(jqget "$ADMIN_RESP" "d['data']['token']")
 [[ -n "$ADMIN_TOKEN" ]] && ok "admin login" || { bad "admin login"; exit 1; }
 AH="Authorization: Bearer $ADMIN_TOKEN"
 
-say "创建三个平台分组 + mock 上游账号"
-for P in anthropic openai gemini; do
+say "创建四个平台分组 + mock 上游账号"
+for P in anthropic openai gemini grok; do
   G=$(curl -s "$BASE/api/admin/groups" -H "$AH" -d "{\"name\":\"grp-$P\",\"platform\":\"$P\"}")
   GID=$(jqget "$G" "d['data']['id']")
   A=$(curl -s "$BASE/api/admin/accounts" -H "$AH" -d "{\"group_id\":$GID,\"name\":\"mock-$P\",\"base_url\":\"$MOCK\",\"api_key\":\"mock-key\"}")
@@ -43,8 +43,8 @@ curl -s -X PUT "$BASE/api/admin/users/$USER_ID" -H "$AH" -d '{"add_balance_micro
 BAL=$(curl -s "$BASE/api/user/me" -H "$UH")
 need "balance = 5 USD" "$BAL" '"balance_micro":5000000'
 
-say "用户为三个平台各建一个 API Key"
-for P in anthropic openai gemini; do
+say "用户为四个平台各建一个 API Key"
+for P in anthropic openai gemini grok; do
   GID_VAR="GID_$P"
   K=$(curl -s "$BASE/api/user/keys" -H "$UH" -d "{\"name\":\"key-$P\",\"group_id\":${!GID_VAR}}")
   PLAIN=$(jqget "$K" "d['data']['plain']")
@@ -76,7 +76,21 @@ R=$(curl -s -N "$BASE/v1beta/models/gemini-2.5-pro:streamGenerateContent?alt=sse
   -H 'content-type: application/json' -d '{"contents":[{"parts":[{"text":"hi"}]}]}')
 need "gemini stream body" "$R" 'gemini stream'
 
-say "计费校验(6 次计费调用后余额应减少)"
+say "Grok:Chat 非流式 + 流式 + Responses + Claude Messages 反代桥接"
+R=$(curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_grok" -H 'content-type: application/json' \
+  -d '{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}')
+need "grok chat non-stream body" "$R" 'mock reply'
+R=$(curl -s -N "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_grok" -H 'content-type: application/json' \
+  -d '{"model":"grok-4.5","stream":true,"messages":[{"role":"user","content":"hi"}]}')
+need "grok chat stream DONE" "$R" '[DONE]'
+R=$(curl -s "$BASE/v1/responses" -H "Authorization: Bearer $KEY_grok" -H 'content-type: application/json' \
+  -d '{"model":"grok-4.5","input":"hi"}')
+need "grok responses body" "$R" 'mock reply from grok'
+R=$(curl -s "$BASE/v1/messages" -H "x-api-key: $KEY_grok" -H 'content-type: application/json' \
+  -d '{"model":"grok-4.5","max_tokens":64,"messages":[{"role":"user","content":"hi"}]}')
+need "grok via claude messages bridge" "$R" 'mock reply from grok'
+
+say "计费校验(计费调用后余额应减少)"
 sleep 1
 ME=$(curl -s "$BASE/api/user/me" -H "$UH")
 BAL_NOW=$(jqget "$ME" "d['data']['balance_micro']")
