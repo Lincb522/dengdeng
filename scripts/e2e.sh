@@ -4,8 +4,8 @@
 # 前提:主服务 :9100(admin@test.local/admin12345),mock 上游 :9200。
 set -euo pipefail
 
-BASE="http://127.0.0.1:9100"
-MOCK="http://127.0.0.1:9200"
+BASE="${BASE:-http://127.0.0.1:9100}"
+MOCK="${MOCK:-http://127.0.0.1:9200}"
 PASS=0
 FAIL=0
 
@@ -18,8 +18,13 @@ need() { # need <desc> <actual> <expect-substr>
 
 jqget() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2" <<<"$1"; }
 
+# The seeded login agreement requires clients to echo the current revision on
+# login/registration. Fetch it once so the flow works whether or not the terms
+# gate is enabled.
+REV=$(jqget "$(curl -s "$BASE/api/settings")" "d['data'].get('login_agreement',{}).get('revision','')")
+
 say "管理员登录"
-ADMIN_RESP=$(curl -s "$BASE/api/auth/login" -d '{"email":"admin@test.local","password":"admin12345"}')
+ADMIN_RESP=$(curl -s "$BASE/api/auth/login" -d "{\"email\":\"admin@test.local\",\"password\":\"admin12345\",\"terms_revision\":\"$REV\"}")
 ADMIN_TOKEN=$(jqget "$ADMIN_RESP" "d['data']['token']")
 [[ -n "$ADMIN_TOKEN" ]] && ok "admin login" || { bad "admin login"; exit 1; }
 AH="Authorization: Bearer $ADMIN_TOKEN"
@@ -34,7 +39,7 @@ for P in anthropic openai gemini grok; do
 done
 
 say "用户注册 + 管理员充值"
-USER_RESP=$(curl -s "$BASE/api/auth/register" -d '{"email":"user1@test.local","password":"user12345"}')
+USER_RESP=$(curl -s "$BASE/api/auth/register" -d "{\"email\":\"user1@test.local\",\"password\":\"user12345\",\"terms_revision\":\"$REV\"}")
 USER_TOKEN=$(jqget "$USER_RESP" "d['data']['token']")
 USER_ID=$(jqget "$USER_RESP" "d['data']['user']['id']")
 [[ -n "$USER_TOKEN" ]] && ok "user register" || bad "user register"
