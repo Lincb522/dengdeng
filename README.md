@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/public/brand/dengdeng-walk-wordmark.png" width="460" alt="DENGDENG">
+  <img src="frontend/public/brand/dengdeng-avatar.png" width="72" height="72" alt="DengDeng AI">
 </p>
 
 <h1 align="center">DengDeng AI · 蹬蹬ai</h1>
