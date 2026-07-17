@@ -25,7 +25,7 @@ type AccountSort = 'custom' | 'name' | 'platform' | 'group' | 'priority' | 'avai
 const accountView = ref<AccountView>('table')
 const sortBy = ref<AccountSort>('custom')
 const sortDirection = ref<'asc' | 'desc'>('asc')
-const filterPlatform = ref<'all' | 'openai' | 'anthropic' | 'gemini'>('all')
+const filterPlatform = ref<'all' | 'openai' | 'anthropic' | 'gemini' | 'grok'>('all')
 const filterAuthType = ref<'all' | 'api_key' | 'oauth'>('all')
 const draggingAccountID = ref<number | null>(null)
 const accountPresentationStorageKey = 'dengdeng.admin.accounts.presentation.v1'
@@ -111,8 +111,12 @@ onMounted(() => {
 const platformOfSelectedGroup = computed(
   () => groups.value.find((g) => g.id === form.value.group_id)?.platform ?? '',
 )
-// Gemini has no OAuth refresh flow wired; only offer OAuth for the two that do.
-const oauthAvailable = computed(() => !!platformOfSelectedGroup.value && platformOfSelectedGroup.value !== 'gemini')
+// Only Claude and OpenAI have the built-in browser OAuth client. Gemini has no
+// OAuth flow, and Grok's browser authorize needs an operator-supplied xAI
+// client id, so Grok subscription accounts are added by JSON import instead.
+const oauthAvailable = computed(
+  () => platformOfSelectedGroup.value === 'anthropic' || platformOfSelectedGroup.value === 'openai',
+)
 const oauthProviderLabel = computed(() => PLATFORM_LABELS[platformOfSelectedGroup.value] || '上游账号')
 const oauthStarting = ref(false)
 
@@ -319,6 +323,10 @@ function normalizeImportPlatform(value: unknown): ImportPlatform | null {
     case 'gemini':
     case 'google':
       return 'gemini'
+    case 'grok':
+    case 'xai':
+    case 'x.ai':
+      return 'grok'
     default:
       return null
   }
@@ -557,6 +565,7 @@ async function refreshCodexQuota(account: UpstreamAccount) {
           <option value="openai">OpenAI</option>
           <option value="anthropic">Claude</option>
           <option value="gemini">Gemini</option>
+          <option value="grok">Grok</option>
         </select>
         <select v-model="filterAuthType" class="input accounts-toolbar-select" aria-label="凭证类型筛选" @change="updateAccountFilters">
           <option value="all">全部凭证</option>

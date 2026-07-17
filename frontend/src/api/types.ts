@@ -141,7 +141,7 @@ export interface UserGroupRate {
 export interface Group {
   id: number
   name: string
-  platform: 'anthropic' | 'openai' | 'gemini'
+  platform: 'anthropic' | 'openai' | 'gemini' | 'grok'
   description: string
   rate_multiplier: number
 	cache_read_multiplier: number

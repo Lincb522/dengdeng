@@ -161,6 +161,7 @@ async function togglePublic(g: Group) {
                 <option value="anthropic">Claude (Anthropic)</option>
                 <option value="openai">OpenAI</option>
                 <option value="gemini">Gemini</option>
+                <option value="grok">Grok (xAI)</option>
               </select>
             </div>
             <div>
