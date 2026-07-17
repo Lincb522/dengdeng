@@ -1,6 +1,6 @@
 # 部署手册
 
-生产环境建议通过 HTTPS 反向代理访问 DengDeng AI。服务本身监听本机 `127.0.0.1:9100`，由 Nginx 或其他代理公开 80/443 端口。
+下面按两种常见方式写：Docker Compose 适合先上线和单机维护；二进制 + systemd 更适合已有服务器规范的环境。无论哪种方式，服务本身只监听 `127.0.0.1:9100`，由 Nginx 或其他反向代理公开 80/443。
 
 ## 方式一：Docker Compose
 
@@ -15,7 +15,7 @@ docker compose ps
 curl -fsS http://127.0.0.1:9100/health
 ```
 
-Docker 数据默认保存在 `deploy/data/`。该目录不在 Git 中；请为其建立加密备份并定期验证恢复。
+Docker 数据默认保存在 `deploy/data/`。它不在 Git 中；请单独备份，并至少做一次恢复演练。
 
 ## 方式二：单二进制 + systemd
 
@@ -61,7 +61,7 @@ sudo systemctl status dengdeng
 
 ## Nginx 与 HTTPS
 
-仓库提供 `deploy/nginx/` 下的示例。复制后替换域名、证书路径和上游地址；它已关闭代理缓冲，并将请求体限制设置为 `65m`，适合较长的 Responses 请求和图像上传。
+仓库的 `deploy/nginx/` 有可直接改域名的示例。它关闭了代理缓冲，并把请求体限制设置为 `65m`，避免较长的 Responses 请求和图像上传在 Nginx 层被截断。
 
 ```bash
 sudo nginx -t
@@ -78,4 +78,4 @@ curl -fsS https://your-domain.example/health
 3. `systemctl restart dengdeng`，检查 `/health`、登录、模型列表和一次真实调用。
 4. 若异常，替换回上一个已验证的二进制后重启。数据库迁移前务必保留可恢复备份。
 
-不要把生产 `.env`、数据库、TLS 私钥、支付密钥或上游凭据复制到仓库或构建日志中。
+生产 `.env`、数据库、TLS 私钥、支付密钥和上游凭据都只留在服务器或 Secret 管理服务里；不要复制进仓库、截图或构建日志。

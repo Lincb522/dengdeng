@@ -1,111 +1,124 @@
-# DengDeng AI（蹬蹬ai）
+<p align="center">
+  <img src="frontend/public/brand/dengdeng-walk-wordmark.png" width="460" alt="DENGDENG">
+</p>
 
-面向团队和个人开发者的 AI API 网关：使用一把平台密钥统一接入 Claude、OpenAI 与 Gemini，并提供账号调度、故障切换、Token 级计费、充值与运营管理能力。
+<h1 align="center">DengDeng AI · 蹬蹬ai</h1>
 
-> 设计参考了 [sub2api](https://github.com/Wei-Shaw/sub2api) 的产品形态,但前后端均为独立实现:Go + Gin + GORM 后端,Vue 3 + Tailwind 自研前端。
+<p align="center">部署在自己服务器上的多模型 API 网关、账号池和计费后台。</p>
 
-## 功能
+---
 
-- **三平台兼容端点**:`/v1/messages`(Anthropic)、`/v1/chat/completions` `/v1/responses` `/v1/images/generations` `/v1/images/edits`(OpenAI)、`/v1beta/models/*`(Gemini),官方 SDK / Claude Code / Gemini CLI 只需改 Base URL + Key
-- **分组账号池**:分组绑定平台与计费倍率,组内多账号按优先级调度,401/429/5xx 自动冷却并切换下一账号
-- **流式透传 + 用量捕获**:SSE 原样转发,同时解析各平台 usage 字段(含缓存读写 token)
-- **Token 级计费**:模型定价支持前缀通配(`claude-sonnet-*`)、图像 token 独立费率,用户倍率 × 分组倍率,余额微美元精度
-- **用户体系**:注册/登录(JWT)、API Key 自助管理、用量明细、兑换码充值
-- **管理端**:运营总览、用户管理(充值/封禁/倍率)、分组与上游账号、模型定价、兑换码批量生成、全站用量
-- **在线支付**:多商户实例、EasyPay / 支付宝 / 微信支付 API v3 / Stripe / Airwallex，签名回调、精确金额核验、幂等入账、订单过期和退款冻结余额
-- **OAuth 账号接入**:支持浏览器授权码 + PKCE 直接登录 Claude / OpenAI，OAuth 凭据自动加密保存并续期；也支持导入 sub2api、Codex `auth.json`、Claude Code credentials、CPA JSON
-- **模型目录与别名**:管理端可配置对外模型名、上游映射和禁用状态；`GET /v1/models` 从本地启用目录返回，不会因账号池暂时为空而失败
+把各家模型接到业务里，麻烦通常不在一次请求，而在后面：密钥怎么发、上游账号怎么切、调用花了多少、出错后谁来排查。DengDeng 把这些放在一个入口里。客户端拿到一把 `dd-` 密钥；网关负责路由、账号调度、用量记录和结算。
 
-## 技术栈
+它适合已有 OpenAI、Anthropic、Gemini 或 xAI 兼容接入的项目，也适合需要给团队成员、客户或不同业务线分配额度的场景。
 
-| 组件 | 技术 |
-|------|------|
-| 后端 | Go 1.25+ / Gin / GORM |
-| 前端 | Vue 3 / Vite / TailwindCSS / Pinia |
-| 存储 | SQLite(默认,零依赖)或 PostgreSQL |
+## 先看它做什么
+
+| 事情 | DengDeng 的处理方式 |
+| --- | --- |
+| 接入模型 | 保留 OpenAI、Anthropic、Gemini 兼容路径；xAI / Grok 使用 OpenAI 兼容路径 |
+| 管理上游 | 按分组维护账号池，支持优先级、代理、冷却和故障切换 |
+| 管理密钥 | 用户自助创建 `dd-` 密钥；可设置额度、失效时间、模型与 IP 规则 |
+| 看用量 | 记录输入、输出、缓存 Token、图像用量、费用和请求状态 |
+| 收款与运营 | 兑换码、在线充值、用户余额、模型定价、告警和运行监控 |
+
+### 对外接口
+
+| 协议 | 常用路径 |
+| --- | --- |
+| Anthropic | `/v1/messages` |
+| OpenAI / xAI | `/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/images/edits` |
+| Gemini | `/v1beta/models/*` |
+
+具体模型由管理端的模型目录和分组决定。`GET /v1/models` 直接读取本地启用目录，因此即使账号池临时不可用，客户端仍能正常拉取模型列表。
 
 ## 文档
 
-- [部署手册](docs/DEPLOYMENT.md)：Docker、二进制、Nginx、备份与升级
-- [架构说明](docs/ARCHITECTURE.md)：请求链路、数据边界和关键模块
-- [开发贡献](CONTRIBUTING.md)：本地环境、构建、测试与提交约定
-- [安全说明](SECURITY.md)：凭据管理、漏洞反馈与上线检查
+- [部署手册](docs/DEPLOYMENT.md)：Docker、二进制、Nginx、备份和回滚
+- [架构说明](docs/ARCHITECTURE.md)：请求如何经过网关、调度器和结算模块
+- [开发说明](CONTRIBUTING.md)：本地环境、测试和提交要求
+- [安全说明](SECURITY.md)：凭据边界、上线检查和漏洞反馈
 
-## 快速开始(本地开发)
+## 本地跑起来
+
+需要 Go 1.25+、Node.js 22+ 和 pnpm。
 
 ```bash
-# 1. 后端(端口 9100)
+# 终端 A：后端，默认监听 9100
 cd backend
-JWT_SECRET=$(openssl rand -hex 32) ADMIN_PASSWORD=admin12345 go run ./cmd/server
+JWT_SECRET="$(openssl rand -hex 32)" \
+ADMIN_PASSWORD=admin12345 \
+go run ./cmd/server
 
-# 2. 前端热更新(端口 5173,代理 /api 到 9100)
+# 终端 B：前端开发服务器，默认监听 5173
 cd frontend
+corepack enable
 pnpm install
 pnpm dev
 ```
 
-打开 http://localhost:5173 ,用 `admin@dengdeng.local` / `admin12345` 登录。
+打开 `http://localhost:5173`，使用 `admin@dengdeng.local` / `admin12345` 登录。仅限本地演示；任何可访问的环境都应设置独立的管理员密码和 `ENCRYPTION_KEY`。
 
-生产构建(前端嵌入后端单二进制):
+生产二进制会把前端静态文件嵌入进去：
 
 ```bash
-cd frontend && pnpm build          # 输出到 backend/internal/web/dist
-cd ../backend && go build -o dengdeng ./cmd/server
+cd frontend
+pnpm build
+
+cd ../backend
+go build -o dengdeng ./cmd/server
 ```
 
-## Docker 部署
+## 第一次配置
+
+1. 在「分组管理」创建平台分组，例如 `openai-default` 或 `claude-team`。
+2. 在「上游账号」把 API Key 或 OAuth 凭据加入对应分组；需要时为账号指定出站代理。
+3. 在「模型配置」确认对外模型名、上游模型名和定价。
+4. 用户在「API 密钥」创建 `dd-` 密钥后，即可将 Base URL 和密钥填入 SDK 或 CLI。
+
+浏览器 OAuth 直连目前用于 Claude 和 OpenAI。生产环境需要先在上游登记回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+
+### 客户端示例
+
+```bash
+# Claude Code
+export ANTHROPIC_BASE_URL="https://your-domain.example"
+export ANTHROPIC_AUTH_TOKEN="dd-xxx"
+
+# Gemini
+curl "https://your-domain.example/v1beta/models/gemini-2.5-pro:generateContent" \
+  -H "x-goog-api-key: dd-xxx" \
+  -H "content-type: application/json" \
+  -d '{"contents":[{"parts":[{"text":"hello"}]}]}'
+```
+
+```python
+# OpenAI SDK
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-domain.example/v1",
+    api_key="dd-xxx",
+)
+```
+
+## 部署
+
+### Docker Compose
 
 ```bash
 cd deploy
 cp .env.example .env
-# 编辑 .env:填入 JWT_SECRET(openssl rand -hex 32)和 ADMIN_PASSWORD
+# 填写 JWT_SECRET、ENCRYPTION_KEY、管理员账号和站点地址
 docker compose up -d --build
+curl -fsS http://127.0.0.1:9100/health
 ```
 
-默认监听 `127.0.0.1:9100`,SQLite 数据落在 `deploy/data/`,整个目录打包即可迁移。生产环境请用 Caddy/Nginx 反代并启用 HTTPS。
+默认只监听 `127.0.0.1:9100`。对外服务时请用 Nginx 或 Caddy 提供 HTTPS；支付和 OAuth 回调依赖最终的 HTTPS 域名。
 
-## 上线三步
+### 上游代理与图像请求
 
-1. **建分组**:管理端「分组管理」→ 新建,选平台(如 Claude)
-2. **加账号**:「上游账号」→ 添加,填上游 API Key(Base URL 留空走官方)
-3. **发密钥**:用户在「API 密钥」页自助创建 `dd-` 开头的密钥
-
-### 直接登录 OAuth 上游账号
-
-管理端「上游账号」→「添加账号」→ 选择 OAuth 后，可点击“去登录”完成浏览器授权。开发环境会自动启动 OpenAI 所需的本地 `localhost:1455`（端口被占用时 `1457`）回调桥接；生产部署请先在上游 OAuth 应用中登记下面的完整回调地址，并配置对应的 Client ID（如使用机密客户端还需 Client Secret）：
-
-```yaml
-oauth:
-  openai:
-    client_id: "..."
-    client_secret: "..." # 可选，取决于上游 OAuth 应用类型
-    redirect_url: "https://relay.example.com/api/admin/oauth/openai/callback"
-  anthropic:
-    client_id: "..."
-    client_secret: "..."
-    redirect_url: "https://relay.example.com/api/admin/oauth/anthropic/callback"
-```
-
-Docker 部署也可改用同名的 `OAUTH_OPENAI_*` / `OAUTH_ANTHROPIC_*` 环境变量。回调地址必须和上游应用注册值完全一致。
-
-客户端接入示例:
-
-```bash
-# Claude Code
-export ANTHROPIC_BASE_URL="https://your-domain.com"
-export ANTHROPIC_AUTH_TOKEN="dd-xxx"
-
-# OpenAI SDK
-client = OpenAI(base_url="https://your-domain.com/v1", api_key="dd-xxx")
-
-# Gemini
-curl "https://your-domain.com/v1beta/models/gemini-2.5-pro:generateContent" \
-  -H "x-goog-api-key: dd-xxx" -d '{...}'
-```
-
-### 上游代理与 OpenAI 生图
-
-为访问受网络限制的上游，在部署配置中设置出站 HTTP(S) CONNECT 代理；它同时用于模型转发和 OAuth 刷新。`NO_PROXY` / `no_proxy` 可排除内网地址。
+出站代理同时用于模型请求和 OAuth 刷新，可在部署配置中设置：
 
 ```yaml
 proxy:
@@ -113,93 +126,56 @@ proxy:
   no_proxy: "localhost,127.0.0.1,10.0.0.0/8"
 ```
 
-OpenAI 生图直接把 SDK 的 base URL 指向本服务即可。推荐模型为 `gpt-image-2`，也支持 `POST /v1/images/edits` 的 multipart 图片编辑。服务会读取上游返回的图像 token usage，并使用管理端「模型定价」的图像输入/输出费率结算。
+OpenAI 兼容的图像生成和编辑路径可直接使用。图像模型可以单独指定上游分组和倍率，费用按管理端的图像定价结算。
 
-### 在线支付
+## 结算怎么记
 
-先在部署配置设置 HTTPS 公网地址，支付中心才允许启用充值：
+- 余额和费用以 micro-USD 整数保存，`1000000 = $1`。
+- 模型价格单位为 USD / 1M Tokens；文本、缓存和图像分别计算，再叠加用户与分组倍率。
+- 流式响应结束后根据上游返回的 usage 结算。OpenAI 流式请求会带上 `stream_options.include_usage`，以拿到完整用量。
+- 余额不足时，新请求返回 `402`；已有流式响应不会被中途截断。
 
-```yaml
-site:
-  public_url: "https://relay.example.com"
-```
+支付渠道、兑换码和人工加款都走同一套账单与幂等入账逻辑。支付回调必须配置 HTTPS 公网地址，且商户后台登记的回调地址应与 `SITE_PUBLIC_URL` 一致。
 
-管理员随后在「支付中心」设置充值汇率（余额始终以微美元记账）并添加商户实例。渠道密钥以 AES-GCM 加密存储，管理端不会回显。回调地址由系统生成，分别为 `/api/payment/webhook/easypay`、`/alipay`、`/wxpay`、`/stripe` 与 `/airwallex`；请仅在对应商户后台登记 HTTPS 地址。
+## 安全边界
 
-## 端到端测试
+- 平台 `dd-` 密钥只保存 SHA-256 摘要，明文仅在创建时显示一次。
+- 上游 API Key 与 OAuth 凭据以 AES-256-GCM 加密保存；生产环境应设置独立的 `ENCRYPTION_KEY`。
+- 登录和注册有 IP 限流与失败锁定；改密码、封禁或修改角色会让旧会话失效。
+- 管理端和业务转发使用不同鉴权边界；跨平台调用会被拒绝。
+- 数据库、备份、证书、私钥和环境文件不应进入版本库。上线前请过一遍 [安全说明](SECURITY.md)。
+
+## 测试
 
 ```bash
-# 终端 1:mock 上游
-cd backend && go run ./tools/mockupstream -port 9200
+# 后端单元测试
+cd backend
+go test ./...
 
-# 终端 2:主服务
-JWT_SECRET=e2e-test-secret ADMIN_EMAIL=admin@test.local ADMIN_PASSWORD=admin12345 \
-  DATABASE_PATH=/tmp/dd-test.db go run ./cmd/server
+# 端到端测试需要两个终端
+go run ./tools/mockupstream -port 9200
 
-# 终端 3:跑测试(25 项断言)
+JWT_SECRET=e2e-test-secret \
+ADMIN_EMAIL=admin@test.local \
+ADMIN_PASSWORD=admin12345 \
+DATABASE_PATH=/tmp/dd-test.db \
+go run ./cmd/server
+
+# 另一个终端
 ./scripts/e2e.sh
 ```
 
-## 项目结构
+## 目录
 
-```
+```text
 dengdeng/
-├── backend/
-│   ├── cmd/server/            # 入口
-│   ├── internal/
-│   │   ├── config/            # YAML + 环境变量配置
-│   │   ├── model/             # GORM 数据模型
-│   │   ├── store/             # 建库/迁移/初始化种子
-│   │   ├── gateway/           # 中转核心:鉴权/转发/流式/用量提取
-│   │   ├── service/           # 调度器/定价/计费
-│   │   ├── handler/           # 控制台 API(auth/user/admin)
-│   │   ├── middleware/        # JWT 鉴权
-│   │   ├── server/            # 路由组装 + SPA 静态托管
-│   │   └── web/               # 前端构建产物 embed
-│   └── tools/mockupstream/    # 本地联调用 mock 上游
-├── frontend/
-│   └── src/
-│       ├── api/               # fetch 封装 + 类型
-│       ├── stores/            # Pinia (auth/toast)
-│       ├── layouts/           # 控制台布局
-│       ├── views/             # 用户端页面 + admin/ 管理端页面
-│       └── components/        # 图表/表格/弹窗等
-├── deploy/                    # docker-compose + 配置模板
-├── scripts/e2e.sh             # 端到端测试
-└── Dockerfile                 # 多阶段构建单镜像
+├── backend/       Go 服务、网关、调度、计费和管理 API
+├── frontend/      Vue 控制台
+├── deploy/        Docker Compose、systemd、Nginx 配置模板
+├── docs/          架构与部署文档
+└── scripts/       本地演示和端到端测试
 ```
 
-## 安全设计
+## 使用说明
 
-面向"防偷 token / 防偷账号 / 防破解"的实现:
-
-- **上游 token 落库加密**:`UpstreamAccount.APIKey` 用 AES-256-GCM 加密存储(`crypto.EncryptedString` 透明加解密),即使数据库/备份泄漏也拿不到明文 key。主密钥来自 `ENCRYPTION_KEY`(未设置则从 `JWT_SECRET` 派生);兼容历史明文,下次写入自动升级为密文
-- **平台密钥不可逆存储**:用户的 `dd-` 密钥只存 SHA-256,明文仅创建时返回一次
-- **防撞库爆破**:登录/注册端点按 IP 限流(20 次/分钟),单邮箱连续 5 次失败锁定 15 分钟
-- **会话可吊销**:JWT 带 `TokenVersion`,改密码 / 封禁 / 改角色后旧 token 立即失效(改密码会自动换发新 token,当前会话不掉线)
-- **凭据隔离**:转发时客户端凭据与上游凭据严格分离,互不泄漏;跨平台密钥会被拒绝
-- **加固响应头**:全站 `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy`,控制台附加 CSP;控制台请求体限 1MB
-- **其他**:密码 bcrypt;登录错误统一提示不暴露邮箱是否存在;GORM 全参数化无注入;`-s -w` 去符号
-
-> 关于"防逆向":中转站是服务端 SaaS,后端二进制不对外分发,前端 JS 不含任何秘密(校验全在后端),所以代码混淆意义有限。真正的防线是上面的加密、限流、鉴权与 HTTPS。
-
-生产部署务必:设置独立的 `ENCRYPTION_KEY` 与强 `JWT_SECRET`,启用 HTTPS 反代,数据库/`data` 目录定期加密备份。
-
-后续可选增强(有产品权衡,按需开启):管理员/用户两步验证(TOTP)、操作审计日志、管理端 IP 白名单、单密钥用量突增告警。
-
-## 计费口径
-
-- 余额与费用以 **micro-USD**(百万分之一美元)整数存储,`1000000 = $1`
-- 模型价格单位 **USD / 1M tokens**,费用 = 文本与图像各自 token × 对应单价 × 用户倍率 × 分组倍率
-- 流式请求会在响应结束后按上游返回的 usage 结算;OpenAI 流式自动注入 `stream_options.include_usage` 保证拿到用量
-- 余额 ≤ 0 时新请求返回 402
-
-## 扩展路线
-
-- 新增上游平台:`model/models.go` 加平台常量 → `gateway/routes.go` 加端点 → `gateway/usage.go` 加用量解析 → `gateway/gateway.go` 的 `forward()` 加认证头
-- OAuth 订阅账号(Claude Pro / ChatGPT Plus 拼车):在 `UpstreamAccount` 上扩展 `auth_type` 与 token 刷新逻辑
-- 在线支付:参考现有兑换码流程,新增支付回调 handler 后给用户 `balance_micro` 加账
-
-## 免责声明
-
-本项目仅供技术学习与研究。中转上游订阅/账号可能违反相应服务商的服务条款,请在合规前提下使用,风险自担。
+项目可以用于自建网关和内部服务。接入上游账号、订阅或模型服务前，请自行确认使用方式符合对应平台的服务条款和当地法律要求。
