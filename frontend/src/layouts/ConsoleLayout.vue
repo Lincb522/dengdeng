@@ -96,18 +96,20 @@ function isActive(to: string) {
       <aside id="primary-navigation" class="side-rail" :class="{ 'is-open': railOpen }">
         <div class="rail-brand">
           <BrandMark :size="34" />
-          <div class="min-w-0">
+          <div class="rail-brand-copy min-w-0">
             <div class="rail-brand-name truncate">{{ auth.siteName }}</div>
             <div class="rail-brand-caption">蹬蹬ai</div>
           </div>
+          <span class="rail-brand-state"><i></i>在线</span>
         </div>
 
         <nav class="rail-nav" aria-label="主导航">
           <section class="rail-nav-group">
             <p class="rail-section">工作区</p>
             <RouterLink v-for="item in userNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
-              <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0 fill-current"><path :d="item.icon" /></svg>
+              <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
               <span>{{ item.label }}</span>
+              <i class="rail-link-mark"></i>
             </RouterLink>
           </section>
 
@@ -115,24 +117,28 @@ function isActive(to: string) {
             <section v-for="group in adminNavGroups" :key="group.label" class="rail-nav-group">
               <p class="rail-section">{{ group.label }}</p>
               <RouterLink v-for="item in group.items" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
-                <svg viewBox="0 0 24 24" class="h-4 w-4 shrink-0 fill-current"><path :d="item.icon" /></svg>
+                <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
                 <span>{{ item.label }}</span>
+                <i class="rail-link-mark"></i>
               </RouterLink>
             </section>
           </template>
         </nav>
 
         <div class="rail-account">
-          <div class="mb-2 flex items-center justify-between gap-2">
-            <span class="truncate text-xs text-slate-300" :title="auth.user?.email">{{ auth.user?.email }}</span>
-            <span v-if="isAdmin" class="tag-amber shrink-0">管理</span>
+          <div class="rail-account-profile">
+            <span class="rail-account-avatar" aria-hidden="true">{{ initials }}</span>
+            <div><strong :title="auth.user?.email">{{ auth.user?.email }}</strong><small>{{ isAdmin ? '管理员账户' : '个人账户' }}</small></div>
           </div>
-          <div class="mb-3 flex items-baseline justify-between">
-            <span class="text-[11px] text-slate-500">可用余额</span>
-            <span class="num text-sm font-semibold text-signal-green">{{ balance }}</span>
+          <div class="rail-account-balance">
+            <span>可用余额</span><strong class="num">{{ balance }}</strong>
           </div>
-          <ThemeToggle class="rail-theme-toggle" />
-          <button type="button" class="btn-ghost w-full !py-1.5 text-xs" @click="auth.logout()">退出登录</button>
+          <div class="rail-account-actions">
+            <ThemeToggle class="rail-theme-toggle" />
+            <button type="button" class="rail-logout" aria-label="退出登录" title="退出登录" @click="auth.logout()">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg>
+            </button>
+          </div>
         </div>
       </aside>
 
