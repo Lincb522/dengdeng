@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -323,6 +324,56 @@ func (g *Gateway) effortRates(rates service.RatePlan, effort string) service.Rat
 	return rates
 }
 
+// relaySessionID extracts only explicit, client-provided conversation
+// identifiers. It deliberately avoids hashing the prompt body: two unrelated
+// callers saying the same thing must never be treated as one session.
+func relaySessionID(c *gin.Context, apiKeyID int64, body []byte) string {
+	if c == nil || apiKeyID <= 0 {
+		return ""
+	}
+	for _, name := range []string{"X-Session-ID", "Session-ID", "X-Conversation-ID", "X-Client-Request-ID"} {
+		if value := strings.TrimSpace(c.GetHeader(name)); value != "" {
+			return strconv.FormatInt(apiKeyID, 10) + ":" + value
+		}
+	}
+	if len(body) == 0 || !json.Valid(body) {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	for _, path := range [][]string{
+		{"conversation_id"},
+		{"session_id"},
+		{"prompt_cache_key"},
+		{"conversation", "id"},
+		{"metadata", "session_id"},
+		{"metadata", "user_id"},
+	} {
+		if value := jsonStringPath(payload, path...); value != "" {
+			return strconv.FormatInt(apiKeyID, 10) + ":" + value
+		}
+	}
+	return ""
+}
+
+func jsonStringPath(root map[string]any, path ...string) string {
+	var current any = root
+	for _, key := range path {
+		object, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current, ok = object[key]
+		if !ok {
+			return ""
+		}
+	}
+	value, _ := current.(string)
+	return strings.TrimSpace(value)
+}
+
 // relay runs the account failover loop and, on success, streams the response
 // while capturing usage for billing.
 func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
@@ -380,9 +431,13 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	var tried []int64
 	var lastStatus int
 	var lastBody []byte
+	sessionID := relaySessionID(c, ak.Key.ID, req.Body)
 
 	for attempt := 0; attempt < g.relayAttempts(); attempt++ {
-		acc, err := g.scheduler.Pick(routeGroup.ID, tried)
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		acc, err := g.scheduler.PickForSession(routeGroup.ID, req.Model, sessionID, tried)
 		if err != nil {
 			if errors.Is(err, service.ErrNoAccount) && lastStatus != 0 {
 				break // fall through to lastStatus passthrough
@@ -400,6 +455,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 
 		resp, err := g.forward(c, acc, req)
 		if err != nil {
+			if c.Request.Context().Err() != nil {
+				return
+			}
 			log.Printf("[gateway] account %d network error: %v", acc.ID, err)
 			g.scheduler.ReportFailure(acc.ID, 0, err.Error())
 			lastStatus, lastBody = http.StatusBadGateway, []byte(`{"error":{"message":"upstream connection failed"}}`)
@@ -409,16 +467,16 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			resp.Body.Close()
-			g.scheduler.ReportFailure(acc.ID, resp.StatusCode, string(body))
 			lastStatus, lastBody = resp.StatusCode, body
 			if retryable(resp.StatusCode) {
+				g.scheduler.ReportFailureForModel(acc.ID, req.Model, resp.StatusCode, string(body))
 				continue
 			}
 			break
 		}
 
 		// Success: stream through and bill afterwards.
-		g.scheduler.ReportSuccess(acc.ID)
+		g.scheduler.ReportSuccessForModel(acc.ID, req.Model)
 		usage, streamed := g.pipeAdapted(c, resp, req.Platform, req.Image, req.ResponseAdapter, req.Model)
 		resp.Body.Close()
 

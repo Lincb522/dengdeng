@@ -12,6 +12,13 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	upstreamMaxIdleConns        = 256
+	upstreamMaxIdleConnsPerHost = 64
+	upstreamMaxConnsPerHost     = 128
+	upstreamIdleConnTimeout     = 2 * time.Minute
+)
+
 // HTTPClient returns a client for outbound provider traffic. Proxy URL may be
 // an http:// or https:// CONNECT proxy. NoProxy accepts comma-separated
 // hostnames, domain suffixes, IPs, CIDRs, and *.
@@ -25,6 +32,7 @@ func (p ProxyConfig) HTTPClient(timeout time.Duration) (*http.Client, error) {
 // mature gateway panels.
 func NewProxyHTTPClient(proxyRaw, noProxy string, timeout time.Duration) (*http.Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tuneUpstreamTransport(transport)
 	if strings.TrimSpace(proxyRaw) == "" {
 		return &http.Client{Transport: transport, Timeout: timeout}, nil
 	}
@@ -46,7 +54,7 @@ func NewProxyHTTPClient(proxyRaw, noProxy string, timeout time.Duration) (*http.
 		if err != nil {
 			return nil, fmt.Errorf("create SOCKS5 proxy client: %w", err)
 		}
-		direct := &net.Dialer{}
+		direct := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 		transport.Proxy = nil
 		transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 			host, _, splitErr := net.SplitHostPort(address)
@@ -64,6 +72,21 @@ func NewProxyHTTPClient(proxyRaw, noProxy string, timeout time.Duration) (*http.
 		return proxyURL, nil
 	}
 	return &http.Client{Transport: transport, Timeout: timeout}, nil
+}
+
+// tuneUpstreamTransport keeps streaming requests free of a global deadline
+// while retaining enough warm HTTP/2 and keep-alive connections for bursty
+// gateway traffic. Go's default per-host idle pool is only two connections,
+// which otherwise causes avoidable TCP/TLS handshakes between requests.
+func tuneUpstreamTransport(transport *http.Transport) {
+	if transport == nil {
+		return
+	}
+	transport.MaxIdleConns = upstreamMaxIdleConns
+	transport.MaxIdleConnsPerHost = upstreamMaxIdleConnsPerHost
+	transport.MaxConnsPerHost = upstreamMaxConnsPerHost
+	transport.IdleConnTimeout = upstreamIdleConnTimeout
+	transport.ForceAttemptHTTP2 = true
 }
 
 func bypassProxy(host, noProxy string) bool {
