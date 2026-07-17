@@ -26,9 +26,11 @@ const (
 )
 
 var (
-	openAICodexUsageURL   = "https://chatgpt.com/backend-api/wham/usage"
-	claudeOAuthUsageURL   = "https://api.anthropic.com/api/oauth/usage"
-	grokCLIBillingBaseURL = "https://cli-chat-proxy.grok.com"
+	openAICodexUsageURL    = "https://chatgpt.com/backend-api/wham/usage"
+	openAISubscriptionsURL = "https://chatgpt.com/backend-api/subscriptions"
+	openAIAccountsCheckURL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
+	claudeOAuthUsageURL    = "https://api.anthropic.com/api/oauth/usage"
+	grokCLIBillingBaseURL  = "https://cli-chat-proxy.grok.com"
 )
 
 // AccountQuotaService normalizes provider subscription windows, passive
@@ -252,10 +254,132 @@ func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.
 			snapshot.Message = "上游订阅额度已用尽，等待窗口重置"
 		}
 	}
+	// Token expiry and subscription expiry are unrelated. The latter is read
+	// from ChatGPT's lightweight subscription endpoint, with accounts/check as
+	// a fallback for organization and education plans. Failure is best-effort:
+	// the valid usage windows above must remain available.
+	enrichOpenAISubscription(ctx, client, account, token, snapshot)
 	snapshot.State = "ready"
 	fetched := time.Now().UTC()
 	snapshot.FetchedAt = &fetched
 	return nil
+}
+
+type openAISubscriptionPayload struct {
+	PlanType    string `json:"plan_type"`
+	ActiveUntil string `json:"active_until"`
+}
+
+func enrichOpenAISubscription(ctx context.Context, client *http.Client, account *model.UpstreamAccount, token string, snapshot *model.AccountQuotaSnapshot) {
+	if client == nil || account == nil || snapshot == nil || strings.TrimSpace(token) == "" {
+		return
+	}
+	if accountID := chatGPTAccountID(account); accountID != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, openAISubscriptionsURL, nil)
+		if err == nil {
+			query := req.URL.Query()
+			query.Set("account_id", accountID)
+			req.URL.RawQuery = query.Encode()
+			applyChatGPTMetadataHeaders(req, token)
+			var payload openAISubscriptionPayload
+			if doQuotaJSON(client, req, &payload) == nil {
+				if plan := strings.TrimSpace(payload.PlanType); plan != "" {
+					snapshot.PlanType = plan
+				}
+				if expiry := parseQuotaTime(payload.ActiveUntil); expiry != nil {
+					snapshot.SubscriptionExpiresAt = expiry
+					return
+				}
+			}
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, openAIAccountsCheckURL, nil)
+	if err != nil {
+		return
+	}
+	applyChatGPTMetadataHeaders(req, token)
+	var payload map[string]any
+	if doQuotaJSON(client, req, &payload) != nil {
+		return
+	}
+	plan, expiry := selectOpenAIAccountEntitlement(payload, account, snapshot.PlanType)
+	if plan != "" {
+		snapshot.PlanType = plan
+	}
+	if expiry != nil {
+		snapshot.SubscriptionExpiresAt = expiry
+	}
+}
+
+func applyChatGPTMetadataHeaders(req *http.Request, token string) {
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Origin", "https://chatgpt.com")
+	req.Header.Set("Referer", "https://chatgpt.com/")
+	req.Header.Set("Accept", "application/json")
+}
+
+func selectOpenAIAccountEntitlement(payload map[string]any, account *model.UpstreamAccount, currentPlan string) (string, *time.Time) {
+	accounts := quotaMap(payload["accounts"])
+	if len(accounts) == 0 {
+		return "", nil
+	}
+	if organizationID := accountOrganizationID(account); organizationID != "" {
+		if candidate := quotaMap(accounts[organizationID]); candidate != nil {
+			if plan, expiry := openAIEntitlement(candidate); plan != "" || expiry != nil {
+				return plan, expiry
+			}
+		}
+	}
+	type candidate struct {
+		plan      string
+		expiry    *time.Time
+		isDefault bool
+	}
+	var preferred, paid, fallback candidate
+	for _, raw := range accounts {
+		item := quotaMap(raw)
+		if item == nil {
+			continue
+		}
+		plan, expiry := openAIEntitlement(item)
+		if plan == "" && expiry == nil {
+			continue
+		}
+		entry := candidate{plan: plan, expiry: expiry}
+		if metadata := quotaMap(item["account"]); metadata != nil {
+			entry.isDefault, _ = metadata["is_default"].(bool)
+		}
+		if fallback.plan == "" && fallback.expiry == nil {
+			fallback = entry
+		}
+		if strings.EqualFold(plan, strings.TrimSpace(currentPlan)) && currentPlan != "" {
+			preferred = entry
+		}
+		if paid.plan == "" && !strings.EqualFold(plan, "free") {
+			paid = entry
+		}
+		if entry.isDefault {
+			return entry.plan, entry.expiry
+		}
+	}
+	if preferred.plan != "" || preferred.expiry != nil {
+		return preferred.plan, preferred.expiry
+	}
+	if paid.plan != "" || paid.expiry != nil {
+		return paid.plan, paid.expiry
+	}
+	return fallback.plan, fallback.expiry
+}
+
+func openAIEntitlement(item map[string]any) (string, *time.Time) {
+	metadata := quotaMap(item["account"])
+	plan, _ := metadata["plan_type"].(string)
+	entitlement := quotaMap(item["entitlement"])
+	if strings.TrimSpace(plan) == "" {
+		plan, _ = entitlement["subscription_plan"].(string)
+	}
+	return strings.TrimSpace(plan), quotaTimeValue(entitlement["expires_at"])
 }
 
 type claudeUsageWindow struct {
@@ -681,6 +805,19 @@ func chatGPTAccountID(account *model.UpstreamAccount) string {
 	}
 	extra := account.DecodeExtra()
 	for _, key := range []string{"chatgpt_account_id", "organization_id"} {
+		if id, _ := extra[key].(string); strings.TrimSpace(id) != "" {
+			return strings.TrimSpace(id)
+		}
+	}
+	return ""
+}
+
+func accountOrganizationID(account *model.UpstreamAccount) string {
+	if account == nil {
+		return ""
+	}
+	extra := account.DecodeExtra()
+	for _, key := range []string{"organization_id", "org_id", "poid"} {
 		if id, _ := extra[key].(string); strings.TrimSpace(id) != "" {
 			return strings.TrimSpace(id)
 		}

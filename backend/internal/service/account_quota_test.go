@@ -138,3 +138,55 @@ func TestQuotaResetAtAcceptsMilliseconds(t *testing.T) {
 		t.Fatalf("reset at = %v, want %v", got, want)
 	}
 }
+
+func TestEnrichOpenAISubscriptionUsesUpstreamActiveUntil(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("account_id") != "acct-1" || r.Header.Get("Authorization") != "Bearer access" {
+			t.Fatalf("unexpected subscription request: %s %#v", r.URL.String(), r.Header)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"plan_type": "plus", "active_until": "2026-08-15T02:50:12Z"})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldSubscriptionsURL, oldAccountsCheckURL := openAISubscriptionsURL, openAIAccountsCheckURL
+	openAISubscriptionsURL, openAIAccountsCheckURL = server.URL+"/subscriptions", server.URL+"/accounts/check"
+	defer func() { openAISubscriptionsURL, openAIAccountsCheckURL = oldSubscriptionsURL, oldAccountsCheckURL }()
+
+	account := &model.UpstreamAccount{AccountID: "acct-1"}
+	snapshot := &model.AccountQuotaSnapshot{}
+	enrichOpenAISubscription(context.Background(), server.Client(), account, "access", snapshot)
+	if snapshot.PlanType != "plus" || snapshot.SubscriptionExpiresAt == nil || snapshot.SubscriptionExpiresAt.UTC().Format(time.RFC3339) != "2026-08-15T02:50:12Z" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestEnrichOpenAISubscriptionFallsBackToAccountEntitlement(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/subscriptions", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"plan_type": "k12"})
+	})
+	mux.HandleFunc("/accounts/check", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"accounts": map[string]any{
+			"org-school": map[string]any{
+				"account":     map[string]any{"plan_type": "k12", "is_default": true},
+				"entitlement": map[string]any{"expires_at": "2026-09-01T00:00:00Z"},
+			},
+		}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	oldSubscriptionsURL, oldAccountsCheckURL := openAISubscriptionsURL, openAIAccountsCheckURL
+	openAISubscriptionsURL, openAIAccountsCheckURL = server.URL+"/subscriptions", server.URL+"/accounts/check"
+	defer func() { openAISubscriptionsURL, openAIAccountsCheckURL = oldSubscriptionsURL, oldAccountsCheckURL }()
+	extra, err := model.EncodeExtra(map[string]any{"organization_id": "org-school"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &model.UpstreamAccount{AccountID: "acct-1", Extra: extra}
+	snapshot := &model.AccountQuotaSnapshot{}
+	enrichOpenAISubscription(context.Background(), server.Client(), account, "access", snapshot)
+	if snapshot.PlanType != "k12" || snapshot.SubscriptionExpiresAt == nil || snapshot.SubscriptionExpiresAt.UTC().Format(time.RFC3339) != "2026-09-01T00:00:00Z" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
