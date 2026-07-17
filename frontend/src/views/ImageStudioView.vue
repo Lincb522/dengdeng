@@ -13,7 +13,6 @@ interface StudioImage {
   src: string
   prompt: string
   revisedPrompt: string
-  createdAt: Date
 }
 
 const studioKeyStorage = 'dengdeng.image-studio.api-key'
@@ -29,28 +28,20 @@ const gallery = ref<StudioImage[]>([])
 const selectedImageID = ref('')
 
 const sizeOptions = [
-  { id: '1024x1024', label: '方形', dimensions: '1024 × 1024', shape: 'square' },
-  { id: '1536x1024', label: '横幅', dimensions: '1536 × 1024', shape: 'landscape' },
-  { id: '1024x1536', label: '竖幅', dimensions: '1024 × 1536', shape: 'portrait' },
+  { id: '1024x1024', shape: 'square', label: '方形 1024 × 1024' },
+  { id: '1536x1024', shape: 'landscape', label: '横幅 1536 × 1024' },
+  { id: '1024x1536', shape: 'portrait', label: '竖幅 1024 × 1536' },
 ]
 
 const qualityOptions = [
-  { id: 'low', label: '快速' },
-  { id: 'medium', label: '标准' },
-  { id: 'high', label: '精细' },
-]
-
-const promptSuggestions = [
-  '雨后傍晚的城市街角，暖色橱窗映在潮湿路面，35mm 胶片质感',
-  '一件放在深色石材上的陶瓷香氛产品，柔和侧光，克制的商业静物摄影',
-  '山间小屋的早餐桌，窗外有云雾和松林，细节丰富的生活方式杂志摄影',
+  { id: 'low', label: '低' },
+  { id: 'medium', label: '中' },
+  { id: 'high', label: '高' },
 ]
 
 const hasKey = computed(() => apiKey.value.trim().startsWith('dd-'))
 const canGenerate = computed(() => hasKey.value && Boolean(prompt.value.trim()) && !generating.value)
 const selectedImage = computed(() => gallery.value.find((item) => item.id === selectedImageID.value) || gallery.value[0] || null)
-const selectedSize = computed(() => sizeOptions.find((item) => item.id === size.value) || sizeOptions[0])
-const keyStatus = computed(() => hasKey.value ? '已在本标签页就绪' : '粘贴 dd- 密钥后开始')
 
 function readSessionKey() {
   try {
@@ -69,17 +60,13 @@ function persistSessionKey(value: string) {
   }
 }
 
-function useSuggestion(value: string) {
-  prompt.value = value
-}
-
 function clearKey() {
   apiKey.value = ''
   revealKey.value = false
 }
 
 function responseError(payload: unknown, status: number) {
-	return localizedApiError(status, payload)
+  return localizedApiError(status, payload)
 }
 
 function imageSource(item: ImageResponseItem) {
@@ -117,7 +104,6 @@ async function generate() {
       src: imageSource(item),
       prompt: requestedPrompt,
       revisedPrompt: item.revised_prompt || '',
-      createdAt: new Date(),
     })).filter((item) => item.src)
     if (!created.length) throw new Error('接口没有返回可展示的图像')
     gallery.value = [...created, ...gallery.value]
@@ -126,7 +112,7 @@ async function generate() {
     const message = cause instanceof Error ? cause.message : '生成失败，请稍后再试'
     error.value = message.includes('401') || /unauthorized|invalid api key|密钥/i.test(message)
       ? '密钥无效或已失效，请重新粘贴后再试。'
-		: localizeErrorMessage(message)
+      : localizeErrorMessage(message)
   } finally {
     generating.value = false
   }
@@ -143,10 +129,6 @@ function downloadSelected() {
   link.remove()
 }
 
-function formatTime(value: Date) {
-  return value.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
 onMounted(() => {
   apiKey.value = readSessionKey()
 })
@@ -157,100 +139,69 @@ watch(apiKey, persistSessionKey)
 <template>
   <div class="image-studio">
     <header class="studio-topbar">
-      <RouterLink to="/studio" class="studio-brand" aria-label="DengDeng 图像创作首页">
-        <span class="studio-brand-mark" aria-hidden="true">DD</span>
-        <span><b>DengDeng</b><em>图像创作</em></span>
+      <RouterLink to="/studio" class="studio-brand" aria-label="DengDeng 图像创作">
+        <img src="/brand/dengdeng-avatar.png" alt="" />
       </RouterLink>
-      <nav class="studio-topbar-actions" aria-label="页面导航">
-        <RouterLink to="/login">登录管理</RouterLink>
-        <a href="#create">开始创作</a>
-      </nav>
+      <RouterLink to="/login" class="studio-icon-button" aria-label="登录管理" title="登录管理">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+      </RouterLink>
     </header>
 
-    <main class="studio-main" id="create">
-      <section class="studio-intro" aria-labelledby="studio-title">
-        <div>
-          <p class="studio-kicker">DengDeng Canvas</p>
-          <h1 id="studio-title">把想法落成一张图。</h1>
-        </div>
-        <p>输入描述，选好画幅，直接通过 DengDeng API 生成。作品只保留在当前会话。</p>
-      </section>
+    <main class="studio-main">
+      <h1 class="sr-only">DengDeng 图像创作</h1>
 
       <section class="studio-keybar" aria-label="API 密钥">
-        <div class="studio-keybar-copy"><strong>API 密钥</strong><span>{{ keyStatus }}</span></div>
-        <div class="studio-keybar-field">
-          <input v-model="apiKey" :type="revealKey ? 'text' : 'password'" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="dd-…" aria-label="DengDeng API 密钥" />
-          <button type="button" :aria-label="revealKey ? '隐藏密钥' : '显示密钥'" @click="revealKey = !revealKey">{{ revealKey ? '隐藏' : '显示' }}</button>
-          <button v-if="apiKey" type="button" class="studio-key-clear" @click="clearKey">清除</button>
-        </div>
-        <p>密钥仅保留在当前浏览器标签页。</p>
+        <span class="studio-key-glyph" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M14.5 9.5a4.5 4.5 0 1 0-4.1 5.1L13 12h2l1.5-1.5H19v-2h-2.5L15 10z" /></svg>
+        </span>
+        <input v-model="apiKey" :type="revealKey ? 'text' : 'password'" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="dd-…" aria-label="DengDeng API 密钥" />
+        <button type="button" class="studio-key-action" :aria-label="revealKey ? '隐藏密钥' : '显示密钥'" :title="revealKey ? '隐藏密钥' : '显示密钥'" @click="revealKey = !revealKey">
+          <svg v-if="revealKey" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 5.2A10.6 10.6 0 0 1 12 5c5.3 0 9 4.4 9 7s-1.3 3.6-3.1 5M6.2 6.2C4.2 7.6 3 9.8 3 12c0 2.6 3.7 7 9 7 1.2 0 2.3-.2 3.3-.6" /></svg>
+          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.2-7 9-7 9 7 9 7-3.2 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="2.5" /></svg>
+        </button>
+        <button v-if="apiKey" type="button" class="studio-key-action is-danger" aria-label="清除密钥" title="清除密钥" @click="clearKey">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
       </section>
 
-      <div class="studio-workspace">
-        <section class="studio-composer" aria-labelledby="composer-title">
-          <div class="studio-section-head">
-            <div><p>创作面板</p><h2 id="composer-title">描述画面</h2></div>
-            <span class="studio-model-badge">{{ model }}</span>
-          </div>
+      <section class="studio-workspace" aria-label="图像生成工作台">
+        <div class="studio-composer">
+          <textarea v-model="prompt" rows="8" placeholder="描述画面" aria-label="提示词" @keydown.meta.enter.prevent="generate" @keydown.ctrl.enter.prevent="generate"></textarea>
 
-          <label class="studio-prompt-field">
-            <span>提示词</span>
-            <textarea v-model="prompt" rows="7" placeholder="例如：一束干燥野花放在胡桃木桌面，午后侧光，静物摄影，细节清晰。"></textarea>
-          </label>
-
-          <div class="studio-suggestions" aria-label="提示词示例">
-            <span>试试</span>
-            <button v-for="suggestion in promptSuggestions" :key="suggestion" type="button" @click="useSuggestion(suggestion)">{{ suggestion }}</button>
-          </div>
-
-          <div class="studio-control-grid">
-            <fieldset class="studio-control-group">
-              <legend>画幅</legend>
-              <div class="studio-size-options">
-                <button v-for="option in sizeOptions" :key="option.id" type="button" :class="{ 'is-active': size === option.id }" @click="size = option.id">
-                  <i class="studio-size-glyph" :class="`is-${option.shape}`" aria-hidden="true"></i>
-                  <span>{{ option.label }}</span><small>{{ option.dimensions }}</small>
-                </button>
-              </div>
-            </fieldset>
-
-            <fieldset class="studio-control-group">
-              <legend>细节强度</legend>
-              <div class="studio-quality-options">
-                <button v-for="option in qualityOptions" :key="option.id" type="button" :class="{ 'is-active': quality === option.id }" @click="quality = option.id">{{ option.label }}</button>
-              </div>
-              <p>{{ quality === 'low' ? '更快出草图' : quality === 'high' ? '适合最终稿' : '速度与细节平衡' }}</p>
-            </fieldset>
+          <div class="studio-controls">
+            <div class="studio-size-options" role="group" aria-label="画幅">
+              <button v-for="option in sizeOptions" :key="option.id" type="button" :class="{ 'is-active': size === option.id }" :aria-label="option.label" :title="option.label" @click="size = option.id">
+                <i class="studio-size-glyph" :class="`is-${option.shape}`" aria-hidden="true"></i>
+              </button>
+            </div>
+            <div class="studio-quality-options" role="group" aria-label="生成质量">
+              <button v-for="option in qualityOptions" :key="option.id" type="button" :class="{ 'is-active': quality === option.id }" :aria-label="`${option.label}质量`" @click="quality = option.id">{{ option.label }}</button>
+            </div>
           </div>
 
           <div class="studio-submit-row">
-            <span v-if="error" class="studio-error" role="alert">{{ error }}</span>
-            <span v-else class="studio-api-note">PNG · {{ selectedSize.dimensions }} · 单张生成</span>
+            <p v-if="error" class="studio-error" role="alert">{{ error }}</p>
             <button type="button" class="studio-generate" :disabled="!canGenerate" @click="generate">
               <span v-if="generating" class="studio-button-loader" aria-hidden="true"></span>
-              {{ generating ? '正在生成' : '生成图像' }}
+              {{ generating ? '生成中' : '生成' }}
             </button>
           </div>
-        </section>
+        </div>
 
-        <section class="studio-output" aria-labelledby="output-title" :class="{ 'is-generating': generating }">
-          <div class="studio-output-head"><div><p>作品区</p><h2 id="output-title">{{ selectedImage ? '最新作品' : '等待第一张作品' }}</h2></div><span v-if="selectedImage">{{ formatTime(selectedImage.createdAt) }}</span></div>
-
+        <div class="studio-output" :class="{ 'is-generating': generating }" aria-live="polite">
           <div v-if="selectedImage" class="studio-canvas-wrap">
             <img :src="selectedImage.src" :alt="selectedImage.revisedPrompt || selectedImage.prompt" class="studio-canvas-image" />
-            <div class="studio-canvas-actions"><button type="button" @click="downloadSelected">下载 PNG</button></div>
+            <button type="button" class="studio-download" aria-label="下载 PNG" title="下载 PNG" @click="downloadSelected">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14" /></svg>
+            </button>
           </div>
-          <div v-else class="studio-empty-canvas">
-            <div class="studio-empty-frame" aria-hidden="true"><span></span><i></i></div>
-            <p>{{ generating ? '正在把描述转成画面…' : '第一张作品会出现在这里。' }}</p>
-          </div>
+          <div v-else class="studio-empty-canvas" aria-hidden="true"><span></span></div>
 
           <div v-if="gallery.length > 1" class="studio-gallery" aria-label="本次会话作品">
-            <button v-for="item in gallery" :key="item.id" type="button" :class="{ 'is-selected': item.id === selectedImage?.id }" @click="selectedImageID = item.id"><img :src="item.src" :alt="item.prompt" /></button>
+            <button v-for="item in gallery" :key="item.id" type="button" :class="{ 'is-selected': item.id === selectedImage?.id }" :aria-label="item.prompt" @click="selectedImageID = item.id"><img :src="item.src" alt="" /></button>
           </div>
-          <p v-if="selectedImage?.revisedPrompt" class="studio-revised-prompt">{{ selectedImage.revisedPrompt }}</p>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
   </div>
 </template>
