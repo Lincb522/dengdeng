@@ -1,0 +1,74 @@
+# 蹬蹬中转 - Docker Compose 部署
+# 默认使用 SQLite(零依赖);需要 PostgreSQL 时取消下方注释并改 DATABASE_* 环境变量。
+#
+# 使用:
+#   cd deploy
+#   cp .env.example .env   # 修改 JWT_SECRET / ADMIN_PASSWORD
+#   docker compose up -d --build
+
+services:
+  dengdeng:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: dengdeng
+    restart: unless-stopped
+    ports:
+      - "${BIND_HOST:-127.0.0.1}:${SERVER_PORT:-9100}:9100"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=9100
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@dengdeng.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - SITE_NAME=${SITE_NAME:-蹬蹬中转}
+      - SITE_ALLOW_REGISTER=${SITE_ALLOW_REGISTER:-true}
+      - OAUTH_OPENAI_CLIENT_ID=${OAUTH_OPENAI_CLIENT_ID:-}
+      - OAUTH_OPENAI_CLIENT_SECRET=${OAUTH_OPENAI_CLIENT_SECRET:-}
+      - OAUTH_OPENAI_AUTHORIZE_URL=${OAUTH_OPENAI_AUTHORIZE_URL:-}
+      - OAUTH_OPENAI_TOKEN_URL=${OAUTH_OPENAI_TOKEN_URL:-}
+      - OAUTH_OPENAI_SCOPE=${OAUTH_OPENAI_SCOPE:-}
+      - OAUTH_OPENAI_REDIRECT_URL=${OAUTH_OPENAI_REDIRECT_URL:-}
+      - OAUTH_ANTHROPIC_CLIENT_ID=${OAUTH_ANTHROPIC_CLIENT_ID:-}
+      - OAUTH_ANTHROPIC_CLIENT_SECRET=${OAUTH_ANTHROPIC_CLIENT_SECRET:-}
+      - OAUTH_ANTHROPIC_AUTHORIZE_URL=${OAUTH_ANTHROPIC_AUTHORIZE_URL:-}
+      - OAUTH_ANTHROPIC_TOKEN_URL=${OAUTH_ANTHROPIC_TOKEN_URL:-}
+      - OAUTH_ANTHROPIC_SCOPE=${OAUTH_ANTHROPIC_SCOPE:-}
+      - OAUTH_ANTHROPIC_REDIRECT_URL=${OAUTH_ANTHROPIC_REDIRECT_URL:-}
+      - DATABASE_DRIVER=sqlite
+      - DATABASE_PATH=/app/data/dengdeng.db
+      # --- 使用 PostgreSQL 时改为 ---
+      # - DATABASE_DRIVER=postgres
+      # - DATABASE_HOST=postgres
+      # - DATABASE_PORT=5432
+      # - DATABASE_USER=dengdeng
+      # - DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+      # - DATABASE_DBNAME=dengdeng
+      - TZ=${TZ:-Asia/Shanghai}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:9100/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+
+  # postgres:
+  #   image: postgres:17-alpine
+  #   container_name: dengdeng-postgres
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./postgres_data:/var/lib/postgresql/data
+  #   environment:
+  #     - POSTGRES_USER=dengdeng
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?required}
+  #     - POSTGRES_DB=dengdeng
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U dengdeng"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5

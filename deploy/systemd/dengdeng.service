@@ -1,0 +1,23 @@
+[Unit]
+Description=DengDeng AI gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dengdeng
+Group=dengdeng
+WorkingDirectory=/opt/dengdeng
+EnvironmentFile=/etc/dengdeng/dengdeng.env
+ExecStart=/opt/dengdeng/dengdeng
+Restart=always
+RestartSec=3
+StateDirectory=dengdeng
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/dengdeng
+
+[Install]
+WantedBy=multi-user.target

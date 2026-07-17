@@ -1,0 +1,56 @@
+# 蹬蹬中转配置示例(二进制部署用;环境变量优先级更高)
+# 使用: cp config.example.yaml config.yaml && ./dengdeng -config config.yaml
+
+server:
+  host: "0.0.0.0"
+  port: 9100
+  mode: "release" # debug | release
+
+database:
+  driver: "sqlite" # sqlite | postgres
+  path: "data/dengdeng.db"
+  # --- postgres ---
+  # host: "localhost"
+  # port: 5432
+  # user: "dengdeng"
+  # password: ""
+  # dbname: "dengdeng"
+  # sslmode: "disable"
+
+jwt:
+  secret: "" # 必填: openssl rand -hex 32
+  expire_hour: 72
+
+# 上游 token 落库加密主密钥(建议设置,openssl rand -hex 32)。
+# 留空则从 jwt.secret 派生;设置后请勿更换,否则已存的上游 key 无法解密。
+encryption_key: ""
+
+admin:
+  email: "admin@dengdeng.local"
+  password: "" # 留空则首次启动随机生成并打印到日志
+
+site:
+  name: "蹬蹬中转"
+  # 在线支付回调和支付完成跳转使用的 HTTPS 公网地址。未设置时支付功能无法开启。
+  public_url: "https://relay.example.com"
+  allow_register: true
+  init_balance_micro: 0 # 新用户注册赠送余额(1000000 = $1)
+
+# 上游模型 API 与 OAuth token 刷新共用此出站代理。仅支持 HTTP(S) CONNECT 代理；
+# no_proxy 支持逗号分隔的域名、IP、CIDR 或 *。也可用 PROXY_URL / NO_PROXY 覆盖。
+proxy:
+  url: ""
+  no_proxy: "localhost,127.0.0.1,::1"
+
+# 上游账号的浏览器 OAuth 登录(可选)。生产环境请在上游 OAuth 应用中登记
+# 完整的 callback URL；本地 localhost 开发会自动推导 callback URL。
+# openai / anthropic 的 authorize_url、token_url、scope 留空时使用项目内置值。
+oauth:
+  openai:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "https://relay.example.com/api/admin/oauth/openai/callback"
+  anthropic:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "https://relay.example.com/api/admin/oauth/anthropic/callback"

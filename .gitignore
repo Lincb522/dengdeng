@@ -1,0 +1,30 @@
+node_modules/
+data/
+postgres_data/
+*.db
+*.db-shm
+*.db-wal
+config.yaml
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+.DS_Store
+
+# 本地运行、发布与证书材料（不进入 Git）
+backend/data/
+backend/dengdeng
+backend/dengdeng-*
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+*.log
+coverage/
+
+# 前端构建产物(embed 占位 index.html 除外)
+backend/internal/web/dist/**
+!backend/internal/web/dist/index.html
