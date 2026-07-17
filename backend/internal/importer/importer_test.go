@@ -92,3 +92,38 @@ func TestParseSub2APIWithCamelCaseCredentials(t *testing.T) {
 		t.Fatalf("sub2api routing metadata was not retained: %#v", got)
 	}
 }
+
+func TestParseGeminiOAuthRetainsRefreshClientMetadata(t *testing.T) {
+	raw := []byte(`{
+  "accounts":[{
+    "name":"gemini-cli",
+    "platform":"gemini",
+    "type":"oauth",
+    "credentials":{
+      "access_token":"access",
+      "refresh_token":"refresh",
+      "client_id":"desktop-client",
+      "client_secret":"desktop-secret",
+      "project_id":"project-1",
+      "oauth_type":"gemini_cli",
+      "scope":"cloud-platform"
+    }
+  }]
+}`)
+	accounts, err := Parse("sub2api", raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(accounts))
+	}
+	extra := accounts[0].Extra
+	for key, want := range map[string]string{
+		"client_id": "desktop-client", "client_secret": "desktop-secret",
+		"project_id": "project-1", "oauth_type": "gemini_cli", "scope": "cloud-platform",
+	} {
+		if got, _ := extra[key].(string); got != want {
+			t.Fatalf("extra[%q] = %q, want %q", key, got, want)
+		}
+	}
+}

@@ -115,6 +115,53 @@ func TestRefreshRenewsRevokedSessionBeforeRecordedExpiry(t *testing.T) {
 	}
 }
 
+func TestGeminiImportedOAuthRefreshesWithConfiguredProvider(t *testing.T) {
+	if err := crypto.Init("", "oauth-gemini-refresh-test"); err != nil {
+		t.Fatalf("initialize crypto: %v", err)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.UpstreamAccount{}); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		if r.Form.Get("client_id") != "gemini-import-client" || r.Form.Get("client_secret") != "gemini-import-secret" || r.Form.Get("refresh_token") != "gemini-refresh" {
+			t.Fatalf("unexpected form: %v", r.Form)
+		}
+		_ = json.NewEncoder(w).Encode(tokenResp{AccessToken: "gemini-renewed", RefreshToken: "gemini-rotated", ExpiresIn: 3600})
+	}))
+	defer server.Close()
+	expired := time.Now().UTC().Add(-time.Minute)
+	extra, err := model.EncodeExtra(map[string]any{
+		"client_id":     "gemini-import-client",
+		"client_secret": "gemini-import-secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := model.UpstreamAccount{
+		GroupID: 1, Name: "gemini", Platform: model.PlatformGemini, AuthType: model.AuthOAuth,
+		AccessToken: "gemini-expired", RefreshToken: "gemini-refresh", ExpiresAt: &expired,
+		Extra: extra,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(db, config.OAuthConfig{Gemini: config.OAuthProviderConfig{TokenURL: server.URL}}, server.Client())
+	token, err := manager.AccessToken(context.Background(), &account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "gemini-renewed" {
+		t.Fatalf("token = %q", token)
+	}
+}
+
 func TestCallbackURLRequiresExplicitProductionURL(t *testing.T) {
 	manager := NewManager(nil, config.OAuthConfig{}, nil)
 	defer manager.Close()

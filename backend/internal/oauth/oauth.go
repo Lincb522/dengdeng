@@ -66,6 +66,15 @@ var providers = map[string]Provider{
 		Scope:         "openid profile email offline_access",
 		BuiltinClient: true,
 	},
+	// Google OAuth uses the standard refresh endpoint. Imported Gemini / Code
+	// Assist credentials normally carry their own client_id, which overrides
+	// this empty registration. Operators may also configure a browser client
+	// explicitly through OAUTH_GEMINI_*.
+	model.PlatformGemini: {
+		AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth",
+		TokenURL:     "https://oauth2.googleapis.com/token",
+		Scope:        "https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",
+	},
 	// xAI / Grok. The public client identity is intentionally left blank: the
 	// browser authorize flow only becomes available once an operator supplies
 	// XAI_OAUTH_CLIENT_ID (+ redirect). Refreshing imported Grok subscription
@@ -108,6 +117,8 @@ func NewManager(db *gorm.DB, cfg config.OAuthConfig, client *http.Client) *Manag
 			override = cfg.OpenAI
 		case model.PlatformAnthropic:
 			override = cfg.Anthropic
+		case model.PlatformGemini:
+			override = cfg.Gemini
 		case model.PlatformGrok:
 			override = cfg.Grok
 		}
@@ -228,11 +239,20 @@ func (m *Manager) refresh(ctx context.Context, acc *model.UpstreamAccount) (stri
 		return "", errors.New("missing refresh_token; re-import this account")
 	}
 
-	// A stored client_id (from import) overrides the built-in default.
+	// Stored OAuth client credentials from an import override provider defaults.
+	// This is required for Gemini CLI / Code Assist exports, whose refresh token
+	// is bound to the client registration that originally issued it.
 	clientID := prov.ClientID
+	clientSecret := prov.ClientSecret
 	extra := acc.DecodeExtra()
 	if v, _ := extra["client_id"].(string); v != "" {
 		clientID = v
+	}
+	if v, _ := extra["client_secret"].(string); v != "" {
+		clientSecret = v
+	}
+	if clientID == "" {
+		return "", fmt.Errorf("missing oauth client_id for platform %s; re-import the original credential file", acc.Platform)
 	}
 
 	values := url.Values{
@@ -240,8 +260,8 @@ func (m *Manager) refresh(ctx context.Context, acc *model.UpstreamAccount) (stri
 		"refresh_token": {string(acc.RefreshToken)},
 		"client_id":     {clientID},
 	}
-	if prov.ClientSecret != "" {
-		values.Set("client_secret", prov.ClientSecret)
+	if clientSecret != "" {
+		values.Set("client_secret", clientSecret)
 	}
 	// Do not send scope on refresh: OAuth refresh grants cannot be expanded.
 	// New scopes (such as api.model.read) require a fresh browser authorization.

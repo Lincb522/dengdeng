@@ -89,6 +89,7 @@ type BackupConfig struct {
 type OAuthConfig struct {
 	OpenAI    OAuthProviderConfig `yaml:"openai"`
 	Anthropic OAuthProviderConfig `yaml:"anthropic"`
+	Gemini    OAuthProviderConfig `yaml:"gemini"`
 	Grok      OAuthProviderConfig `yaml:"grok"`
 }
 
@@ -212,6 +213,13 @@ func applyEnv(cfg *Config) {
 	envStr("OAUTH_ANTHROPIC_TOKEN_URL", &cfg.OAuth.Anthropic.TokenURL)
 	envStr("OAUTH_ANTHROPIC_SCOPE", &cfg.OAuth.Anthropic.Scope)
 	envStr("OAUTH_ANTHROPIC_REDIRECT_URL", &cfg.OAuth.Anthropic.RedirectURL)
+
+	envStr("OAUTH_GEMINI_CLIENT_ID", &cfg.OAuth.Gemini.ClientID)
+	envStr("OAUTH_GEMINI_CLIENT_SECRET", &cfg.OAuth.Gemini.ClientSecret)
+	envStr("OAUTH_GEMINI_AUTHORIZE_URL", &cfg.OAuth.Gemini.AuthorizeURL)
+	envStr("OAUTH_GEMINI_TOKEN_URL", &cfg.OAuth.Gemini.TokenURL)
+	envStr("OAUTH_GEMINI_SCOPE", &cfg.OAuth.Gemini.Scope)
+	envStr("OAUTH_GEMINI_REDIRECT_URL", &cfg.OAuth.Gemini.RedirectURL)
 
 	// xAI / Grok OAuth follows the public XAI_OAUTH_* contract used by the
 	// Grok CLI, so operators can reuse the same environment they already set.
