@@ -33,6 +33,13 @@ const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
 const geminiBase = computed(() => `${origin.value}/v1beta`)
 const configuredApiKey = computed(() => workingApiKey.value.trim())
+const activeEndpoint = computed(() => {
+  if (activeClient.value === 'claude') return origin.value
+  if (activeClient.value === 'gemini') return geminiBase.value
+  if (activeClient.value === 'ccswitch') return props.platform === 'openai' ? apiBase.value : origin.value
+  return apiBase.value
+})
+
 async function changeReasoningEffort(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   const previous = reasoningEffort.value
@@ -245,8 +252,8 @@ const currentFiles = computed<SetupFile[]>(() => {
     }
     if (model) env.ANTHROPIC_MODEL = model
     return [
-      { path: terminalPath, content: terminal, hint: '仅对当前终端生效。' },
-      { path: settingsPath, content: JSON.stringify({ env }, null, 2), hint: '持久化方式：与已有 settings.json 的 env 合并。' },
+      { path: terminalPath, content: terminal, hint: 'Base URL 末尾不要加 /v1；仅对当前终端生效。' },
+      { path: settingsPath, content: JSON.stringify({ env }, null, 2), hint: 'Base URL 末尾不要加 /v1；与已有 settings.json 的 env 合并。' },
     ]
   }
 
@@ -379,7 +386,7 @@ function openCCSwitch() {
 
         <div class="key-setup-summary">
           <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
-          <div class="key-setup-secret"><span>接口地址</span><code>{{ apiBase }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(apiBase, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
+          <div class="key-setup-secret"><span>接口地址</span><code>{{ activeEndpoint }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
 			<div v-if="platform === 'openai'" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
         </div>
 

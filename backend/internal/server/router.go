@@ -209,6 +209,15 @@ func mountFrontend(r *gin.Engine) {
 	}
 	fileServer := http.FileServer(http.FS(dist))
 	r.NoRoute(func(c *gin.Context) {
+		// Unknown API paths must never fall through to index.html with HTTP
+		// 200. SDKs otherwise report a misleading "empty or malformed
+		// response" instead of the actionable endpoint error.
+		if strings.HasPrefix(c.Request.URL.Path, "/v1/") ||
+			strings.HasPrefix(c.Request.URL.Path, "/v1beta/") ||
+			strings.HasPrefix(c.Request.URL.Path, "/api/") {
+			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"message": "API endpoint not found"}})
+			return
+		}
 		p := strings.TrimPrefix(c.Request.URL.Path, "/")
 		if p == "" {
 			p = "index.html"

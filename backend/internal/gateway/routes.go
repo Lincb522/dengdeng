@@ -23,6 +23,12 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// Anthropic Messages API
 	r.POST("/v1/messages", g.handleAnthropicMessages)
 	r.POST("/v1/messages/count_tokens", g.handleAnthropicCountTokens)
+	// Older quick-setup snippets and some desktop clients accept a provider
+	// URL ending in /v1, then append /v1/messages themselves. Keep these
+	// aliases so that configuration mistake returns a real API response
+	// instead of the SPA index document.
+	r.POST("/v1/v1/messages", g.handleAnthropicMessages)
+	r.POST("/v1/v1/messages/count_tokens", g.handleAnthropicCountTokens)
 
 	// OpenAI
 	r.POST("/v1/chat/completions", g.handleOpenAIChat)
