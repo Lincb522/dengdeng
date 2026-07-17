@@ -61,7 +61,7 @@ func TestListAccountsPaginatesAndFiltersCredentialType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := db.AutoMigrate(&model.Group{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.CodexQuotaSnapshot{}); err != nil {
+	if err := db.AutoMigrate(&model.Group{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	group := model.Group{Name: "openai", Platform: model.PlatformOpenAI, Status: model.StatusActive}

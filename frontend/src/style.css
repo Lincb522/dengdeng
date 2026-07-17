@@ -264,14 +264,19 @@ body {
   .account-card-meta dt { color: var(--ink-soft); font-size: .66rem; font-weight: 700; }
   .account-card-meta dd { overflow: hidden; margin-top: .18rem; color: var(--ink); font-size: .76rem; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
   .account-card-quota { margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+  .account-quota-head { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
   .account-card-quota strong { color: var(--ink); font-size: .76rem; font-weight: 800; }
   .account-card-quota > p { color: var(--ink-soft); font-size: .73rem; }
   .account-card-quota > div span { color: var(--ink-soft); font-size: .67rem; }
   .account-card-quota > div > span + span { flex: 0 0 auto; }
+  .account-card-quota .account-quota-message { margin-top: .55rem; line-height: 1.45; }
+  .account-quota-observed { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-top: .65rem; }
+  .account-quota-observed span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .account-card-quota button { margin-top: .65rem; color: #8a5b10; font-size: .72rem; font-weight: 800; transition: color .16s ease; }
   .account-card-quota button:hover:not(:disabled) { color: var(--ink); }
   .account-card-quota button:disabled { cursor: wait; opacity: .5; }
   .account-card-quota-window { margin-top: .5rem; }
+  .account-card-quota-window small { display: block; margin-top: .24rem; color: var(--ink-faint); font-size: .64rem; white-space: nowrap; }
   .account-card-quota-window > div { height: .28rem; overflow: hidden; margin-top: .28rem; border-radius: 99px; background: var(--line); }
   .account-card-quota-window i { display: block; height: 100%; border-radius: inherit; }
   .account-card-actions { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: auto; padding-top: 1rem; }

@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"dengdeng/internal/config"
+	"dengdeng/internal/crypto"
 	"dengdeng/internal/model"
+	"dengdeng/internal/oauth"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -76,5 +80,56 @@ func TestAccountMonitorExpiredOAuthDoesNotCallUpstream(t *testing.T) {
 	}
 	if called || probe.Mode != "transport" || probe.State != "expired" {
 		t.Fatalf("probe = %#v called=%v", probe, called)
+	}
+}
+
+func TestAccountMonitorProactivelyRefreshesOAuthBeforeProbe(t *testing.T) {
+	if err := crypto.Init("", "account-monitor-refresh-test"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.UpstreamAccount{}, &model.AccountProbe{}); err != nil {
+		t.Fatal(err)
+	}
+
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "renewed", "refresh_token": "rotated", "expires_in": 3600})
+	}))
+	defer tokenServer.Close()
+	probeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead || r.Header.Get("Authorization") != "Bearer renewed" {
+			t.Fatalf("probe method/header = %s %q", r.Method, r.Header.Get("Authorization"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer probeServer.Close()
+
+	expired := time.Now().UTC().Add(-time.Minute)
+	account := model.UpstreamAccount{
+		GroupID: 1, Name: "claude", Platform: model.PlatformAnthropic, AuthType: model.AuthOAuth,
+		AccessToken: "expired", RefreshToken: "refresh", ExpiresAt: &expired, BaseURL: probeServer.URL, Status: model.StatusActive,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	manager := oauth.NewManager(db, config.OAuthConfig{Anthropic: config.OAuthProviderConfig{ClientID: "test-client", TokenURL: tokenServer.URL}}, tokenServer.Client())
+	monitor := NewAccountMonitor(db, nil)
+	monitor.SetOAuthManager(manager)
+	probe, err := monitor.Probe(context.Background(), &account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.State != "healthy" {
+		t.Fatalf("probe = %#v", probe)
+	}
+	var stored model.UpstreamAccount
+	if err := db.First(&stored, account.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.AccessToken != "renewed" || stored.RefreshToken != "rotated" || stored.ExpiresAt == nil || !stored.ExpiresAt.After(time.Now()) {
+		t.Fatalf("stored account = %#v", stored)
 	}
 }

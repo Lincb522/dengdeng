@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { api, withToast } from '../../api/client'
-import type { CodexQuotaSnapshot, Group, Proxy, UpstreamAccount } from '../../api/types'
+import type { AccountObservedUsage, AccountQuotaSnapshot, AccountQuotaWindow, Group, Proxy, UpstreamAccount } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
 import { useToast } from '../../stores/toast'
@@ -407,7 +407,7 @@ async function doImport() {
 
 function healthState(a: UpstreamAccount): { label: string; cls: string } {
   if (a.status !== 'active') return { label: '停用', cls: 'tag-gray' }
-	if (codexQuotaExhausted(a.codex_quota)) return { label: 'Codex 额度用尽', cls: 'tag-red' }
+	if (accountQuotaExhausted(a.quota)) return { label: '额度用尽', cls: 'tag-red' }
   if (a.cooldown_until && new Date(a.cooldown_until) > new Date()) return { label: '冷却中', cls: 'tag-red' }
   return { label: '在线', cls: 'tag-green' }
 }
@@ -425,44 +425,83 @@ function expiryInfo(a: UpstreamAccount): { text: string; cls: string } | null {
 	return { text: t.toLocaleString(), cls: expired ? 'text-signal-red' : 'text-slate-500' }
 }
 
-function supportsCodexQuota(a: UpstreamAccount) {
-	return a.platform === 'openai' && a.auth_type === 'oauth'
-}
-
-function quotaWindowLabel(seconds: number, fallback: string) {
-	if (seconds >= 6 * 24 * 60 * 60) return '7 天窗口'
-	if (seconds >= 4 * 60 * 60 && seconds <= 6 * 60 * 60) return '5 小时窗口'
-	if (seconds > 0) return `${Math.round(seconds / 3600)} 小时窗口`
-	return fallback
-}
-
 function quotaPercent(value: number) {
 	return Math.min(100, Math.max(0, Number(value) || 0))
 }
 
-function quotaWindowText(quota: CodexQuotaSnapshot, kind: 'primary' | 'secondary') {
-	const seconds = kind === 'primary' ? quota.primary_window_seconds : quota.secondary_window_seconds
-	const used = kind === 'primary' ? quota.primary_used_percent : quota.secondary_used_percent
-	return `${quotaWindowLabel(seconds, kind === 'primary' ? '主窗口' : '次窗口')} · 已用 ${quotaPercent(used).toFixed(1)}%`
+function quotaState(snapshot?: AccountQuotaSnapshot): { label: string; cls: string } {
+	if (!snapshot) return { label: '等待同步', cls: 'tag-gray' }
+	switch (snapshot.state) {
+		case 'ready': return { label: '已同步', cls: 'tag-green' }
+		case 'partial': return { label: '部分可用', cls: 'tag-amber' }
+		case 'error': return { label: '刷新失败', cls: 'tag-red' }
+		default: return { label: '本站记录', cls: 'tag-gray' }
+	}
 }
 
-function quotaResetText(quota: CodexQuotaSnapshot, kind: 'primary' | 'secondary') {
-	const resetAt = kind === 'primary' ? quota.primary_reset_at : quota.secondary_reset_at
-	if (!resetAt) return '重置时间未返回'
-	return `重置 ${new Date(resetAt).toLocaleString()}`
+function quotaSourceLabel(snapshot?: AccountQuotaSnapshot) {
+	if (!snapshot) return '上游额度'
+	if (snapshot.plan_type) return snapshot.plan_type
+	switch (snapshot.source) {
+		case 'codex_subscription': return 'Codex 订阅'
+		case 'claude_subscription': return 'Claude 订阅'
+		case 'grok_billing': return 'Grok 订阅'
+		case 'rate_limit_headers': return '上游限额'
+		default: return `${PLATFORM_LABELS[snapshot.platform] || '上游'} 用量`
+	}
 }
 
-function codexQuotaExhausted(quota?: CodexQuotaSnapshot) {
-	if (!quota) return false
-	return quota.limit_reached || !quota.allowed ||
-		(quota.has_primary_window && quotaPercent(quota.primary_used_percent) >= 100) ||
-		(quota.has_secondary_window && quotaPercent(quota.secondary_used_percent) >= 100)
+function quotaWindowText(window: AccountQuotaWindow) {
+	if (window.used_percent !== undefined && window.used_percent !== null) {
+		return `${window.label} · 已用 ${quotaPercent(window.used_percent).toFixed(1)}%`
+	}
+	if (window.remaining !== undefined && window.limit !== undefined) {
+		return `${window.label} · 剩余 ${formatQuotaNumber(window.remaining)} / ${formatQuotaNumber(window.limit)} ${quotaUnit(window.unit)}`
+	}
+	if (window.remaining !== undefined) {
+		return `${window.label} · 剩余 ${formatQuotaNumber(window.remaining)} ${quotaUnit(window.unit)}`
+	}
+	return window.label
+}
+
+function quotaUnit(unit?: string) {
+	if (unit === 'requests') return '次'
+	if (unit === 'tokens') return 'Tokens'
+	return unit || ''
+}
+
+function formatQuotaNumber(value: number) {
+	return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(value)
+}
+
+function quotaResetText(window: AccountQuotaWindow) {
+	if (!window.reset_at) return ''
+	return `重置 ${new Date(window.reset_at).toLocaleString()}`
+}
+
+function accountQuotaExhausted(quota?: AccountQuotaSnapshot) {
+	return !!quota?.windows?.some((window) => window.used_percent !== undefined && quotaPercent(window.used_percent) >= 100)
+}
+
+function primaryObservedUsage(quota?: AccountQuotaSnapshot): AccountObservedUsage | undefined {
+	return quota?.observed_usage?.find((item) => item.key === '24h') || quota?.observed_usage?.[0]
+}
+
+function observedUsageText(usage?: AccountObservedUsage) {
+	if (!usage) return '暂无本站调用记录'
+	const tokens = Number(usage.input_tokens || 0) + Number(usage.output_tokens || 0)
+	return `${usage.label} · ${formatQuotaNumber(usage.requests)} 次 · ${formatQuotaNumber(tokens)} Tokens`
+}
+
+function quotaCheckedAt(quota?: AccountQuotaSnapshot) {
+	const raw = quota?.fetched_at || quota?.last_attempt_at
+	return raw ? new Date(raw).toLocaleString() : '等待自动刷新'
 }
 
 function availability(a: UpstreamAccount): { score: number; label: string; cls: string; reason: string } {
 	if (a.status !== 'active') return { score: 0, label: '已停用', cls: 'tag-gray', reason: '管理员已停用该账号' }
 	if (a.auth_type === 'oauth' && a.expires_at && new Date(a.expires_at) <= new Date()) return { score: 0, label: '凭据到期', cls: 'tag-red', reason: 'OAuth 凭据已过期，需重新授权' }
-	if (codexQuotaExhausted(a.codex_quota)) return { score: 0, label: 'Codex 额度用尽', cls: 'tag-red', reason: '上游返回该 Codex 订阅窗口已用尽' }
+	if (accountQuotaExhausted(a.quota)) return { score: 0, label: '额度用尽', cls: 'tag-red', reason: '上游返回该账号的额度窗口已用尽' }
 	if (a.cooldown_until && new Date(a.cooldown_until) > new Date()) return { score: 10, label: '冷却中', cls: 'tag-red', reason: `预计 ${new Date(a.cooldown_until).toLocaleTimeString()} 后恢复调度` }
 	if (a.error_count >= 4) return { score: 45, label: '需关注', cls: 'tag-amber', reason: `近期连续失败 ${a.error_count} 次` }
 	if (a.error_count > 0) return { score: 75, label: '待观察', cls: 'tag-amber', reason: `近期失败 ${a.error_count} 次，当前仍可调度` }
@@ -532,15 +571,15 @@ async function dropAccountAt(target: UpstreamAccount) {
 	await loadAccounts()
 }
 
-async function refreshCodexQuota(account: UpstreamAccount) {
-	if (!supportsCodexQuota(account) || refreshingQuotaAccountID.value) return
+async function refreshAccountQuota(account: UpstreamAccount) {
+	if (refreshingQuotaAccountID.value) return
 	refreshingQuotaAccountID.value = account.id
 	try {
-		const snapshot = await api.post<CodexQuotaSnapshot>(`/api/admin/accounts/${account.id}/codex-quota/refresh`, {})
-		account.codex_quota = snapshot
-		toast.show('已获取 Codex 上游额度', 'success')
+		const snapshot = await api.post<AccountQuotaSnapshot>(`/api/admin/accounts/${account.id}/quota/refresh`, {})
+		account.quota = snapshot
+		toast.show(snapshot.state === 'error' ? snapshot.message : '额度与用量已刷新', snapshot.state === 'error' ? 'error' : 'success')
 	} catch (error) {
-		toast.show(error instanceof Error ? error.message : 'Codex 额度查询失败', 'error')
+		toast.show(error instanceof Error ? error.message : '额度查询失败', 'error')
 	} finally {
 		refreshingQuotaAccountID.value = null
 	}
@@ -629,14 +668,19 @@ async function refreshCodexQuota(account: UpstreamAccount) {
           <div><dt>可用度</dt><dd :class="availability(a).cls">{{ availability(a).label }}</dd></div>
         </dl>
 
-        <section v-if="supportsCodexQuota(a)" class="account-card-quota">
-          <template v-if="a.codex_quota">
-            <div class="mb-2 flex items-center justify-between gap-3"><strong>{{ a.codex_quota.plan_type || 'Codex 订阅' }}</strong><span>{{ new Date(a.codex_quota.fetched_at).toLocaleTimeString() }}</span></div>
-            <div v-if="a.codex_quota.has_primary_window" class="account-card-quota-window"><span>{{ quotaWindowText(a.codex_quota, 'primary') }}</span><div><i class="bg-amber" :style="{ width: `${quotaPercent(a.codex_quota.primary_used_percent)}%` }"></i></div></div>
-            <div v-if="a.codex_quota.has_secondary_window" class="account-card-quota-window"><span>{{ quotaWindowText(a.codex_quota, 'secondary') }}</span><div><i class="bg-signal-cyan" :style="{ width: `${quotaPercent(a.codex_quota.secondary_used_percent)}%` }"></i></div></div>
+        <section class="account-card-quota">
+          <template v-if="a.quota">
+            <div class="account-quota-head"><strong>{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
+            <div v-for="window in a.quota.windows || []" :key="window.key" class="account-card-quota-window">
+              <span>{{ quotaWindowText(window) }}</span>
+              <div v-if="window.used_percent !== undefined"><i class="bg-amber" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></i></div>
+              <small v-if="quotaResetText(window)">{{ quotaResetText(window) }}</small>
+            </div>
+            <p v-if="a.quota.message" class="account-quota-message">{{ a.quota.message }}</p>
+            <div class="account-quota-observed"><span>{{ observedUsageText(primaryObservedUsage(a.quota)) }}</span><span>{{ quotaCheckedAt(a.quota) }}</span></div>
           </template>
-          <p v-else>尚未查询 Codex 上游额度。</p>
-          <button type="button" :disabled="refreshingQuotaAccountID === a.id" @click="refreshCodexQuota(a)">{{ refreshingQuotaAccountID === a.id ? '查询中…' : '刷新 Codex 额度' }}</button>
+          <p v-else>等待后台自动同步额度与用量。</p>
+          <button type="button" :disabled="refreshingQuotaAccountID === a.id" @click="refreshAccountQuota(a)">{{ refreshingQuotaAccountID === a.id ? '刷新中…' : '刷新额度' }}</button>
         </section>
 
         <footer class="account-card-actions">
@@ -658,7 +702,7 @@ async function refreshCodexQuota(account: UpstreamAccount) {
             <th>Base URL</th>
             <th>代理</th>
             <th>优先级</th>
-			<th>Codex 账号额度</th>
+			<th>上游额度 / 用量</th>
             <th>可用度</th>
             <th>最后使用</th>
             <th class="text-right">操作</th>
@@ -685,17 +729,18 @@ async function refreshCodexQuota(account: UpstreamAccount) {
               <span :class="[a.proxy ? 'tag-cyan' : 'tag-gray', 'max-w-full truncate whitespace-nowrap align-middle']" :title="a.proxy?.name || '默认出口'">{{ a.proxy?.name || '默认出口' }}</span>
             </td>
             <td class="num">{{ a.priority }}</td>
-			<td class="min-w-48">
-				<template v-if="supportsCodexQuota(a)">
-					<div v-if="a.codex_quota" class="space-y-2">
-						<div v-if="a.codex_quota.has_primary_window"><div class="num text-xs text-slate-300">{{ quotaWindowText(a.codex_quota, 'primary') }}</div><div class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-amber transition-[width] duration-200" :style="{ width: `${quotaPercent(a.codex_quota.primary_used_percent)}%` }"></span></div></div>
-						<div v-if="a.codex_quota.has_secondary_window"><div class="num text-xs text-slate-300">{{ quotaWindowText(a.codex_quota, 'secondary') }}</div><div class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-signal-cyan transition-[width] duration-200" :style="{ width: `${quotaPercent(a.codex_quota.secondary_used_percent)}%` }"></span></div></div>
-						<div class="text-[11px] text-slate-500">{{ a.codex_quota.plan_type || 'Codex 订阅' }} · {{ new Date(a.codex_quota.fetched_at).toLocaleString() }}</div>
+			<td class="min-w-56">
+				<div v-if="a.quota" class="space-y-2">
+					<div class="flex items-center gap-2 whitespace-nowrap"><strong class="text-xs text-slate-200">{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
+					<div v-for="window in a.quota.windows || []" :key="window.key" class="min-w-52">
+						<div class="num whitespace-nowrap text-xs text-slate-300">{{ quotaWindowText(window) }}</div>
+						<div v-if="window.used_percent !== undefined" class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-amber transition-[width] duration-200" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></span></div>
 					</div>
-					<div v-else class="text-xs text-slate-500">尚未查询上游额度</div>
-					<button class="mt-2 text-xs text-amber hover:text-amber-light disabled:opacity-50" :disabled="refreshingQuotaAccountID === a.id" @click="refreshCodexQuota(a)">{{ refreshingQuotaAccountID === a.id ? '查询中…' : '刷新 Codex 额度' }}</button>
-				</template>
-				<span v-else class="text-xs text-slate-500">不适用</span>
+					<div class="whitespace-nowrap text-[11px] text-slate-500">{{ observedUsageText(primaryObservedUsage(a.quota)) }}</div>
+					<div class="whitespace-nowrap text-[11px] text-slate-500">{{ quotaCheckedAt(a.quota) }}</div>
+				</div>
+				<div v-else class="whitespace-nowrap text-xs text-slate-500">等待后台自动同步</div>
+				<button class="mt-2 whitespace-nowrap text-xs text-amber hover:text-amber-light disabled:opacity-50" :disabled="refreshingQuotaAccountID === a.id" @click="refreshAccountQuota(a)">{{ refreshingQuotaAccountID === a.id ? '刷新中…' : '刷新额度' }}</button>
 			</td>
             <td class="min-w-[8.5rem] whitespace-nowrap">
               <span :class="[availability(a).cls, 'whitespace-nowrap']">{{ availability(a).score }}% · {{ availability(a).label }}</span>
@@ -835,7 +880,29 @@ async function refreshCodexQuota(account: UpstreamAccount) {
 			<div v-if="diagnostic" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="diagnostic = null">
 				<div class="card max-h-[88vh] w-full max-w-lg overflow-y-auto p-6">
 					<div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ diagnostic.group?.name || '未分组' }}</p></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
-					<div class="grid gap-3 sm:grid-cols-2"><section class="rounded-lg border border-ink-700 bg-ink-850 p-3"><p class="text-xs text-slate-500">调度可用度</p><div class="mt-1 flex items-center gap-2"><strong class="num text-xl text-slate-100">{{ availability(diagnostic).score }}%</strong><span :class="availability(diagnostic).cls">{{ availability(diagnostic).label }}</span></div><p class="mt-2 text-xs leading-5 text-slate-500">{{ availability(diagnostic).reason }}</p></section><section class="rounded-lg border border-ink-700 bg-ink-850 p-3"><p class="text-xs text-slate-500">Codex 账号额度</p><template v-if="supportsCodexQuota(diagnostic) && diagnostic.codex_quota"><strong class="mt-1 block text-sm text-slate-100">{{ diagnostic.codex_quota.plan_type || 'Codex 订阅' }}</strong><p v-if="diagnostic.codex_quota.has_primary_window" class="mt-2 text-xs text-slate-300">{{ quotaWindowText(diagnostic.codex_quota, 'primary') }}</p><p v-if="diagnostic.codex_quota.has_primary_window" class="mt-1 text-xs text-slate-500">{{ quotaResetText(diagnostic.codex_quota, 'primary') }}</p><p v-if="diagnostic.codex_quota.has_secondary_window" class="mt-2 text-xs text-slate-300">{{ quotaWindowText(diagnostic.codex_quota, 'secondary') }}</p><p v-if="diagnostic.codex_quota.has_secondary_window" class="mt-1 text-xs text-slate-500">{{ quotaResetText(diagnostic.codex_quota, 'secondary') }}</p></template><p v-else-if="supportsCodexQuota(diagnostic)" class="mt-1 text-xs leading-5 text-slate-500">尚未查询。点击下方按钮后直接从 Codex 获取当前窗口。</p><p v-else class="mt-1 text-xs leading-5 text-slate-500">仅 OpenAI OAuth 账号可查询。</p><button v-if="supportsCodexQuota(diagnostic)" class="mt-3 text-xs text-amber hover:text-amber-light disabled:opacity-50" :disabled="refreshingQuotaAccountID === diagnostic.id" @click="refreshCodexQuota(diagnostic)">{{ refreshingQuotaAccountID === diagnostic.id ? '查询中…' : '刷新 Codex 额度' }}</button></section></div>
+					<div class="grid gap-3 sm:grid-cols-2">
+						<section class="rounded-lg border border-ink-700 bg-ink-850 p-3">
+							<p class="text-xs text-slate-500">调度可用度</p>
+							<div class="mt-1 flex items-center gap-2"><strong class="num text-xl text-slate-100">{{ availability(diagnostic).score }}%</strong><span :class="availability(diagnostic).cls">{{ availability(diagnostic).label }}</span></div>
+							<p class="mt-2 text-xs leading-5 text-slate-500">{{ availability(diagnostic).reason }}</p>
+						</section>
+						<section class="rounded-lg border border-ink-700 bg-ink-850 p-3">
+							<div class="flex items-center justify-between gap-2"><p class="text-xs text-slate-500">上游额度与用量</p><span :class="quotaState(diagnostic.quota).cls">{{ quotaState(diagnostic.quota).label }}</span></div>
+							<template v-if="diagnostic.quota">
+								<strong class="mt-2 block text-sm text-slate-100">{{ quotaSourceLabel(diagnostic.quota) }}</strong>
+								<div v-for="window in diagnostic.quota.windows || []" :key="window.key" class="mt-2">
+									<p class="text-xs text-slate-300">{{ quotaWindowText(window) }}</p>
+									<div v-if="window.used_percent !== undefined" class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-amber" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></span></div>
+									<p v-if="quotaResetText(window)" class="mt-1 text-xs text-slate-500">{{ quotaResetText(window) }}</p>
+								</div>
+								<p class="mt-2 text-xs text-slate-500">{{ observedUsageText(primaryObservedUsage(diagnostic.quota)) }}</p>
+								<p v-if="diagnostic.quota.last_credential_refresh" class="mt-1 text-xs text-slate-500">凭证已自动续期：{{ new Date(diagnostic.quota.last_credential_refresh).toLocaleString() }}</p>
+								<p v-if="diagnostic.quota.message" class="mt-2 text-xs leading-5 text-slate-500">{{ diagnostic.quota.message }}</p>
+							</template>
+							<p v-else class="mt-2 text-xs leading-5 text-slate-500">等待后台自动同步。</p>
+							<button class="mt-3 text-xs text-amber hover:text-amber-light disabled:opacity-50" :disabled="refreshingQuotaAccountID === diagnostic.id" @click="refreshAccountQuota(diagnostic)">{{ refreshingQuotaAccountID === diagnostic.id ? '刷新中…' : '刷新额度' }}</button>
+						</section>
+					</div>
 					<section class="mt-3 rounded-lg border border-ink-700 bg-ink-850 p-3"><p class="text-xs text-slate-500">账号状态</p><div class="mt-2 flex flex-wrap items-center gap-2"><span :class="healthState(diagnostic).cls">{{ healthState(diagnostic).label }}</span><span v-if="diagnostic.cooldown_until" class="text-xs text-slate-500">冷却至 {{ new Date(diagnostic.cooldown_until).toLocaleString() }}</span><span class="text-xs text-slate-500">最近使用：{{ diagnostic.last_used_at ? new Date(diagnostic.last_used_at).toLocaleString() : '从未' }}</span></div></section>
 					<section v-if="diagnostic.last_error" class="mt-3 rounded-lg border border-signal-red/25 bg-signal-red/5 p-3"><p class="text-xs font-semibold text-signal-red">最近错误</p><p class="mt-1 text-sm text-slate-200">{{ summarizeProviderError(diagnostic.last_error, 180) }}</p><details class="mt-3"><summary class="cursor-pointer text-xs text-slate-500">查看原始诊断信息</summary><pre class="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-ink-950 p-3 text-xs text-slate-300">{{ diagnostic.last_error }}</pre></details></section>
 					<p v-else class="mt-4 text-sm text-signal-green">暂无近期错误记录。</p>

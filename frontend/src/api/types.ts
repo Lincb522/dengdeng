@@ -236,9 +236,48 @@ export interface UpstreamAccount {
   last_used_at: string | null
   last_error: string
   created_at: string
-  group?: Group
+	group?: Group
 	proxy?: Proxy
+	quota?: AccountQuotaSnapshot
 	codex_quota?: CodexQuotaSnapshot
+}
+
+export interface AccountQuotaWindow {
+	key: string
+	label: string
+	used_percent?: number
+	limit?: number
+	remaining?: number
+	unit?: string
+	reset_at?: string | null
+}
+
+export interface AccountObservedUsage {
+	key: string
+	label: string
+	requests: number
+	input_tokens: number
+	output_tokens: number
+	cost_micro: number
+}
+
+// Unified allowance snapshot for every upstream account. Subscription OAuth
+// accounts expose provider windows; API keys always retain locally observed
+// request/token usage and any rate-limit headers returned by the provider.
+export interface AccountQuotaSnapshot {
+	id: number
+	upstream_account_id: number
+	platform: string
+	source: 'codex_subscription' | 'claude_subscription' | 'grok_billing' | 'rate_limit_headers' | 'local_observed' | string
+	state: 'ready' | 'partial' | 'local_only' | 'error'
+	plan_type: string
+	message: string
+	windows: AccountQuotaWindow[]
+	observed_usage: AccountObservedUsage[]
+	fetched_at?: string | null
+	last_attempt_at: string
+	last_credential_refresh?: string | null
+	updated_at: string
 }
 
 // The subscription windows reported by ChatGPT/Codex for an OAuth account.

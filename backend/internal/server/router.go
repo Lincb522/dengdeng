@@ -52,6 +52,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		panic(err)
 	}
 	oauthManager := oauth.NewManager(db, cfg.OAuth, oauthClient)
+	accountQuota := service.NewAccountQuotaService(db, cfg, oauthManager, oauthClient)
 	gw := gateway.New(db, scheduler, billing, rates, oauthManager, runtimeMetrics, providerClient)
 	gw.SetRuntimePolicy(runtimePolicy)
 
@@ -59,9 +60,12 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	userH := handler.NewUserHandler(db, cfg)
 	adminH := handler.NewAdminHandler(db, pricing, oauthManager, rates)
 	adminH.SetCodexQuotaHTTPClient(oauthClient)
+	adminH.SetAccountQuotaService(accountQuota)
 	accountMonitor := service.NewAccountMonitor(db, cfg)
 	accountMonitor.SetRuntimePolicy(runtimePolicy)
 	accountMonitor.SetAlertService(alertService)
+	accountMonitor.SetOAuthManager(oauthManager)
+	accountMonitor.SetQuotaService(accountQuota)
 	adminH.SetAccountMonitor(accountMonitor)
 	adminH.SetRuntimeMetrics(runtimeMetrics)
 	systemSettingsH := handler.NewSystemSettingsHandler(db, cfg)
@@ -140,6 +144,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/accounts", adminH.CreateAccount)
 			admin.POST("/accounts/import", adminH.ImportAccounts)
 			admin.PUT("/accounts/order", adminH.ReorderAccounts)
+			admin.POST("/accounts/:id/quota/refresh", adminH.RefreshAccountQuota)
 			admin.POST("/accounts/:id/codex-quota/refresh", adminH.RefreshCodexQuota)
 			admin.POST("/oauth/:platform/start", adminH.StartOAuthLogin)
 			admin.PUT("/accounts/:id", adminH.UpdateAccount)

@@ -12,6 +12,7 @@ import (
 
 	"dengdeng/internal/config"
 	"dengdeng/internal/model"
+	"dengdeng/internal/oauth"
 
 	"gorm.io/gorm"
 )
@@ -25,6 +26,8 @@ type AccountMonitor struct {
 	cfg     *config.Config
 	policy  *RuntimePolicyService
 	alerts  *AlertService
+	oauth   *oauth.Manager
+	quota   *AccountQuotaService
 	started sync.Once
 	running atomic.Bool
 }
@@ -38,6 +41,10 @@ func (m *AccountMonitor) SetRuntimePolicy(policy *RuntimePolicyService) {
 }
 
 func (m *AccountMonitor) SetAlertService(alerts *AlertService) { m.alerts = alerts }
+
+func (m *AccountMonitor) SetOAuthManager(manager *oauth.Manager) { m.oauth = manager }
+
+func (m *AccountMonitor) SetQuotaService(quota *AccountQuotaService) { m.quota = quota }
 
 func (m *AccountMonitor) runtimePolicy() GatewayRuntimePolicy {
 	if m != nil && m.policy != nil {
@@ -90,6 +97,9 @@ func (m *AccountMonitor) runAll(parent context.Context) {
 			defer group.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if m.quota != nil {
+				_, _ = m.quota.RefreshIfStale(parent, account.ID)
+			}
 			_, _ = m.Probe(parent, &account)
 		}()
 	}
@@ -117,9 +127,18 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 	probe := model.AccountProbe{AccountID: account.ID, State: "down", CheckedAt: checkedAt}
 	if account.AuthType == model.AuthOAuth {
 		probe.Mode = "transport"
-		if account.ExpiresAt != nil && !account.ExpiresAt.After(checkedAt) {
+		if m.oauth != nil {
+			refreshCtx, cancel := context.WithTimeout(parent, m.runtimePolicy().ProbeTimeout())
+			_, err := m.oauth.AccessToken(refreshCtx, account)
+			cancel()
+			if err != nil {
+				probe.State = "expired"
+				probe.ErrorMessage = "OAuth credential refresh failed; re-authorize this account"
+				return m.persistProbe(probe)
+			}
+		} else if account.ExpiresAt != nil && !account.ExpiresAt.After(checkedAt) {
 			probe.State = "expired"
-			probe.ErrorMessage = "OAuth access token expired; it will refresh on the next provider request"
+			probe.ErrorMessage = "OAuth access token expired"
 			return m.persistProbe(probe)
 		}
 	} else {
@@ -160,6 +179,9 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 	}
 	response.Body.Close()
 	probe.StatusCode = response.StatusCode
+	if m.quota != nil {
+		_ = m.quota.ObserveRateLimitHeaders(account, response.Header, checkedAt)
+	}
 	if account.AuthType == model.AuthOAuth {
 		if response.StatusCode < http.StatusInternalServerError {
 			probe.State = "healthy"

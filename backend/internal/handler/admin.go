@@ -27,6 +27,7 @@ type AdminHandler struct {
 	rates   *service.UserGroupRateResolver
 	oauth   *oauth.Manager
 	monitor *service.AccountMonitor
+	quota   *service.AccountQuotaService
 	runtime *service.RuntimeMetrics
 	// codexQuotaHTTPClient carries the deployment-wide outbound route. Account
 	// specific proxies still take precedence for individual quota lookups.
@@ -39,6 +40,10 @@ func NewAdminHandler(db *gorm.DB, pricing *service.PricingService, oauthManager 
 
 func (h *AdminHandler) SetAccountMonitor(monitor *service.AccountMonitor) {
 	h.monitor = monitor
+}
+
+func (h *AdminHandler) SetAccountQuotaService(quota *service.AccountQuotaService) {
+	h.quota = quota
 }
 
 func (h *AdminHandler) SetRuntimeMetrics(runtime *service.RuntimeMetrics) {
@@ -580,7 +585,7 @@ func (h *AdminHandler) ListAccounts(c *gin.Context) {
 			return
 		}
 		var accounts []model.UpstreamAccount
-		list := applyAccountListFilters(h.db.Model(&model.UpstreamAccount{}).Preload("Group").Preload("Proxy").Preload("CodexQuota"), query)
+		list := applyAccountListFilters(h.db.Model(&model.UpstreamAccount{}).Preload("Group").Preload("Proxy").Preload("Quota").Preload("CodexQuota"), query)
 		if err := applyAccountListOrder(list, query).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&accounts).Error; err != nil {
 			util.Fail(c, http.StatusInternalServerError, "query accounts failed")
 			return
@@ -590,7 +595,7 @@ func (h *AdminHandler) ListAccounts(c *gin.Context) {
 	}
 
 	var accounts []model.UpstreamAccount
-	q := h.db.Preload("Group").Preload("Proxy").Preload("CodexQuota")
+	q := h.db.Preload("Group").Preload("Proxy").Preload("Quota").Preload("CodexQuota")
 	if gid := c.Query("group_id"); gid != "" {
 		q = q.Where("group_id = ?", gid)
 	}
@@ -1110,6 +1115,8 @@ func (h *AdminHandler) DeleteAccount(c *gin.Context) {
 	var account model.UpstreamAccount
 	if err := h.db.First(&account, c.Param("id")).Error; err == nil {
 		h.db.Where("account_id = ?", account.ID).Delete(&model.AccountProbe{})
+		h.db.Where("upstream_account_id = ?", account.ID).Delete(&model.AccountQuotaSnapshot{})
+		h.db.Where("upstream_account_id = ?", account.ID).Delete(&model.CodexQuotaSnapshot{})
 		h.db.Delete(&account)
 	}
 	util.OK(c, gin.H{"deleted": true})

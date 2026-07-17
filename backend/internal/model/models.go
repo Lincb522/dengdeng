@@ -232,10 +232,62 @@ type UpstreamAccount struct {
 
 	Group *Group `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 	Proxy *Proxy `gorm:"foreignKey:ProxyID" json:"proxy,omitempty"`
+	// Quota is the normalized provider allowance plus DengDeng-observed usage.
+	// Every platform receives a snapshot. Providers with a subscription usage
+	// endpoint add real upstream windows; API-key providers that do not expose
+	// balance data still retain local 24h/7d/30d usage and rate-limit headers.
+	Quota *AccountQuotaSnapshot `gorm:"foreignKey:UpstreamAccountID;references:ID" json:"quota,omitempty"`
 	// CodexQuota is a cached snapshot returned by ChatGPT's Codex usage
 	// endpoint for an OpenAI OAuth account. It is intentionally separate from
 	// this service's billing ledger: provider subscription limits are not USD.
 	CodexQuota *CodexQuotaSnapshot `gorm:"foreignKey:UpstreamAccountID;references:ID" json:"codex_quota,omitempty"`
+}
+
+// AccountQuotaWindow is one provider-side allowance or rate-limit window.
+// Pointer values preserve the difference between a real zero and an omitted
+// field. Unit is normally "%", "requests", "tokens", or "USD".
+type AccountQuotaWindow struct {
+	Key         string     `json:"key"`
+	Label       string     `json:"label"`
+	UsedPercent *float64   `json:"used_percent,omitempty"`
+	Limit       *float64   `json:"limit,omitempty"`
+	Remaining   *float64   `json:"remaining,omitempty"`
+	Unit        string     `json:"unit,omitempty"`
+	ResetAt     *time.Time `json:"reset_at,omitempty"`
+}
+
+// AccountObservedUsage is usage recorded by DengDeng for an upstream account.
+// It is not presented as a provider balance; it remains available for every
+// provider, including static API keys whose vendor exposes no quota endpoint.
+type AccountObservedUsage struct {
+	Key          string `json:"key"`
+	Label        string `json:"label"`
+	Requests     int64  `json:"requests"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	CostMicro    int64  `json:"cost_micro"`
+}
+
+// AccountQuotaSnapshot is the latest unified quota view for any upstream
+// account. State is ready, partial, local_only, or error. FetchedAt tracks the
+// last successful provider result; LastAttemptAt advances on every automatic
+// or manual refresh so stale/error states are visible without discarding the
+// previous useful windows.
+type AccountQuotaSnapshot struct {
+	ID                    int64                  `gorm:"primaryKey" json:"id"`
+	UpstreamAccountID     int64                  `gorm:"not null;uniqueIndex" json:"upstream_account_id"`
+	Platform              string                 `gorm:"size:16;not null" json:"platform"`
+	Source                string                 `gorm:"size:32;not null" json:"source"`
+	State                 string                 `gorm:"size:16;not null;default:local_only" json:"state"`
+	PlanType              string                 `gorm:"size:64" json:"plan_type"`
+	Message               string                 `gorm:"size:512" json:"message"`
+	Windows               []AccountQuotaWindow   `gorm:"serializer:json;type:text" json:"windows"`
+	ObservedUsage         []AccountObservedUsage `gorm:"serializer:json;type:text" json:"observed_usage"`
+	FetchedAt             *time.Time             `gorm:"index" json:"fetched_at"`
+	LastAttemptAt         time.Time              `gorm:"not null;index" json:"last_attempt_at"`
+	LastCredentialRefresh *time.Time             `json:"last_credential_refresh,omitempty"`
+	CreatedAt             time.Time              `json:"created_at"`
+	UpdatedAt             time.Time              `json:"updated_at"`
 }
 
 // CodexQuotaSnapshot is the most recent, non-secret result from the Codex
