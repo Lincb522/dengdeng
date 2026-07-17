@@ -32,6 +32,7 @@
   --surface-muted: #fbf1e4;
   --ink: #30261e;
   --ink-soft: #746154;
+  --ink-faint: #8b7768;
   --line: #e8d9c6;
   --accent: #c98a20;
   --accent-soft: #f8e6bb;
@@ -46,7 +47,7 @@
 	--dd-ink-800: 52 46 39;
 	--dd-ink-700: 76 67 57;
 	--dd-ink-600: 111 98 84;
-	--dd-ink-500: 151 133 114;
+	--dd-ink-500: 190 174 159;
 	--dd-amber: 221 167 72;
 	--dd-amber-bright: 242 194 104;
 	--dd-amber-dim: 205 145 44;
@@ -55,10 +56,10 @@
 	--dd-signal-cyan: 110 184 214;
 	--dd-slate-100: 248 243 236;
 	--dd-slate-200: 235 226 216;
-	--dd-slate-300: 211 198 186;
-	--dd-slate-400: 181 163 148;
-	--dd-slate-500: 159 142 128;
-	--dd-slate-600: 130 115 103;
+	--dd-slate-300: 222 211 201;
+	--dd-slate-400: 209 196 184;
+	--dd-slate-500: 193 178 164;
+	--dd-slate-600: 174 159 145;
 	--dd-slate-700: 92 80 70;
 	--dd-slate-800: 59 51 44;
 	--dd-slate-900: 40 35 30;
@@ -67,7 +68,8 @@
 	--surface: #201d19;
 	--surface-muted: #2a251f;
 	--ink: #f8f3ec;
-	--ink-soft: #b5a394;
+	--ink-soft: #d0c2b5;
+	--ink-faint: #aa9888;
 	--line: #4c4339;
 	--accent: #dda748;
 	--accent-soft: #4a3820;
@@ -126,6 +128,127 @@ body {
 :root[data-theme='dark'] .workspace-main { border-color: rgba(76,67,57,.88); background: rgba(32,29,25,.78); }
 :root[data-theme='dark'] .metric-card { background: linear-gradient(145deg, rgba(42,37,31,.96), rgba(32,29,25,.92)); }
 :root[data-theme='dark'] .console-page-head { border-bottom-color: rgba(76,67,57,.74); }
+
+/* Keep every secondary label readable on dark surfaces. The warm hierarchy is
+   preserved, but no text role falls below the normal-text contrast target. */
+:root[data-theme='dark'] input::placeholder,
+:root[data-theme='dark'] textarea::placeholder { color: rgb(var(--dd-slate-500)); opacity: 1; }
+:root[data-theme='dark'] .btn:disabled,
+:root[data-theme='dark'] .accounts-sort-direction:disabled,
+:root[data-theme='dark'] .settings-document-editor__head button:disabled,
+:root[data-theme='dark'] .studio-generate:disabled { opacity: .62; }
+
+:root[data-theme='dark'] .login-field label,
+:root[data-theme='dark'] .legal-document__content,
+:root[data-theme='dark'] .settings-field,
+:root[data-theme='dark'] .proxy-guide,
+:root[data-theme='dark'] .proxy-endpoint,
+:root[data-theme='dark'] .ops-system-mini b { color: var(--ink); }
+
+:root[data-theme='dark'] .login-field input::placeholder,
+:root[data-theme='dark'] .login-code-button:disabled,
+:root[data-theme='dark'] .login-password-toggle,
+:root[data-theme='dark'] .ops-eyebrow,
+:root[data-theme='dark'] .ops-range-tabs button,
+:root[data-theme='dark'] .ops-updated,
+:root[data-theme='dark'] .ops-score-ring span,
+:root[data-theme='dark'] .ops-metric-label,
+:root[data-theme='dark'] .ops-pulse-metrics dt,
+:root[data-theme='dark'] .ops-realtime-metrics dt,
+:root[data-theme='dark'] .ops-token-mini dt,
+:root[data-theme='dark'] .ops-live-breakdown span,
+:root[data-theme='dark'] .ops-sample-note,
+:root[data-theme='dark'] .ops-rank-index,
+:root[data-theme='dark'] .model-plaza-eyebrow,
+:root[data-theme='dark'] .model-platform-tabs button,
+:root[data-theme='dark'] .model-platform-tabs b,
+:root[data-theme='dark'] .model-platform-label,
+:root[data-theme='dark'] .model-limits dt,
+:root[data-theme='dark'] .model-price-box span,
+:root[data-theme='dark'] .model-price-box em,
+:root[data-theme='dark'] .model-groups-label,
+:root[data-theme='dark'] .model-groups > div > span,
+:root[data-theme='dark'] .model-groups em,
+:root[data-theme='dark'] .key-setup-head p,
+:root[data-theme='dark'] .key-setup-tabs button,
+:root[data-theme='dark'] .key-setup-model-row label,
+:root[data-theme='dark'] .login-agreement-checkbox,
+:root[data-theme='dark'] .legal-document__date { color: var(--ink-soft); }
+
+:root[data-theme='dark'] .login-code-button,
+:root[data-theme='dark'] .ops-link,
+:root[data-theme='dark'] .model-capabilities span,
+:root[data-theme='dark'] .model-price-box strong,
+:root[data-theme='dark'] .model-card-action,
+:root[data-theme='dark'] .account-card-quota button,
+:root[data-theme='dark'] .key-setup-secret span,
+:root[data-theme='dark'] .key-setup-secret code,
+:root[data-theme='dark'] .key-setup-key-input,
+:root[data-theme='dark'] .key-setup-key-input::placeholder,
+:root[data-theme='dark'] .key-setup-effort,
+:root[data-theme='dark'] .login-agreement-checkbox a,
+:root[data-theme='dark'] .login-agreement-open,
+:root[data-theme='dark'] .agreement-document-link span:last-child,
+:root[data-theme='dark'] .legal-back { color: rgb(var(--dd-amber-bright)); }
+:root[data-theme='dark'] .ops-link:hover { color: var(--ink); }
+
+:root[data-theme='dark'] .ops-error-state,
+:root[data-theme='dark'] .ops-rank-row b,
+:root[data-theme='dark'] .key-setup-warning,
+:root[data-theme='dark'] .key-setup-status.is-error,
+:root[data-theme='dark'] .settings-status-list dd.is-warn,
+:root[data-theme='dark'] .settings-document-editor__head button.is-danger { color: rgb(var(--dd-signal-red)); }
+:root[data-theme='dark'] .ops-live-indicator,
+:root[data-theme='dark'] .model-groups > div > span.is-ready,
+:root[data-theme='dark'] .key-setup-status.is-ok,
+:root[data-theme='dark'] .settings-status-list dd.is-ok { color: rgb(var(--dd-signal-green)); }
+
+:root[data-theme='dark'] .ops-filterbar,
+:root[data-theme='dark'] .model-plaza-toolbar,
+:root[data-theme='dark'] .settings-nav { background: rgba(42,37,31,.82); }
+:root[data-theme='dark'] .ops-range-tabs,
+:root[data-theme='dark'] .model-platform-tabs,
+:root[data-theme='dark'] .key-setup-tabs,
+:root[data-theme='dark'] .settings-choice-group { background: var(--surface-muted); }
+:root[data-theme='dark'] .ops-pulse { background: rgba(32,29,25,.94); }
+:root[data-theme='dark'] .ops-health-score { background: linear-gradient(140deg, #32291f, #201d19); }
+:root[data-theme='dark'] .ops-score-ring { background: radial-gradient(closest-side, var(--surface) 77%, transparent 78% 100%), conic-gradient(var(--accent) var(--score), var(--line) 0); }
+:root[data-theme='dark'] .ops-account-table td,
+:root[data-theme='dark'] .ops-error-table td,
+:root[data-theme='dark'] .ops-model-table td,
+:root[data-theme='dark'] .ops-rate-table td { background: rgba(42,37,31,.36); }
+:root[data-theme='dark'] .model-card { border-color: var(--line); background: linear-gradient(145deg, rgba(42,37,31,.96), rgba(32,29,25,.9)); box-shadow: 0 4px 8px var(--shadow); }
+:root[data-theme='dark'] .model-card:hover { border-color: rgba(221,167,72,.58); box-shadow: 0 9px 18px var(--shadow); }
+:root[data-theme='dark'] .model-card.is-unavailable { opacity: .86; }
+:root[data-theme='dark'] .model-capabilities span,
+:root[data-theme='dark'] .key-setup-secret,
+:root[data-theme='dark'] .key-setup-ccswitch,
+:root[data-theme='dark'] .key-setup-empty { background: rgba(74,56,32,.68); }
+:root[data-theme='dark'] .key-setup-effort,
+:root[data-theme='dark'] .key-setup-subtabs button,
+:root[data-theme='dark'] .agreement-document-link,
+:root[data-theme='dark'] .settings-document-editor { background: var(--surface); }
+:root[data-theme='dark'] .key-setup-subtabs button.is-active,
+:root[data-theme='dark'] .settings-nav button.is-active { border-color: var(--accent); background: var(--accent-soft); color: #f5d59d; }
+:root[data-theme='dark'] .agreement-dialog__actions,
+:root[data-theme='dark'] .settings-section,
+:root[data-theme='dark'] .settings-section--quiet { background: rgba(32,29,25,.9); }
+:root[data-theme='dark'] .agreement-document-link:hover,
+:root[data-theme='dark'] .agreement-reject:hover,
+:root[data-theme='dark'] .settings-nav button:hover,
+:root[data-theme='dark'] .settings-document-editor__head button:hover:not(:disabled) { background: var(--surface-muted); }
+:root[data-theme='dark'] .legal-shell { background: var(--canvas); }
+:root[data-theme='dark'] .proxy-guide { background: rgba(74,56,32,.52); }
+:root[data-theme='dark'] .studio-empty-canvas > div,
+:root[data-theme='dark'] .studio-gallery > span { color: rgba(255,250,241,.82); }
+
+.chart-grid-line { stroke: var(--line); }
+.chart-area { fill: var(--accent-soft); }
+.chart-primary-line { stroke: var(--accent); }
+.chart-primary-point { fill: var(--surface); stroke: var(--accent); }
+.chart-error-point { fill: rgb(var(--dd-signal-red)); }
+.chart-bar { fill: rgb(var(--dd-amber)); }
+.chart-axis-label { fill: var(--ink-soft); }
 
 ::selection {
   background: rgba(201, 138, 32, 0.24);
@@ -603,7 +726,7 @@ body {
 .studio-keybar input::placeholder { color: var(--ink-soft); opacity: .78; }
 .studio-key-action { width: 2.15rem; height: 2.15rem; border-radius: .45rem; }
 .studio-key-action:hover { background: var(--surface-muted); color: var(--ink); }
-.studio-key-action.is-danger:hover { color: var(--dd-signal-red); }
+  .studio-key-action.is-danger:hover { color: rgb(var(--dd-signal-red)); }
 .studio-workspace { display: grid; grid-template-columns: minmax(18rem, .74fr) minmax(0, 1.26fr); min-height: min(43rem, calc(100vh - 11rem)); overflow: hidden; border: 1px solid var(--line); border-radius: .9rem; background: var(--surface); }
 .studio-composer { display: flex; min-width: 0; flex-direction: column; padding: clamp(1rem, 2.3vw, 1.65rem); border-right: 1px solid var(--line); }
 .studio-composer-head { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; margin-bottom: .95rem; }

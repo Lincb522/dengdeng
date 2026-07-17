@@ -29,18 +29,18 @@ const bars = computed(() => {
 </script>
 
 <template>
-  <div class="card p-5">
+  <div class="usage-chart card p-5">
     <div class="mb-4 flex items-baseline justify-between">
       <h3 class="text-sm font-semibold text-slate-200">近 14 天 Token 用量</h3>
       <span class="font-mono text-[10px] uppercase tracking-widest text-slate-500">tokens / day</span>
     </div>
     <svg :viewBox="`0 0 ${W} ${H}`" class="w-full">
-      <line v-for="i in 3" :key="i" :x1="PAD" :x2="W - PAD" :y1="((H - 24) / 4) * i" :y2="((H - 24) / 4) * i" stroke="#E8D9C6" stroke-width="1" />
+      <line v-for="i in 3" :key="i" class="chart-grid-line" :x1="PAD" :x2="W - PAD" :y1="((H - 24) / 4) * i" :y2="((H - 24) / 4) * i" stroke-width="1" />
       <g v-for="(b, i) in bars" :key="i">
-        <rect :x="b.x" :y="b.y" :width="b.w" :height="b.h" rx="3" fill="#C98A20" opacity="0.88">
+        <rect class="chart-bar" :x="b.x" :y="b.y" :width="b.w" :height="b.h" rx="3" opacity="0.88">
           <title>{{ b.row.day }}: {{ formatTokens(b.row.tokens) }} tokens / {{ b.row.requests }} 次 / {{ formatMoney(b.row.cost_micro) }}</title>
         </rect>
-        <text :x="b.x + b.w / 2" :y="H - 8" text-anchor="middle" fill="#8A776A" font-size="10" font-family="monospace">
+        <text class="chart-axis-label" :x="b.x + b.w / 2" :y="H - 8" text-anchor="middle" font-size="10" font-family="monospace">
           {{ b.row.day.slice(3) }}
         </text>
       </g>

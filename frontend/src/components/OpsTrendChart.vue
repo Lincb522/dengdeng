@@ -56,19 +56,19 @@ const visibleLabels = computed(() => {
     </div>
     <div v-if="!points.length" class="flex h-[230px] items-center justify-center text-sm text-slate-500">这个时间段还没有调用记录</div>
     <svg v-else :viewBox="`0 0 ${W} ${H}`" class="w-full overflow-visible" role="img" aria-label="请求和错误趋势图">
-      <line v-for="n in 4" :key="n" :x1="PAD.left" :x2="W - PAD.right" :y1="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" :y2="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" stroke="#E8D9C6" stroke-width="1" />
-      <polygon :points="requestArea" fill="#F8E6BB" opacity=".65" />
-      <polyline :points="requestLine" fill="none" stroke="#C98A20" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" />
+      <line v-for="n in 4" :key="n" class="chart-grid-line" :x1="PAD.left" :x2="W - PAD.right" :y1="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" :y2="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" stroke-width="1" />
+      <polygon class="chart-area" :points="requestArea" opacity=".65" />
+      <polyline class="chart-primary-line" :points="requestLine" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" />
       <g v-for="(point, index) in points" :key="point.start">
-        <circle :cx="point.x" :cy="point.requestY" r="3.5" fill="#FFFDF8" stroke="#C98A20" stroke-width="2">
+        <circle class="chart-primary-point" :cx="point.x" :cy="point.requestY" r="3.5" stroke-width="2">
           <title>{{ point.label }} · {{ point.requests }} 请求 · {{ point.error_requests }} 失败 · {{ formatTokens(point.tokens) }} Token</title>
         </circle>
-        <circle v-if="point.error_requests" :cx="point.x" :cy="point.errorY" r="3" fill="#B75050">
+        <circle v-if="point.error_requests" class="chart-error-point" :cx="point.x" :cy="point.errorY" r="3">
           <title>{{ point.label }} · {{ point.error_requests }} 个失败请求</title>
         </circle>
-        <line v-if="index === points.length - 1" :x1="point.x" :x2="point.x" :y1="PAD.top" :y2="H - PAD.bottom" stroke="#C98A20" stroke-dasharray="3 4" opacity=".28" />
+        <line v-if="index === points.length - 1" class="chart-primary-line" :x1="point.x" :x2="point.x" :y1="PAD.top" :y2="H - PAD.bottom" stroke-dasharray="3 4" opacity=".28" />
       </g>
-      <text v-for="point in visibleLabels" :key="`label-${point.start}`" :x="point.x" :y="H - 10" text-anchor="middle" fill="#8A776A" font-size="10" font-family="ui-monospace, monospace">{{ point.label }}</text>
+      <text v-for="point in visibleLabels" :key="`label-${point.start}`" class="chart-axis-label" :x="point.x" :y="H - 10" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace">{{ point.label }}</text>
     </svg>
   </div>
 </template>
