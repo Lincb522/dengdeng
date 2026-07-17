@@ -21,6 +21,7 @@ const createdKey = ref<ApiKey | null>(null)
 const setupKey = ref<ApiKey | null>(null)
 const setupPlain = ref('')
 const showSetup = ref(false)
+const copiedKeyID = ref<number | null>(null)
 const settingKey = ref<ApiKey | null>(null)
 const settingsForm = ref({ name: '', group_id: 0, reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
@@ -29,6 +30,7 @@ const reasoningOptions = REASONING_OPTIONS
 function groupPlatform(groupID: number | null | undefined) {
   return groups.value.find((group) => group.id === groupID)?.platform || ''
 }
+
 function quickSetupStorageKey(keyID: number) {
   return `dengdeng.quick-setup.key.${keyID}`
 }
@@ -50,6 +52,31 @@ function rememberedQuickSetupKey(key: ApiKey) {
     return sessionStorage.getItem(quickSetupStorageKey(key.id)) || ''
   } catch {
     return ''
+  }
+}
+
+function plainForKey(key: ApiKey) {
+  if (createdKey.value?.id === key.id && createdPlain.value) return createdPlain.value
+  if (setupKey.value?.id === key.id && setupPlain.value) return setupPlain.value
+  return rememberedQuickSetupKey(key)
+}
+
+async function copyKey(key: ApiKey) {
+  const plain = plainForKey(key)
+  if (!plain) {
+    openQuickSetup(key)
+    toast.show('旧密钥没有可读取的明文，请先补入原密钥', 'error')
+    return
+  }
+  try {
+    await copyText(plain)
+    copiedKeyID.value = key.id
+    toast.show('密钥已复制', 'success')
+    window.setTimeout(() => {
+      if (copiedKeyID.value === key.id) copiedKeyID.value = null
+    }, 1600)
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '复制失败', 'error')
   }
 }
 
@@ -166,6 +193,11 @@ function openQuickSetup(key: ApiKey) {
 	showSetup.value = true
 }
 
+function closeQuickSetup() {
+  showSetup.value = false
+  if (setupKey.value) setupPlain.value = rememberedQuickSetupKey(setupKey.value)
+}
+
 function requestRotateForSetup() {
 	const key = setupKey.value
 	if (!key) return
@@ -202,6 +234,7 @@ function closeCreate() {
 	createdKey.value = null
 }
 
+// 在快速配置弹窗里改了默认思考强度后，同步列表数据（不打断弹窗）。
 function onSetupEffortUpdated(value: string) {
   if (setupKey.value) setupKey.value = { ...setupKey.value, reasoning_effort: value }
   void load()
@@ -234,7 +267,18 @@ function onSetupEffortUpdated(value: string) {
         <tbody>
           <tr v-for="k in keys" :key="k.id">
             <td class="font-medium text-slate-200">{{ k.name }}</td>
-            <td class="num text-xs text-slate-400">{{ k.key_preview }}</td>
+            <td>
+              <div class="flex items-center gap-2 whitespace-nowrap">
+                <code class="num text-xs text-slate-400">{{ k.key_preview }}</code>
+                <button
+                  class="btn-ghost !min-h-0 !px-2 !py-1 text-[11px]"
+                  :title="plainForKey(k) ? '复制完整密钥' : '补入原密钥后即可复制'"
+                  @click="copyKey(k)"
+                >
+                  {{ plainForKey(k) ? (copiedKeyID === k.id ? '已复制' : '复制') : '补入' }}
+                </button>
+              </div>
+            </td>
             <td>
               <span class="tag-gray">{{ k.group?.name }}</span>
               <span class="ml-1.5 text-xs text-slate-500">{{ PLATFORM_LABELS[k.group?.platform || ''] }}</span>
@@ -339,14 +383,14 @@ function onSetupEffortUpdated(value: string) {
 			</div>
 		</Teleport>
 
-		<KeyQuickSetupModal
-			:show="showSetup"
+    <KeyQuickSetupModal
+      :show="showSetup"
 			:api-key="setupPlain"
 			:key-id="setupKey?.id || null"
 			:key-name="setupKey?.name || ''"
 			:platform="setupKey?.group?.platform || 'openai'"
 			:reasoning-effort="setupKey?.reasoning_effort || 'auto'"
-			@close="showSetup = false"
+      @close="closeQuickSetup"
 			@rotate="requestRotateForSetup"
 			@effort-updated="onSetupEffortUpdated"
 		/>
