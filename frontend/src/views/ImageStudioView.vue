@@ -141,6 +141,7 @@ watch(apiKey, persistSessionKey)
     <header class="studio-topbar">
       <RouterLink to="/studio" class="studio-brand" aria-label="DengDeng 图像创作">
         <img src="/brand/dengdeng-avatar.png" alt="" />
+        <span>图像创作</span>
       </RouterLink>
       <RouterLink to="/login" class="studio-icon-button" aria-label="登录管理" title="登录管理">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
@@ -151,39 +152,56 @@ watch(apiKey, persistSessionKey)
       <h1 class="sr-only">DengDeng 图像创作</h1>
 
       <section class="studio-keybar" aria-label="API 密钥">
-        <span class="studio-key-glyph" aria-hidden="true">
-          <svg viewBox="0 0 24 24"><path d="M14.5 9.5a4.5 4.5 0 1 0-4.1 5.1L13 12h2l1.5-1.5H19v-2h-2.5L15 10z" /></svg>
-        </span>
-        <input v-model="apiKey" :type="revealKey ? 'text' : 'password'" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="dd-…" aria-label="DengDeng API 密钥" />
-        <button type="button" class="studio-key-action" :aria-label="revealKey ? '隐藏密钥' : '显示密钥'" :title="revealKey ? '隐藏密钥' : '显示密钥'" @click="revealKey = !revealKey">
-          <svg v-if="revealKey" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 5.2A10.6 10.6 0 0 1 12 5c5.3 0 9 4.4 9 7s-1.3 3.6-3.1 5M6.2 6.2C4.2 7.6 3 9.8 3 12c0 2.6 3.7 7 9 7 1.2 0 2.3-.2 3.3-.6" /></svg>
-          <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.2-7 9-7 9 7 9 7-3.2 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="2.5" /></svg>
-        </button>
-        <button v-if="apiKey" type="button" class="studio-key-action is-danger" aria-label="清除密钥" title="清除密钥" @click="clearKey">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-        </button>
+        <div class="studio-key-copy">
+          <strong>API 密钥</strong>
+          <span>仅保存在本次浏览器会话</span>
+        </div>
+        <div class="studio-key-entry">
+          <span class="studio-key-glyph" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M14.5 9.5a4.5 4.5 0 1 0-4.1 5.1L13 12h2l1.5-1.5H19v-2h-2.5L15 10z" /></svg>
+          </span>
+          <input v-model="apiKey" :type="revealKey ? 'text' : 'password'" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="dd-…" aria-label="DengDeng API 密钥" />
+          <button type="button" class="studio-key-action" :aria-label="revealKey ? '隐藏密钥' : '显示密钥'" :title="revealKey ? '隐藏密钥' : '显示密钥'" @click="revealKey = !revealKey">
+            <svg v-if="revealKey" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 3 18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 5.2A10.6 10.6 0 0 1 12 5c5.3 0 9 4.4 9 7s-1.3 3.6-3.1 5M6.2 6.2C4.2 7.6 3 9.8 3 12c0 2.6 3.7 7 9 7 1.2 0 2.3-.2 3.3-.6" /></svg>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.2-7 9-7 9 7 9 7-3.2 7-9 7-9-7-9-7Z" /><circle cx="12" cy="12" r="2.5" /></svg>
+          </button>
+          <button v-if="apiKey" type="button" class="studio-key-action is-danger" aria-label="清除密钥" title="清除密钥" @click="clearKey">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
       </section>
 
       <section class="studio-workspace" aria-label="图像生成工作台">
         <div class="studio-composer">
-          <textarea v-model="prompt" rows="8" placeholder="描述画面" aria-label="提示词" @keydown.meta.enter.prevent="generate" @keydown.ctrl.enter.prevent="generate"></textarea>
+          <div class="studio-composer-head">
+            <h2>描述画面</h2>
+            <p>中文、英文均可</p>
+          </div>
+          <textarea v-model="prompt" rows="8" placeholder="输入你想生成的画面" aria-label="提示词" @keydown.meta.enter.prevent="generate" @keydown.ctrl.enter.prevent="generate"></textarea>
 
           <div class="studio-controls">
-            <div class="studio-size-options" role="group" aria-label="画幅">
-              <button v-for="option in sizeOptions" :key="option.id" type="button" :class="{ 'is-active': size === option.id }" :aria-label="option.label" :title="option.label" @click="size = option.id">
-                <i class="studio-size-glyph" :class="`is-${option.shape}`" aria-hidden="true"></i>
-              </button>
+            <div class="studio-control-set">
+              <span>画幅</span>
+              <div class="studio-size-options" role="group" aria-label="画幅">
+                <button v-for="option in sizeOptions" :key="option.id" type="button" :class="{ 'is-active': size === option.id }" :aria-label="option.label" :title="option.label" @click="size = option.id">
+                  <i class="studio-size-glyph" :class="`is-${option.shape}`" aria-hidden="true"></i>
+                </button>
+              </div>
             </div>
-            <div class="studio-quality-options" role="group" aria-label="生成质量">
-              <button v-for="option in qualityOptions" :key="option.id" type="button" :class="{ 'is-active': quality === option.id }" :aria-label="`${option.label}质量`" @click="quality = option.id">{{ option.label }}</button>
+            <div class="studio-control-set">
+              <span>清晰度</span>
+              <div class="studio-quality-options" role="group" aria-label="生成质量">
+                <button v-for="option in qualityOptions" :key="option.id" type="button" :class="{ 'is-active': quality === option.id }" :aria-label="`${option.label}质量`" @click="quality = option.id">{{ option.label }}</button>
+              </div>
             </div>
           </div>
 
           <div class="studio-submit-row">
             <p v-if="error" class="studio-error" role="alert">{{ error }}</p>
+            <p v-else class="studio-generate-hint">填写密钥与画面描述后生成</p>
             <button type="button" class="studio-generate" :disabled="!canGenerate" @click="generate">
               <span v-if="generating" class="studio-button-loader" aria-hidden="true"></span>
-              {{ generating ? '生成中' : '生成' }}
+              {{ generating ? '正在生成' : '生成图像' }}
             </button>
           </div>
         </div>
@@ -195,9 +213,15 @@ watch(apiKey, persistSessionKey)
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 20h14" /></svg>
             </button>
           </div>
-          <div v-else class="studio-empty-canvas" aria-hidden="true"><span></span></div>
+          <div v-else class="studio-empty-canvas">
+            <div>
+              <span aria-hidden="true"></span>
+              <p>{{ generating ? '正在生成图像' : '生成结果会显示在这里' }}</p>
+            </div>
+          </div>
 
           <div v-if="gallery.length > 1" class="studio-gallery" aria-label="本次会话作品">
+            <span>最近生成</span>
             <button v-for="item in gallery" :key="item.id" type="button" :class="{ 'is-selected': item.id === selectedImage?.id }" :aria-label="item.prompt" @click="selectedImageID = item.id"><img :src="item.src" alt="" /></button>
           </div>
         </div>
