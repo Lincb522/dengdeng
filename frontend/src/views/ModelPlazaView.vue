@@ -30,8 +30,11 @@ function pricing(value: number | undefined) {
   return `$${value.toFixed(value >= 1 ? 2 : 3)}`
 }
 
-function formatLimit(value: number) {
-  if (!value) return '未录入'
+function formatLimit(value: number, item: ModelCatalogueItem, field: 'context' | 'output') {
+  if (!value) {
+    if (item.kind === 'image') return field === 'context' ? '专用接口' : '按图像规格'
+    return '未公开'
+  }
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value % 1_000_000 ? 1 : 0)}M`
   if (value >= 1000) return `${(value / 1000).toFixed(value % 1000 ? 1 : 0)}K`
   return value.toLocaleString()
@@ -99,7 +102,7 @@ onMounted(load)
         </div>
         <p class="model-description">{{ item.description || '尚未添加模型说明。' }}</p>
         <div class="model-capabilities"><span v-for="capability in capabilities(item)" :key="capability">{{ capability }}</span><span v-if="!capabilities(item).length">通用对话</span></div>
-        <dl class="model-limits"><div><dt>上下文</dt><dd>{{ formatLimit(item.context_window) }}</dd></div><div><dt>最大输出</dt><dd>{{ formatLimit(item.max_output_tokens) }}</dd></div><div><dt>接口</dt><dd>{{ item.kind === 'image' ? 'Images' : 'Chat' }}</dd></div></dl>
+        <dl class="model-limits"><div><dt>上下文</dt><dd>{{ formatLimit(item.context_window, item, 'context') }}</dd></div><div><dt>最大输出</dt><dd>{{ formatLimit(item.max_output_tokens, item, 'output') }}</dd></div><div><dt>接口</dt><dd>{{ item.kind === 'image' ? 'Images' : 'Chat' }}</dd></div></dl>
         <div class="model-price-box">
           <template v-if="item.kind === 'image' && item.pricing?.image_price_per_image"><span>参考单价</span><strong>{{ pricing(item.pricing.image_price_per_image) }}<em>/ 张</em></strong></template>
           <template v-else><span>每百万 Token · 输入 / 输出</span><strong>{{ pricing(item.pricing?.input_price) }} <em>/</em> {{ pricing(item.pricing?.output_price) }}</strong></template>

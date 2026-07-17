@@ -212,39 +212,73 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 			}
 		}
 	}
-	configs := []model.ModelConfig{
-		{Name: "gpt-5.6", Platform: model.PlatformOpenAI, Kind: "chat", UpstreamModel: "gpt-5.6-sol", Description: "OpenAI 默认旗舰推理模型"},
-		{Name: "gpt-5.6-sol", Platform: model.PlatformOpenAI, Kind: "chat", Description: "OpenAI 旗舰推理与编码模型"},
-		{Name: "gpt-5.6-terra", Platform: model.PlatformOpenAI, Kind: "chat", Description: "OpenAI 均衡型模型"},
-		{Name: "gpt-5.6-luna", Platform: model.PlatformOpenAI, Kind: "chat", Description: "OpenAI 高吞吐低成本模型"},
-		{Name: "gpt-5.5", Platform: model.PlatformOpenAI, Kind: "chat", Description: "OpenAI 当前专业推理模型"},
-		{Name: "gpt-5.5-pro", Platform: model.PlatformOpenAI, Kind: "chat", Description: "OpenAI 高精度专业模型"},
+	if err := seedDefaultModelConfigs(db); err != nil {
+		return err
+	}
+	return nil
+}
+
+// defaultModelConfigs is the public catalogue shipped with DengDeng. Token
+// limits follow the providers' synchronous APIs. A zero max-output value is
+// intentional when the provider publishes no fixed text-token ceiling (for
+// example, pure image output or current xAI models).
+func defaultModelConfigs() []model.ModelConfig {
+	return []model.ModelConfig{
+		{Name: "gpt-5.6", Platform: model.PlatformOpenAI, Kind: "chat", UpstreamModel: "gpt-5.6-sol", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 默认旗舰推理模型"},
+		{Name: "gpt-5.6-sol", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 旗舰推理与编码模型"},
+		{Name: "gpt-5.6-terra", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 均衡型模型"},
+		{Name: "gpt-5.6-luna", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 高吞吐低成本模型"},
+		{Name: "gpt-5.5", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 当前专业推理模型"},
+		{Name: "gpt-5.5-pro", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 高精度专业模型"},
 		{Name: "gpt-image-2", Platform: model.PlatformOpenAI, Kind: "image", Description: "OpenAI 最新图像生成与编辑模型"},
-		{Name: "claude-fable-5", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude 最新旗舰智能体模型"},
-		{Name: "claude-opus-4-8", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Opus 4.8，高级推理与代码"},
-		{Name: "claude-opus-4-7", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Opus 4.7，高级推理与代码"},
-		{Name: "claude-opus-4-6", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Opus 4.6，高级推理与代码"},
-		{Name: "claude-opus-4-5-20251101", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Opus 4.5 固定版本"},
-		{Name: "claude-sonnet-5", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Sonnet 5，速度与能力均衡"},
-		{Name: "claude-sonnet-4-6", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Sonnet 4.6"},
-		{Name: "claude-sonnet-4-5-20250929", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Sonnet 4.5 固定版本"},
-		{Name: "claude-haiku-4-5-20251001", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Haiku 4.5，高吞吐低成本"},
+		{Name: "claude-fable-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude 最新旗舰智能体模型"},
+		{Name: "claude-opus-4-8", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.8，高级推理与代码"},
+		{Name: "claude-opus-4-7", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.7，高级推理与代码"},
+		{Name: "claude-opus-4-6", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.6，高级推理与代码"},
+		{Name: "claude-opus-4-5-20251101", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 64_000, Description: "Claude Opus 4.5 固定版本"},
+		{Name: "claude-sonnet-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Sonnet 5，速度与能力均衡"},
+		{Name: "claude-sonnet-4-6", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 64_000, Description: "Claude Sonnet 4.6"},
+		{Name: "claude-sonnet-4-5-20250929", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 64_000, Description: "Claude Sonnet 4.5 固定版本"},
+		{Name: "claude-haiku-4-5-20251001", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 64_000, Description: "Claude Haiku 4.5，高吞吐低成本"},
 		// These models require explicit Anthropic approval. Keeping them disabled
 		// makes the catalogue complete without sending ordinary traffic to a
 		// model the account cannot access.
-		{Name: "claude-mythos-5", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Mythos 5，受邀可用", Status: model.StatusDisabled},
-		{Name: "claude-mythos-preview", Platform: model.PlatformAnthropic, Kind: "chat", Description: "Claude Mythos Preview，受邀预览", Status: model.StatusDisabled},
-		{Name: "gemini-2.5-flash-image", Platform: model.PlatformGemini, Kind: "image", Description: "Gemini Nano Banana 图像模型"},
-		{Name: "gemini-3-pro-image", Platform: model.PlatformGemini, Kind: "image", Description: "Gemini 高质量图像模型"},
-		{Name: "grok-4.5", Platform: model.PlatformGrok, Kind: "chat", Description: "xAI Grok 4.5 旗舰模型"},
-		{Name: "grok-4.3", Platform: model.PlatformGrok, Kind: "chat", Description: "xAI Grok 4.3"},
-		{Name: "grok-composer-2.5-fast", Platform: model.PlatformGrok, Kind: "chat", Description: "xAI Grok 高速编码模型"},
-		{Name: "grok-imagine-image", Platform: model.PlatformGrok, Kind: "image", Description: "xAI Grok 图像生成模型"},
+		{Name: "claude-mythos-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Mythos 5，受邀可用", Status: model.StatusDisabled},
+		{Name: "claude-mythos-preview", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Mythos Preview，受邀预览", Status: model.StatusDisabled},
+		{Name: "gemini-2.5-flash-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, Description: "Gemini Nano Banana 图像模型"},
+		{Name: "gemini-3-pro-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, Description: "Gemini 高质量图像模型"},
+		{Name: "grok-4.5", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 500_000, Description: "xAI Grok 4.5 旗舰模型"},
+		{Name: "grok-4.3", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 1_000_000, Description: "xAI Grok 4.3"},
+		// grok-composer-2.5-fast is the public relay alias for grok-build-0.1.
+		{Name: "grok-composer-2.5-fast", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 256_000, Description: "xAI Grok 高速编码模型"},
+		{Name: "grok-imagine-image", Platform: model.PlatformGrok, Kind: "image", ContextWindow: 1_024, Description: "xAI Grok 图像生成模型"},
 	}
-	for _, cfg := range configs {
+}
+
+// seedDefaultModelConfigs adds newly shipped models and fills only missing
+// limits on existing rows. Operator-entered non-zero limits remain untouched.
+func seedDefaultModelConfigs(db *gorm.DB) error {
+	for _, cfg := range defaultModelConfigs() {
 		var existing model.ModelConfig
-		if err := db.Where("name = ?", cfg.Name).First(&existing).Error; err == gorm.ErrRecordNotFound {
+		err := db.Where("name = ?", cfg.Name).First(&existing).Error
+		if err == gorm.ErrRecordNotFound {
 			if err := db.Create(&cfg).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		updates := map[string]any{}
+		if existing.ContextWindow == 0 && cfg.ContextWindow > 0 {
+			updates["context_window"] = cfg.ContextWindow
+		}
+		if existing.MaxOutputTokens == 0 && cfg.MaxOutputTokens > 0 {
+			updates["max_output_tokens"] = cfg.MaxOutputTokens
+		}
+		if len(updates) > 0 {
+			if err := db.Model(&existing).Updates(updates).Error; err != nil {
 				return err
 			}
 		}
