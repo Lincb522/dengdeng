@@ -47,7 +47,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	if err := db.AutoMigrate(
-		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.CodexQuotaSnapshot{},
+		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
 		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.BackupRecord{},
@@ -73,6 +73,11 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		Where("reasoning_effort IS NULL OR reasoning_effort = ''").
 		Update("reasoning_effort", "auto").Error; err != nil {
 		return nil, fmt.Errorf("backfill key reasoning effort: %w", err)
+	}
+	if err := db.Model(&model.APIKey{}).
+		Where("reasoning_effort IN ?", []string{"fast", "minimal"}).
+		Update("reasoning_effort", "low").Error; err != nil {
+		return nil, fmt.Errorf("migrate legacy reasoning effort: %w", err)
 	}
 	if err := normalizeSQLiteUsageTimes(db, cfg); err != nil {
 		return nil, fmt.Errorf("normalize usage timestamps: %w", err)

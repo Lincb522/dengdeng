@@ -2,6 +2,7 @@
 import type { UsageLog } from '../api/types'
 import { formatMoney, formatTokens } from '../api/types'
 import { copyText } from '../api/client'
+import { reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 
 defineProps<{ items: UsageLog[]; showUser?: boolean }>()
@@ -48,6 +49,7 @@ async function copyRequestID(id: string) {
           <td>
             <span class="font-mono text-xs text-slate-200">{{ l.model || '-' }}</span>
             <span v-if="l.stream" class="ml-1 text-[10px] text-signal-cyan">SSE</span>
+            <div v-if="l.reasoning_effort" class="mt-0.5 text-[10px] text-slate-500">思考强度 Reasoning Effort · {{ reasoningLabel(l.reasoning_effort) }}</div>
           </td>
           <td>
             <div class="text-xs text-slate-400">{{ l.group_name || '—' }}</div>

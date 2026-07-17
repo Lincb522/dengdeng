@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { copyText } from '../api/client'
+import { api, copyText } from '../api/client'
 import { localizedApiError, localizeErrorMessage } from '../api/errors'
+import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 
 type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch'
@@ -14,7 +15,7 @@ interface SetupFile {
 }
 
 const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; platform: string; reasoningEffort: string }>()
-const emit = defineEmits<{ close: []; rotate: [] }>()
+const emit = defineEmits<{ close: []; rotate: []; 'effort-updated': [value: string] }>()
 const toast = useToast()
 
 const activeClient = ref<ClientID>('codex')
@@ -25,18 +26,33 @@ const selectedModel = ref('')
 const modelsState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const modelsError = ref('')
 const workingApiKey = ref('')
+const reasoningEffort = ref('auto')
+const savingEffort = ref(false)
 
 const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
 const geminiBase = computed(() => `${origin.value}/v1beta`)
 const configuredApiKey = computed(() => workingApiKey.value.trim())
-const reasoningLabel = computed(() => {
-  const labels: Record<string, string> = {
-    auto: '自动（沿用客户端）', fast: '快速（低思考）', none: '不推理（速度优先）',
-    minimal: '最低', low: '低', medium: '均衡', high: '高', xhigh: '很高', max: '最大',
+async function changeReasoningEffort(event: Event) {
+  const value = (event.target as HTMLSelectElement).value
+  const previous = reasoningEffort.value
+  if (!props.keyId || value === previous) {
+    reasoningEffort.value = value
+    return
   }
-  return labels[props.reasoningEffort] || labels.auto
-})
+  reasoningEffort.value = value
+  savingEffort.value = true
+  try {
+    await api.put(`/api/user/keys/${props.keyId}`, { reasoning_effort: value })
+    toast.show('思考强度已更新', 'success')
+    emit('effort-updated', value)
+  } catch (error) {
+    reasoningEffort.value = previous
+    toast.show(error instanceof Error ? localizeErrorMessage(error.message) : '保存失败', 'error')
+  } finally {
+    savingEffort.value = false
+  }
+}
 
 function quickSetupStorageKey() {
   return props.keyId ? `dengdeng.quick-setup.key.${props.keyId}` : ''
@@ -133,10 +149,15 @@ watch([() => props.show, () => props.platform, () => props.apiKey, () => props.k
   selectedModel.value = ''
   modelsState.value = 'idle'
   modelsError.value = ''
+  reasoningEffort.value = normalizeReasoningEffort(props.reasoningEffort)
   if (!show) return
   workingApiKey.value = props.apiKey.trim() || readRememberedApiKey()
   if (configuredApiKey.value) void loadModels()
 }, { immediate: true })
+
+watch(() => props.reasoningEffort, (value) => {
+  reasoningEffort.value = normalizeReasoningEffort(value)
+})
 
 watch(workingApiKey, rememberApiKey)
 
@@ -189,9 +210,9 @@ function quotedModelEnv(name: string) {
 }
 
 function codexConfigToml(model: string) {
-  const reasoningEffort = props.reasoningEffort === 'fast' ? 'low' : props.reasoningEffort
-  const reasoningLine = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(reasoningEffort)
-    ? `\nmodel_reasoning_effort = "${reasoningEffort}"`
+  const effort = reasoningEffort.value
+  const reasoningLine = OFFICIAL_REASONING_EFFORTS.includes(effort as (typeof OFFICIAL_REASONING_EFFORTS)[number])
+    ? `\nmodel_reasoning_effort = "${effort}"`
     : ''
   return `model_provider = "dengdeng"
 model = "${model}"
@@ -359,7 +380,7 @@ function openCCSwitch() {
         <div class="key-setup-summary">
           <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
           <div class="key-setup-secret"><span>接口地址</span><code>{{ apiBase }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(apiBase, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
-			<div v-if="platform === 'openai'" class="key-setup-secret"><span>默认思考</span><code>{{ reasoningLabel }}</code></div>
+			<div v-if="platform === 'openai'" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
         </div>
 
         <div v-if="configuredApiKey" class="key-setup-model-row">

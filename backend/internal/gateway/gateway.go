@@ -291,6 +291,9 @@ type relayRequest struct {
 	Path     string // upstream path (incl. query for gemini)
 	Model    string // resolved model name for billing
 	Stream   bool
+	// Effort is the effective OpenAI reasoning effort (client field first,
+	// key default second, empty for the model default).
+	Effort string
 	// ResponseAdapter presents a different public wire protocol while Platform
 	// remains the real upstream protocol used for routing and accounting.
 	ResponseAdapter responseAdapter
@@ -301,6 +304,23 @@ type relayRequest struct {
 	// UpstreamGroupID is only accepted for image requests. It lets a public
 	// image model use an account pool that is separate from the API key group.
 	UpstreamGroupID int64
+}
+
+// effortRates layers the configured reasoning charge onto text and cache
+// rates. Image rates are intentionally untouched.
+func (g *Gateway) effortRates(rates service.RatePlan, effort string) service.RatePlan {
+	if effort == "" || g.policy == nil {
+		return rates
+	}
+	multiplier := g.policy.Current().EffortMultiplier(effort)
+	if multiplier == 1 {
+		return rates
+	}
+	rates.Base *= multiplier
+	rates.CacheRead *= multiplier
+	rates.CacheWrite5m *= multiplier
+	rates.CacheWrite1h *= multiplier
+	return rates
 }
 
 // relay runs the account failover loop and, on success, streams the response
@@ -411,8 +431,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				GroupID:     routeGroup.ID,
 				Model:       req.Model,
 				Stream:      streamed,
+				Effort:      req.Effort,
 				Usage:       usage,
-				Rates:       billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)),
+				Rates:       g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
 				DurationMs:  time.Since(start).Milliseconds(),
 				StatusCode:  resp.StatusCode,
 				SkipBalance: ak.AccessActive || ak.RequestReserved,
@@ -445,6 +466,7 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		GroupID:      group.ID,
 		Model:        req.Model,
 		Stream:       false,
+		Effort:       req.Effort,
 		Rates:        billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
 		DurationMs:   time.Since(started).Milliseconds(),
 		StatusCode:   status,

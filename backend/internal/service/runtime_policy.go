@@ -13,20 +13,37 @@ import (
 
 const runtimePolicyKey = "runtime.gateway_policy.v1"
 
+// OfficialReasoningEfforts follows GPT-5.6's documented reasoning.effort
+// values. "auto" is a DengDeng UI option and intentionally stays out of this
+// list because it means "do not inject a value; follow the client/model".
+var OfficialReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
+
+func DefaultReasoningEffortMultipliers() map[string]float64 {
+	return map[string]float64{
+		"none":   0.8,
+		"low":    0.9,
+		"medium": 1,
+		"high":   1.25,
+		"xhigh":  1.5,
+		"max":    2,
+	}
+}
+
 // GatewayRuntimePolicy contains the operational switches that genuinely
 // affect relay selection and low-cost account health checks. Values are kept
 // intentionally bounded: this is a resilience control plane, not a way to
 // change how the service identifies itself to an upstream provider.
 type GatewayRuntimePolicy struct {
-	MaxAttempts                    int `json:"max_attempts"`
-	UnauthorizedCooldownSeconds    int `json:"unauthorized_cooldown_seconds"`
-	RateLimitCooldownSeconds       int `json:"rate_limit_cooldown_seconds"`
-	UpstreamFailureCooldownSeconds int `json:"upstream_failure_cooldown_seconds"`
-	NetworkFailureCooldownSeconds  int `json:"network_failure_cooldown_seconds"`
-	ProbeIntervalSeconds           int `json:"probe_interval_seconds"`
-	ProbeTimeoutSeconds            int `json:"probe_timeout_seconds"`
-	ProbeRetentionDays             int `json:"probe_retention_days"`
-	ProbeConcurrency               int `json:"probe_concurrency"`
+	MaxAttempts                    int                `json:"max_attempts"`
+	UnauthorizedCooldownSeconds    int                `json:"unauthorized_cooldown_seconds"`
+	RateLimitCooldownSeconds       int                `json:"rate_limit_cooldown_seconds"`
+	UpstreamFailureCooldownSeconds int                `json:"upstream_failure_cooldown_seconds"`
+	NetworkFailureCooldownSeconds  int                `json:"network_failure_cooldown_seconds"`
+	ProbeIntervalSeconds           int                `json:"probe_interval_seconds"`
+	ProbeTimeoutSeconds            int                `json:"probe_timeout_seconds"`
+	ProbeRetentionDays             int                `json:"probe_retention_days"`
+	ProbeConcurrency               int                `json:"probe_concurrency"`
+	ReasoningEffortMultipliers     map[string]float64 `json:"reasoning_effort_multipliers"`
 }
 
 func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
@@ -40,7 +57,20 @@ func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
 		ProbeTimeoutSeconds:            12,
 		ProbeRetentionDays:             30,
 		ProbeConcurrency:               4,
+		ReasoningEffortMultipliers:     DefaultReasoningEffortMultipliers(),
 	}
+}
+
+// EffortMultiplier returns the commercial multiplier for the effective
+// effort. Unknown or model-default requests remain at face value.
+func (p GatewayRuntimePolicy) EffortMultiplier(effort string) float64 {
+	if effort == "" || p.ReasoningEffortMultipliers == nil {
+		return 1
+	}
+	if multiplier, ok := p.ReasoningEffortMultipliers[effort]; ok && multiplier > 0 {
+		return multiplier
+	}
+	return 1
 }
 
 func (p GatewayRuntimePolicy) CooldownFor(statusCode int) time.Duration {
@@ -115,6 +145,19 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 			return p, fmt.Errorf("%s must be between %d and %d", check.label, check.min, check.max)
 		}
 	}
+
+	normalizedMultipliers := DefaultReasoningEffortMultipliers()
+	for _, effort := range OfficialReasoningEfforts {
+		value, ok := p.ReasoningEffortMultipliers[effort]
+		if !ok || value == 0 {
+			continue
+		}
+		if value < 0.1 || value > 10 {
+			return p, fmt.Errorf("reasoning multiplier for %s must be between 0.1 and 10", effort)
+		}
+		normalizedMultipliers[effort] = value
+	}
+	p.ReasoningEffortMultipliers = normalizedMultipliers
 	return p, nil
 }
 

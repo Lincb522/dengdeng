@@ -15,6 +15,7 @@ const email = ref('')
 const password = ref('')
 const confirm = ref('')
 const verificationCode = ref('')
+const referralCode = ref(new URLSearchParams(window.location.search).get('ref') || '')
 const busy = ref(false)
 const sendingCode = ref(false)
 const resendAfter = ref(0)
@@ -112,7 +113,7 @@ async function submit() {
     if (mode.value === 'login') {
       await auth.login(email.value, password.value, agreement.value.revision)
     } else {
-      await auth.register(email.value, password.value, verificationCode.value.trim(), agreement.value.revision)
+      await auth.register(email.value, password.value, verificationCode.value.trim(), agreement.value.revision, referralCode.value.trim())
     }
     router.push('/dashboard')
   } catch (e) {
@@ -174,6 +175,11 @@ async function submit() {
           <div v-if="mode === 'register'" class="login-field">
             <label for="confirm-password">确认密码</label>
             <input id="confirm-password" v-model="confirm" type="password" placeholder="再输入一次" autocomplete="new-password" />
+          </div>
+
+          <div v-if="mode === 'register'" class="login-field">
+            <label for="referral-code">推广码（选填）</label>
+            <input id="referral-code" v-model="referralCode" type="text" placeholder="例如 DD-XXXXXXXXXX" autocomplete="off" maxlength="32" />
           </div>
 
           <button type="submit" class="login-submit" :disabled="busy || !canContinue">

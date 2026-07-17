@@ -149,6 +149,46 @@ type UserGroupRate struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+// ReferralCode belongs to one promoter. CommissionBps is constrained by the
+// handlers to 500–1000 (5%–10%). One promoter has one stable code so existing
+// links never silently change ownership.
+type ReferralCode struct {
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	Code          string    `gorm:"uniqueIndex;size:32;not null" json:"code"`
+	OwnerUserID   int64     `gorm:"uniqueIndex;not null" json:"owner_user_id"`
+	CommissionBps int       `gorm:"not null;default:500" json:"commission_bps"`
+	Status        string    `gorm:"size:16;not null;default:active" json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+
+	Owner *User `gorm:"foreignKey:OwnerUserID" json:"owner,omitempty"`
+}
+
+// ReferralBinding is immutable from the user's point of view. A unique
+// ReferredUserID prevents code switching after the account has started using
+// paid services.
+type ReferralBinding struct {
+	ID             int64     `gorm:"primaryKey" json:"id"`
+	ReferralCodeID int64     `gorm:"index;not null" json:"referral_code_id"`
+	ReferrerUserID int64     `gorm:"index;not null" json:"referrer_user_id"`
+	ReferredUserID int64     `gorm:"uniqueIndex;not null" json:"referred_user_id"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ReferralCommission is a usage-ledger sidecar. UsageLogID is unique, making
+// settlement idempotent even if a billing record is retried.
+type ReferralCommission struct {
+	ID             int64     `gorm:"primaryKey" json:"id"`
+	UsageLogID     int64     `gorm:"uniqueIndex;not null" json:"usage_log_id"`
+	ReferralCodeID int64     `gorm:"index;not null" json:"referral_code_id"`
+	ReferrerUserID int64     `gorm:"index;not null" json:"referrer_user_id"`
+	ReferredUserID int64     `gorm:"index;not null" json:"referred_user_id"`
+	BaseCostMicro  int64     `gorm:"not null" json:"base_cost_micro"`
+	CommissionBps  int       `gorm:"not null" json:"commission_bps"`
+	AmountMicro    int64     `gorm:"not null" json:"amount_micro"`
+	CreatedAt      time.Time `gorm:"index" json:"created_at"`
+}
+
 // UpstreamAccount is a credential for an upstream provider. It supports two
 // auth styles: a static API key, or an OAuth access/refresh token pair that is
 // renewed automatically. All secret fields are encrypted at rest.
@@ -380,13 +420,16 @@ type UsageLog struct {
 	// RequestID is the correlation identifier returned as X-Request-ID. It
 	// lets a user or operator locate one completed/failed relay call without
 	// exposing payloads, API keys or upstream credentials.
-	RequestID        string `gorm:"size:32;index" json:"request_id"`
-	UserID           int64  `gorm:"index" json:"user_id"`
-	APIKeyID         int64  `gorm:"index" json:"api_key_id"`
-	AccountID        int64  `gorm:"index" json:"account_id"`
-	GroupID          int64  `gorm:"index" json:"group_id"`
-	Model            string `gorm:"size:128" json:"model"`
-	Stream           bool   `json:"stream"`
+	RequestID string `gorm:"size:32;index" json:"request_id"`
+	UserID    int64  `gorm:"index" json:"user_id"`
+	APIKeyID  int64  `gorm:"index" json:"api_key_id"`
+	AccountID int64  `gorm:"index" json:"account_id"`
+	GroupID   int64  `gorm:"index" json:"group_id"`
+	Model     string `gorm:"size:128" json:"model"`
+	Stream    bool   `json:"stream"`
+	// ReasoningEffort is the effective outgoing OpenAI-wire value. Recording it
+	// keeps per-effort charges auditable after an administrator changes rates.
+	ReasoningEffort  string `gorm:"size:16" json:"reasoning_effort,omitempty"`
 	InputTokens      int64  `json:"input_tokens"`
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`

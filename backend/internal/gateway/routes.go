@@ -128,7 +128,7 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 	if !ok {
 		return
 	}
-	body = applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningChatCompletions)
+	body, effort := applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningChatCompletions)
 	stream := jsonBool(fields["stream"])
 	// Guarantee a usage chunk on streams so billing never misses tokens.
 	if stream {
@@ -144,6 +144,7 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 		Path:     "/v1/chat/completions",
 		Model:    modelName,
 		Stream:   stream,
+		Effort:   effort,
 		Body:     body,
 		Billable: true,
 	})
@@ -178,12 +179,13 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	body = applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningResponses)
+	body, effort := applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningResponses)
 	g.relay(c, ak, relayRequest{
 		Platform: platform,
 		Path:     "/v1/responses",
 		Model:    modelName,
 		Stream:   jsonBool(fields["stream"]),
+		Effort:   effort,
 		Body:     body,
 		Billable: true,
 	})
@@ -205,7 +207,7 @@ func (g *Gateway) relayAnthropicViaResponses(c *gin.Context, ak *authedKey, body
 		return
 	}
 	converted["model"] = resolved.UpstreamModel
-	applyOpenAIResponsesReasoningDefault(converted, ak.Key.ReasoningEffort)
+	effort := applyOpenAIResponsesReasoningDefault(converted, ak.Key.ReasoningEffort)
 	encoded, err := json.Marshal(converted)
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, "convert Anthropic request failed")
@@ -216,6 +218,7 @@ func (g *Gateway) relayAnthropicViaResponses(c *gin.Context, ak *authedKey, body
 		Path:            "/v1/responses",
 		Model:           modelName,
 		Stream:          stream,
+		Effort:          effort,
 		ResponseAdapter: adapterOpenAIResponsesToAnthropic,
 		Body:            encoded,
 		Billable:        true,

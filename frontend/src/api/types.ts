@@ -58,6 +58,7 @@ export interface GatewayRuntimePolicy {
 	probe_timeout_seconds: number
 	probe_retention_days: number
 	probe_concurrency: number
+	reasoning_effort_multipliers: Record<string, number>
 }
 
 export interface AuditLog {
@@ -136,6 +137,45 @@ export interface UserGroupRate {
 	user_id: number
 	group_id: number
 	rate_multiplier: number
+}
+
+export interface ReferralCodeStats {
+	id: number
+	code: string
+	owner_user_id: number
+	owner_email: string
+	commission_bps: number
+	status: string
+	referred_users: number
+	commission_micro: number
+	created_at: string
+}
+
+export interface ReferralBindingInfo {
+	code: string
+	referrer_email: string
+	bound_at: string
+}
+
+export interface ReferralCommission {
+	id: number
+	usage_log_id: number
+	referral_code_id: number
+	referrer_user_id: number
+	referred_user_id: number
+	referred_email: string
+	code: string
+	base_cost_micro: number
+	commission_bps: number
+	amount_micro: number
+	created_at: string
+}
+
+export interface ReferralDashboard {
+	binding: ReferralBindingInfo | null
+	codes: ReferralCodeStats[]
+	commissions: ReferralCommission[]
+	total_commission_micro: number
 }
 
 export interface Group {
@@ -293,6 +333,7 @@ export interface UsageLog {
   group_id: number
   model: string
   stream: boolean
+	reasoning_effort?: string
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number

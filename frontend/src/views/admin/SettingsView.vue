@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { api, withToast } from '../../api/client'
 import type { AuditLog, GatewayRuntimePolicy, LegalDocument, SystemSettings } from '../../api/types'
+import { defaultReasoningMultipliers, REASONING_OPTIONS } from '../../api/reasoning'
 
 type SettingsPayload = SystemSettings & {
   site_public_url?: string
@@ -32,6 +33,7 @@ const form = ref<SystemSettings>({
   init_balance_micro: 0,
   login_agreement: { enabled: true, mode: 'modal', updated_at: '', documents: [] },
 })
+const reasoningEffortFields = REASONING_OPTIONS.filter((item) => item.value !== 'auto')
 const runtimePolicy = ref<GatewayRuntimePolicy>({
   max_attempts: 3,
   unauthorized_cooldown_seconds: 600,
@@ -42,6 +44,7 @@ const runtimePolicy = ref<GatewayRuntimePolicy>({
   probe_timeout_seconds: 12,
   probe_retention_days: 30,
   probe_concurrency: 4,
+  reasoning_effort_multipliers: defaultReasoningMultipliers(),
 })
 const auditItems = ref<AuditLog[]>([])
 
@@ -80,7 +83,13 @@ async function load() {
       smtp_from: data.smtp_from,
     }
 		registrationSuffixesText.value = (data.registration_email_suffixes || []).join('\n')
-    runtimePolicy.value = policy
+    runtimePolicy.value = {
+      ...policy,
+      reasoning_effort_multipliers: {
+        ...defaultReasoningMultipliers(),
+        ...(policy.reasoning_effort_multipliers || {}),
+      },
+    }
     await loadAudit()
   } finally {
     loading.value = false
@@ -293,6 +302,7 @@ onMounted(load)
               </article>
             </div>
           </section>
+
         </template>
 
         <template v-else-if="activeSection === 'gateway'">
@@ -328,6 +338,20 @@ onMounted(load)
             <div class="settings-form-grid settings-form-grid--three">
               <label class="settings-field"><span>上游 5xx 冷却（秒）</span><input v-model.number="runtimePolicy.upstream_failure_cooldown_seconds" class="input" type="number" min="5" max="3600" /></label>
               <label class="settings-field"><span>网络错误冷却（秒）</span><input v-model.number="runtimePolicy.network_failure_cooldown_seconds" class="input" type="number" min="1" max="3600" /></label>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <header>
+              <h2>思考强度计费 Reasoning Effort Billing</h2>
+              <p>按本次请求实际生效的档位计费：客户端显式值优先，其次是密钥默认值；自动 Auto 按模型默认值和 1x 计算。倍率范围 0.1–10。</p>
+            </header>
+            <div class="settings-form-grid settings-form-grid--three">
+              <label v-for="field in reasoningEffortFields" :key="field.value" class="settings-field">
+                <span>{{ field.label }}</span>
+                <input v-model.number="runtimePolicy.reasoning_effort_multipliers[field.value]" class="input" type="number" min="0.1" max="10" step="0.05" />
+                <small>在模型 Token 价格、用户倍率和分组倍率之上叠加。</small>
+              </label>
             </div>
           </section>
         </template>

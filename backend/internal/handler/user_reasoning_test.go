@@ -7,7 +7,10 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"", "auto"}, {"AUTO", "auto"}, {"fast", "fast"}, {"xhigh", "xhigh"}, {"max", "max"},
+		{"", "auto"}, {"AUTO", "auto"},
+		{"fast", "low"}, {"minimal", "low"},
+		{"none", "none"}, {"low", "low"}, {"medium", "medium"},
+		{"high", "high"}, {"xhigh", "xhigh"}, {"max", "max"},
 	} {
 		got, err := normalizeReasoningEffort(test.input)
 		if err != nil || got != test.want {

@@ -32,12 +32,20 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.Setting{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
 		t.Fatal(err)
 	}
 	mailer := &fakeRegistrationMailer{}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret"}, Site: config.SiteConfig{AllowRegister: true}}
 	h := NewAuthHandlerWithMailer(db, cfg, mailer)
+	promoter := model.User{Email: "promoter@example.test", PasswordHash: "x", Role: model.RoleUser, Status: model.StatusActive}
+	if err := db.Create(&promoter).Error; err != nil {
+		t.Fatal(err)
+	}
+	referral := model.ReferralCode{Code: "DD-REGISTER", OwnerUserID: promoter.ID, CommissionBps: 500, Status: model.StatusActive}
+	if err := db.Create(&referral).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	request := func(path, body string, handle gin.HandlerFunc) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
@@ -59,7 +67,7 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := `{"email":"new@example.test","password":"password123","code":"` + mailer.code + `","terms_revision":"` + settings.LoginAgreement.Revision() + `"}`
+	body := `{"email":"new@example.test","password":"password123","code":"` + mailer.code + `","referral_code":"DD-REGISTER","terms_revision":"` + settings.LoginAgreement.Revision() + `"}`
 	if w := request("/api/auth/register", body, h.Register); w.Code != http.StatusOK {
 		t.Fatalf("register status = %d, body = %s", w.Code, w.Body.String())
 	}
@@ -69,6 +77,13 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	}
 	if !user.EmailVerified {
 		t.Fatal("registered user should be email verified")
+	}
+	var binding model.ReferralBinding
+	if err := db.Where("referred_user_id = ?", user.ID).First(&binding).Error; err != nil {
+		t.Fatal("registration should bind the referral code:", err)
+	}
+	if binding.ReferrerUserID != promoter.ID || binding.ReferralCodeID != referral.ID {
+		t.Fatalf("unexpected referral binding: %#v", binding)
 	}
 	if w := request("/api/auth/register", body, h.Register); w.Code != http.StatusBadRequest {
 		t.Fatalf("reused code status = %d, want %d", w.Code, http.StatusBadRequest)

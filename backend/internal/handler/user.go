@@ -241,14 +241,16 @@ type keyPolicy struct {
 	expiresAt              *time.Time
 }
 
-// normalizeReasoningEffort keeps the stored API-key default deliberately
-// small and provider-neutral. "fast" is our UI shortcut and is converted to
-// OpenAI's native "low" value by the gateway immediately before relay.
+// normalizeReasoningEffort stores GPT-5.6's supported effort values plus
+// "auto" (= follow the client/model). Legacy fast/minimal values migrate to
+// low so saved keys, pricing rules and usage logs share one vocabulary.
 func normalizeReasoningEffort(value string) (string, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
 	case "", "auto":
 		return "auto", nil
-	case "fast", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+	case "fast", "minimal":
+		return "low", nil
+	case "none", "low", "medium", "high", "xhigh", "max":
 		return normalized, nil
 	default:
 		return "", fmt.Errorf("invalid reasoning effort")

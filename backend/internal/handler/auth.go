@@ -92,6 +92,7 @@ type registrationCredentials struct {
 	Code          string `json:"code" binding:"required"`
 	Password      string `json:"password" binding:"required,min=8,max=72"`
 	TermsRevision string `json:"terms_revision"`
+	ReferralCode  string `json:"referral_code"`
 }
 
 type emailAddress struct {
@@ -234,6 +235,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		if count > 0 {
 			return fmt.Errorf("email already registered")
 		}
+		var referral *model.ReferralCode
+		if referralText := normalizeReferralCode(req.ReferralCode); referralText != "" {
+			var item model.ReferralCode
+			if err := tx.Where("code = ? AND status = ?", referralText, model.StatusActive).First(&item).Error; err != nil {
+				return fmt.Errorf("invalid referral code")
+			}
+			var owner model.User
+			if err := tx.First(&owner, item.OwnerUserID).Error; err != nil || owner.Status != model.StatusActive {
+				return fmt.Errorf("invalid referral code")
+			}
+			referral = &item
+		}
 		acceptedAt := now
 		user = model.User{
 			Email: email, EmailVerified: true, PasswordHash: hash,
@@ -243,6 +256,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 		if err := tx.Create(&user).Error; err != nil {
 			return err
+		}
+		if referral != nil {
+			binding := model.ReferralBinding{
+				ReferralCodeID: referral.ID, ReferrerUserID: referral.OwnerUserID, ReferredUserID: user.ID,
+			}
+			if err := tx.Create(&binding).Error; err != nil {
+				return err
+			}
 		}
 		res := tx.Model(&model.EmailVerification{}).Where("id = ? AND used_at IS NULL", verification.ID).Update("used_at", now)
 		if res.Error != nil {
@@ -260,6 +281,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 		if err.Error() == "email already registered" {
 			util.Fail(c, http.StatusConflict, "email already registered")
+			return
+		}
+		if err.Error() == "invalid referral code" {
+			util.Fail(c, http.StatusBadRequest, "invalid referral code")
 			return
 		}
 		util.Fail(c, http.StatusInternalServerError, "create user failed")

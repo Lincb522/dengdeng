@@ -17,6 +17,7 @@ const userNav = [
   { to: '/keys', label: 'API 密钥', icon: 'M12.65 10a6 6 0 1 0 0 4H17v4h4v-4h2v-4H12.65zM7 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4z' },
   { to: '/usage', label: '用量明细', icon: 'M3 3v18h18v-2H5V3H3zm4 12h2v4H7v-4zm4-6h2v10h-2V9zm4 3h2v7h-2v-7zm4-6h2v13h-2V6z' },
   { to: '/wallet', label: '钱包', icon: 'M21 7H5a1 1 0 0 1 0-2h14V3H5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm-4 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z' },
+  { to: '/referrals', label: '推广中心', icon: 'M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm8 2c-2 0-6 1-6 3v3h12v-3c0-2-4-3-6-3zM8 13c-2.33 0-7 1.17-7 3.5V19h7v-3c0-.9.35-1.8 1.03-2.56A7.8 7.8 0 0 0 8 13z' },
   { to: '/profile', label: '账户设置', icon: 'M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z' },
 ]
 
@@ -31,6 +32,7 @@ const adminNav = [
   { to: '/admin/models', label: '模型配置', icon: 'M4 5a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v4h-2V5a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5v2H7a3 3 0 0 1-3-3V5zm10 7h7v2h-7v-2zm0 4h7v2h-7v-2zm0-8h7v2h-7V8z' },
   { to: '/admin/prices', label: '模型定价', icon: 'M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 15h-2v-1.1a3.9 3.9 0 0 1-2.5-1.5l1.4-1.4a2.6 2.6 0 0 0 2.1 1c.8 0 1.5-.3 1.5-1s-.9-.9-2-1.2c-1.5-.4-3-1-3-2.8 0-1.4 1-2.5 2.5-2.9V5h2v1.1a3.6 3.6 0 0 1 2.2 1.3L13.8 8.8a2.3 2.3 0 0 0-1.8-.8c-.7 0-1.3.3-1.3.9s.8.8 1.9 1.1c1.5.4 3.1 1 3.1 2.9 0 1.5-1.1 2.6-2.7 3z' },
   { to: '/admin/redeem', label: '兑换码', icon: 'M20 6h-2.18A3 3 0 0 0 18 5a3 3 0 0 0-3-3 3.9 3.9 0 0 0-3 1.5A3.9 3.9 0 0 0 9 2a3 3 0 0 0-3 3 3 3 0 0 0 .18 1H4a2 2 0 0 0-2 2v3h20V8a2 2 0 0 0-2-2zM2 20a2 2 0 0 0 2 2h7V12H2v8zm11 2h7a2 2 0 0 0 2-2v-8h-9v10z' },
+  { to: '/admin/referrals', label: '推广分成', icon: 'M12 2a5 5 0 0 0-5 5c0 3.75 5 9 5 9s5-5.25 5-9a5 5 0 0 0-5-5zm0 2a3 3 0 0 1 3 3c0 1.9-1.8 4.7-3 6.3C10.8 11.7 9 8.9 9 7a3 3 0 0 1 3-3zm-8 14h16v2H4v-2z' },
   { to: '/admin/payment', label: '支付中心', icon: 'M3 5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v2h-2V5a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5v2H6a3 3 0 0 1-3-3V5zm12 5h7v2h-7v-2zm0 4h7v2h-7v-2zm0 4h5v2h-5v-2z' },
   { to: '/admin/proxies', label: '代理配置', icon: 'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H7zm2 3h6v2H9V8zm0 4h6v2H9v-2zm0 4h4v2H9v-2z' },
   { to: '/admin/settings', label: '系统设置', icon: 'M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.28h-4l-.37 2.65c-.61.24-1.17.57-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.65-.07.98s.02.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.41 1.08.74 1.69.98L11 20.72h4l.37-2.65c.61-.24 1.17-.57 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z' },
@@ -39,9 +41,9 @@ const adminNav = [
 
 const adminNavGroups = [
   { label: '运行中心', items: adminNav.slice(0, 4) },
-  { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[11], adminNav[7], adminNav[8]] },
-  { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10]] },
-  { label: '系统维护', items: [adminNav[13], adminNav[12]] },
+  { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[12], adminNav[7], adminNav[8]] },
+  { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10], adminNav[11]] },
+  { label: '系统维护', items: [adminNav[14], adminNav[13]] },
 ]
 
 const isAdmin = computed(() => auth.user?.role === 'admin')

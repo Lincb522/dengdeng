@@ -302,15 +302,15 @@ func writeUsageCSV(c *gin.Context, db *gorm.DB, filter usageQuery, userID *int64
 	c.Header("Content-Disposition", "attachment; filename=usage-"+time.Now().UTC().Format("20060102")+".csv")
 	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF}) // Excel's UTF-8 marker
 	w := csv.NewWriter(c.Writer)
-	header := []string{"请求 ID", "时间", "密钥", "分组", "模型", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
+	header := []string{"请求 ID", "时间", "密钥", "分组", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
 	if includeInternal {
-		header = []string{"请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
+		header = []string{"请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
 	}
 	_ = w.Write(header)
 	for _, entry := range logs {
 		row := []string{
 			entry.RequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.KeyName, entry.GroupName,
-			entry.Model, strconv.FormatBool(entry.Stream), strconv.FormatInt(entry.InputTokens, 10), strconv.FormatInt(entry.OutputTokens, 10),
+			entry.Model, entry.ReasoningEffort, strconv.FormatBool(entry.Stream), strconv.FormatInt(entry.InputTokens, 10), strconv.FormatInt(entry.OutputTokens, 10),
 			strconv.FormatInt(entry.CacheReadTokens, 10), strconv.FormatInt(entry.CacheWriteTokens, 10), strconv.FormatInt(entry.CacheWrite5mTokens, 10), strconv.FormatInt(entry.CacheWrite1hTokens, 10),
 			strconv.FormatInt(entry.ImageCount, 10), fmt.Sprintf("%.6f", float64(entry.CostMicro)/1_000_000), strconv.FormatInt(entry.DurationMs, 10), strconv.Itoa(entry.StatusCode), entry.ErrorMessage,
 		}

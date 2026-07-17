@@ -42,8 +42,8 @@ export const useAuth = defineStore('auth', () => {
     user.value = resp.user
   }
 
-  async function register(email: string, password: string, code: string, termsRevision = '') {
-    const resp = await api.post<LoginResp>('/api/auth/register', { email, password, code, terms_revision: termsRevision })
+  async function register(email: string, password: string, code: string, termsRevision = '', referralCode = '') {
+    const resp = await api.post<LoginResp>('/api/auth/register', { email, password, code, terms_revision: termsRevision, referral_code: referralCode })
     setToken(resp.token)
     user.value = resp.user
   }

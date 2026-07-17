@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { api, copyText, withToast } from '../api/client'
 import type { ApiKey, Group } from '../api/types'
 import { formatMoney, PLATFORM_LABELS } from '../api/types'
+import { normalizeReasoningEffort, REASONING_OPTIONS, reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
 
@@ -23,25 +24,11 @@ const showSetup = ref(false)
 const settingKey = ref<ApiKey | null>(null)
 const settingsForm = ref({ name: '', group_id: 0, reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
-const reasoningOptions = [
-  { value: 'auto', label: '自动（沿用客户端）' },
-  { value: 'fast', label: '快速（低思考）' },
-  { value: 'none', label: '不推理（速度优先）' },
-  { value: 'minimal', label: '最低' },
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '均衡' },
-  { value: 'high', label: '高' },
-  { value: 'xhigh', label: '很高' },
-  { value: 'max', label: '最大' },
-]
+const reasoningOptions = REASONING_OPTIONS
 
 function groupPlatform(groupID: number | null | undefined) {
   return groups.value.find((group) => group.id === groupID)?.platform || ''
 }
-function reasoningLabel(value: string) {
-  return reasoningOptions.find((option) => option.value === value)?.label || reasoningOptions[0].label
-}
-
 function quickSetupStorageKey(keyID: number) {
   return `dengdeng.quick-setup.key.${keyID}`
 }
@@ -129,7 +116,7 @@ function openSettings(key: ApiKey) {
   settingsForm.value = {
     name: key.name,
     group_id: key.group_id,
-	  reasoning_effort: key.reasoning_effort || 'auto',
+	  reasoning_effort: normalizeReasoningEffort(key.reasoning_effort),
     quota: fromMicro(key.quota_micro),
     daily_quota: fromMicro(key.daily_quota_micro),
     status: key.status,
@@ -214,6 +201,11 @@ function closeCreate() {
   createdPlain.value = ''
 	createdKey.value = null
 }
+
+function onSetupEffortUpdated(value: string) {
+  if (setupKey.value) setupKey.value = { ...setupKey.value, reasoning_effort: value }
+  void load()
+}
 </script>
 
 <template>
@@ -250,7 +242,7 @@ function closeCreate() {
 				<td class="text-xs">
 					<div class="num text-slate-300">{{ k.quota_micro ? `${formatMoney(k.quota_used_micro)} / ${formatMoney(k.quota_micro)}` : '总额不限' }}</div>
 					<div class="mt-1 text-slate-500">每日 {{ quotaLabel(k.daily_quota_micro) }}</div>
-					<div v-if="k.group?.platform === 'openai' && k.reasoning_effort && k.reasoning_effort !== 'auto'" class="mt-1 text-slate-500">默认思考：{{ reasoningLabel(k.reasoning_effort) }}</div>
+					<div v-if="k.group?.platform === 'openai'" class="mt-1 text-slate-500">思考强度 Reasoning Effort：{{ reasoningLabel(k.reasoning_effort) }}</div>
 					<div v-if="k.rpm || k.expires_at || k.allowed_ips || k.blocked_ips" class="mt-1 text-slate-500">{{ k.rpm ? `${k.rpm} RPM` : '' }}{{ k.rpm && (k.expires_at || k.allowed_ips || k.blocked_ips) ? ' · ' : '' }}{{ k.expires_at ? `到期 ${new Date(k.expires_at).toLocaleDateString()}` : (k.allowed_ips || k.blocked_ips ? '已设 IP 规则' : '') }}</div>
 				</td>
             <td>
@@ -296,9 +288,9 @@ function closeCreate() {
                 <p v-if="!groups.length" class="mt-2 text-xs text-signal-red">暂无开放分组,请联系管理员</p>
               </div>
 					<div v-if="groupPlatform(newGroupID) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3">
-						<label class="label">默认思考强度</label>
+						<label class="label">默认思考强度 Reasoning Effort</label>
 						<select v-model="newReasoningEffort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
-						<p class="mt-2 text-xs leading-5 text-slate-500">快速模式使用低思考强度；客户端请求里主动设置的思考强度会优先，不会更换模型或服务等级。</p>
+						<p class="mt-2 text-xs leading-5 text-slate-500">档位与 GPT‑5.6 官方一致；客户端显式设置时优先。高档位会按后台设置的独立倍率计费，创建后仍可修改。</p>
 					</div>
 				<div class="grid grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-950/35 p-3">
 					<label><span class="label">总额度（USD）</span><input v-model.number="newQuota" type="number" min="0" step="0.01" class="input" placeholder="0 = 不限制" /></label>
@@ -335,7 +327,7 @@ function closeCreate() {
 					<div class="space-y-4">
 						<label><span class="label">密钥名称</span><input v-model.trim="settingsForm.name" class="input" maxlength="64" /></label>
 						<label><span class="label">分组</span><select v-model.number="settingsForm.group_id" class="input"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}（{{ PLATFORM_LABELS[group.platform] }}）</option></select></label>
-						<div v-if="groupPlatform(settingsForm.group_id) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">快速 = 低思考。客户端请求显式设置时优先。</p></div>
+						<div v-if="groupPlatform(settingsForm.group_id) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度 Reasoning Effort</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">客户端显式设置时优先；费用按实际生效档位计算。</p></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="mt-1 block text-[11px] text-slate-500">留空表示永久有效</small></label></div>
 						<label><span class="label">IP 白名单</span><input v-model.trim="settingsForm.allowed_ips" class="input font-mono text-xs" placeholder="203.0.113.8, 2001:db8::/32（留空不限）" /><small class="mt-1 block text-[11px] text-slate-500">仅允许列出的 IP 或 CIDR；多个规则用逗号或空格分隔。</small></label>
@@ -356,6 +348,7 @@ function closeCreate() {
 			:reasoning-effort="setupKey?.reasoning_effort || 'auto'"
 			@close="showSetup = false"
 			@rotate="requestRotateForSetup"
+			@effort-updated="onSetupEffortUpdated"
 		/>
   </div>
 </template>

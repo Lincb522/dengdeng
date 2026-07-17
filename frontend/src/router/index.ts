@@ -18,6 +18,7 @@ const router = createRouter({
         { path: 'keys', name: 'keys', component: () => import('../views/KeysView.vue') },
         { path: 'usage', name: 'usage', component: () => import('../views/UsageView.vue') },
         { path: 'wallet', name: 'wallet', component: () => import('../views/WalletView.vue') },
+        { path: 'referrals', name: 'referrals', component: () => import('../views/ReferralView.vue') },
         { path: 'profile', name: 'profile', component: () => import('../views/ProfileView.vue') },
         {
           path: 'admin',
@@ -34,6 +35,7 @@ const router = createRouter({
             { path: 'models', name: 'admin-models', component: () => import('../views/admin/ModelsView.vue') },
             { path: 'prices', name: 'admin-prices', component: () => import('../views/admin/PricesView.vue') },
           { path: 'redeem', name: 'admin-redeem', component: () => import('../views/admin/RedeemView.vue') },
+            { path: 'referrals', name: 'admin-referrals', component: () => import('../views/admin/ReferralsView.vue') },
             { path: 'payment', name: 'admin-payment', component: () => import('../views/admin/PaymentView.vue') },
 			  { path: 'proxies', name: 'admin-proxies', component: () => import('../views/admin/ProxiesView.vue') },
 			  { path: 'settings', name: 'admin-settings', component: () => import('../views/admin/SettingsView.vue') },
