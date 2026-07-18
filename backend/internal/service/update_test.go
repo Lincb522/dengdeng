@@ -69,6 +69,7 @@ func TestUpdateStatusUsesConfiguredRepositoryAndPersistedRelease(t *testing.T) {
 	cfg.Update.StateDirectory = dir
 	if err := writeUpdateJSON(filepath.Join(dir, "status.json"), UpdateStatus{
 		Status: "succeeded", CurrentCommit: "abc", PreviousCommit: "def", UpdateAvailable: true,
+		Changes: []UpdateChange{{Commit: "abc", Title: "新增自动备份", CommittedAt: "2026-07-18T10:00:00Z"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,5 +79,8 @@ func TestUpdateStatusUsesConfiguredRepositoryAndPersistedRelease(t *testing.T) {
 	}
 	if status.Repository != cfg.Update.Repository || status.Branch != "stable" || !status.Enabled || !status.CanRollback {
 		t.Fatalf("unexpected status: %#v", status)
+	}
+	if len(status.Changes) != 1 || status.Changes[0].Title != "新增自动备份" {
+		t.Fatalf("unexpected changes: %#v", status.Changes)
 	}
 }

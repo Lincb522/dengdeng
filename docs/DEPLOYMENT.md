@@ -76,6 +76,22 @@ curl -fsS https://your-domain.example/health
 
 支付和 OAuth 回调依赖 `SITE_PUBLIC_URL`，其域名、HTTPS 证书和上游平台登记的回调地址必须完全一致。
 
+## 自动备份与保留策略
+
+SQLite 部署默认每 24 小时创建一次一致性快照，保留 30 天且最多保留 30 份。可以在「系统维护 → 数据库备份」随时启停或调整间隔、天数和份数；设置保存在数据库中，服务重启和版本更新不会丢失。
+
+保留策略仅清理创建者标记为 `system:auto` 的系统自动备份。管理员手动创建的备份不会自动删除，也不会因为超过保留天数而消失。生产环境建议把备份目录放在独立持久化磁盘，并定期复制到异机或对象存储：
+
+```dotenv
+BACKUP_DIRECTORY=/var/lib/dengdeng/backups
+BACKUP_AUTO_ENABLED=true
+BACKUP_INTERVAL_HOURS=24
+BACKUP_RETENTION_DAYS=30
+BACKUP_RETENTION_COUNT=30
+```
+
+“立即清理”只立即执行同一套自动备份保留规则，不会清空数据库、用量日志或手动备份。
+
 ## 服务器直连仓库与版本更新
 
 二进制 + systemd 部署可以安装独立更新器，让管理员在「系统维护 → 版本更新」检查 `main`、执行更新或恢复上一版本。源码固定放在 `/opt/dengdeng/source`，运行二进制仍是 `/opt/dengdeng/dengdeng`；前端和后端全部构建成功前不会触碰线上进程，构建结束后也会恢复仓库中的前端占位文件以保持工作区干净。
@@ -102,6 +118,8 @@ sudo bash deploy/update/install.sh
 2. 「更新到最新版本」先通过应用创建一致性 SQLite 快照，再在独立 systemd 任务中构建。
 3. 构建成功后原子替换二进制，短暂重启并连续检查 `/health`。
 4. 健康检查失败会自动恢复旧二进制；「恢复上一版本」也会在切换前创建数据库快照。
+
+检查完成后，管理端会列出当前提交到目标提交之间最多 30 条更新日志，包括标题、短提交号和提交时间。更新成功后仍保留本次日志，便于核对实际上线内容。
 
 更新成功后，执行器会从同一个已验证提交同步自身脚本、systemd 单元和 Polkit 规则；root 独占的 `/etc/dengdeng/update.conf` 不会被网页或自动更新覆盖。
 

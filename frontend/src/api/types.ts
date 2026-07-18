@@ -136,6 +136,19 @@ export interface BackupRecord {
 	completed_at: string | null
 }
 
+export interface BackupPolicy {
+	enabled: boolean
+	interval_hours: number
+	retention_days: number
+	retention_count: number
+}
+
+export interface UpdateChange {
+	commit: string
+	title: string
+	committed_at: string
+}
+
 export interface UpdateStatus {
 	enabled: boolean
 	repository: string
@@ -154,6 +167,7 @@ export interface UpdateStatus {
 	requested_at: string
 	started_at: string
 	finished_at: string
+	changes: UpdateChange[]
 }
 
 export interface UpdateActionResponse {

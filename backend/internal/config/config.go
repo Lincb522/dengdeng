@@ -80,7 +80,11 @@ type SMTPConfig struct {
 // directory is never served directly; an authenticated administrator must use
 // the backup API to retrieve a snapshot.
 type BackupConfig struct {
-	Directory string `yaml:"directory"`
+	Directory      string `yaml:"directory"`
+	AutoEnabled    bool   `yaml:"auto_enabled"`
+	IntervalHours  int    `yaml:"interval_hours"`
+	RetentionDays  int    `yaml:"retention_days"`
+	RetentionCount int    `yaml:"retention_count"`
 }
 
 // UpdateConfig exposes the operator-installed updater to the administration
@@ -131,7 +135,12 @@ func Default() *Config {
 		Admin:    AdminConfig{Email: "admin@dengdeng.local", Password: ""},
 		Site:     SiteConfig{Name: "DengDeng AI · 蹬蹬ai", AllowRegister: true, InitBalanceMicro: 0},
 		SMTP:     SMTPConfig{Host: "smtp.qq.com", Port: 465, Secure: true, FromName: "DengDeng AI"},
-		Backup:   BackupConfig{},
+		Backup: BackupConfig{
+			AutoEnabled:    true,
+			IntervalHours:  24,
+			RetentionDays:  30,
+			RetentionCount: 30,
+		},
 		Update: UpdateConfig{
 			Repository:     "https://github.com/Lincb522/dengdeng.git",
 			Branch:         "main",
@@ -204,6 +213,12 @@ func applyEnv(cfg *Config) {
 	envStr("SMTP_FROM_NAME", &cfg.SMTP.FromName)
 	envStr("SMTP_FROM", &cfg.SMTP.From)
 	envStr("BACKUP_DIRECTORY", &cfg.Backup.Directory)
+	if v := os.Getenv("BACKUP_AUTO_ENABLED"); v != "" {
+		cfg.Backup.AutoEnabled = v == "true" || v == "1"
+	}
+	envInt("BACKUP_INTERVAL_HOURS", &cfg.Backup.IntervalHours)
+	envInt("BACKUP_RETENTION_DAYS", &cfg.Backup.RetentionDays)
+	envInt("BACKUP_RETENTION_COUNT", &cfg.Backup.RetentionCount)
 	if v := os.Getenv("UPDATE_ENABLED"); v != "" {
 		cfg.Update.Enabled = v == "true" || v == "1"
 	}

@@ -9,6 +9,8 @@ const requesting = ref(false)
 let pollTimer: number | undefined
 
 const busy = computed(() => requesting.value || status.value?.status === 'queued' || status.value?.status === 'running')
+const repositoryURL = computed(() => status.value?.repository?.replace(/\.git$/, '') || '')
+const changes = computed(() => Array.isArray(status.value?.changes) ? status.value!.changes : [])
 const shortCommit = (value?: string) => !value || value === 'unknown' ? '未记录' : value.slice(0, 12)
 const dateTime = (value?: string) => value ? new Date(value).toLocaleString() : '—'
 
@@ -136,8 +138,28 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
         </ol>
       </section>
 
+      <section class="update-changelog" aria-labelledby="update-changelog-title">
+        <div class="update-changelog-head">
+          <div>
+            <h2 id="update-changelog-title">{{ status.update_available ? '待更新内容' : changes.length ? '本次更新' : '更新日志' }}</h2>
+            <p>{{ changes.length ? `共 ${changes.length} 个提交，按时间从新到旧排列` : '当前版本与仓库分支一致，没有待更新提交。' }}</p>
+          </div>
+          <span v-if="changes.length">最多显示 30 条</span>
+        </div>
+        <ol v-if="changes.length">
+          <li v-for="change in changes" :key="change.commit">
+            <a :href="`${repositoryURL}/commit/${change.commit}`" target="_blank" rel="noreferrer">{{ change.title }}</a>
+            <div><code>{{ shortCommit(change.commit) }}</code><time>{{ dateTime(change.committed_at) }}</time></div>
+          </li>
+        </ol>
+        <div v-else class="update-changelog-empty">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-8" /></svg>
+          <span>无需更新</span>
+        </div>
+      </section>
+
       <section class="update-details">
-        <div><span>连接仓库</span><a :href="status.repository.replace(/\.git$/, '')" target="_blank" rel="noreferrer">{{ status.repository }}</a></div>
+        <div><span>连接仓库</span><a :href="repositoryURL" target="_blank" rel="noreferrer">{{ status.repository }}</a></div>
         <div><span>跟随分支</span><code>{{ status.branch }}</code></div>
         <div><span>上次完成</span><time>{{ dateTime(status.finished_at) }}</time></div>
         <div><span>回滚版本</span><code :title="status.previous_commit">{{ shortCommit(status.previous_commit) }}</code></div>
