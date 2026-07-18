@@ -37,13 +37,14 @@ const adminNav = [
   { to: '/admin/proxies', label: '代理配置', icon: 'M7 3h10a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H7a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4zm0 2a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H7zm2 3h6v2H9V8zm0 4h6v2H9v-2zm0 4h4v2H9v-2z' },
   { to: '/admin/settings', label: '系统设置', icon: 'M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.28h-4l-.37 2.65c-.61.24-1.17.57-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.65-.07.98s.02.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.41 1.08.74 1.69.98L11 20.72h4l.37-2.65c.61-.24 1.17-.57 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z' },
   { to: '/admin/usage', label: '全站用量', icon: 'M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.5h-15V5H3v16h18v-1.5h-1.5z' },
+  { to: '/admin/updates', label: '版本更新', icon: 'M12 3a9 9 0 0 0-8.6 6.35L1 7v6h6l-2.1-2.1A7 7 0 1 1 5 15H3a9 9 0 1 0 9-12zm1 4h-2v6l5 3 1-1.7-4-2.3V7z' },
 ]
 
 const adminNavGroups = [
   { label: '运行中心', items: adminNav.slice(0, 4) },
   { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[12], adminNav[7], adminNav[8]] },
   { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10], adminNav[11]] },
-  { label: '系统维护', items: [adminNav[14], adminNav[13]] },
+  { label: '系统维护', items: [adminNav[14], adminNav[13], adminNav[15]] },
 ]
 
 const isAdmin = computed(() => auth.user?.role === 'admin')

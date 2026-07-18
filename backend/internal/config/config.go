@@ -17,6 +17,7 @@ type Config struct {
 	Site          SiteConfig     `yaml:"site"`
 	SMTP          SMTPConfig     `yaml:"smtp"`
 	Backup        BackupConfig   `yaml:"backup"`
+	Update        UpdateConfig   `yaml:"update"`
 	OAuth         OAuthConfig    `yaml:"oauth"`
 	Proxy         ProxyConfig    `yaml:"proxy"`
 	EncryptionKey string         `yaml:"encryption_key"`
@@ -82,6 +83,18 @@ type BackupConfig struct {
 	Directory string `yaml:"directory"`
 }
 
+// UpdateConfig exposes the operator-installed updater to the administration
+// console. The privileged helper still reads its repository and branch from a
+// root-owned file; these values are informational and never become shell
+// arguments supplied by an HTTP request. Polkit only permits the application
+// account to start the fixed updater unit.
+type UpdateConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	Repository     string `yaml:"repository"`
+	Branch         string `yaml:"branch"`
+	StateDirectory string `yaml:"state_directory"`
+}
+
 // OAuthConfig holds the optional client registration overrides used by the
 // upstream-account "sign in with OAuth" flow. RedirectURL must be the exact
 // callback URL registered with the provider. When it is empty, development on
@@ -119,6 +132,11 @@ func Default() *Config {
 		Site:     SiteConfig{Name: "DengDeng AI · 蹬蹬ai", AllowRegister: true, InitBalanceMicro: 0},
 		SMTP:     SMTPConfig{Host: "smtp.qq.com", Port: 465, Secure: true, FromName: "DengDeng AI"},
 		Backup:   BackupConfig{},
+		Update: UpdateConfig{
+			Repository:     "https://github.com/Lincb522/dengdeng.git",
+			Branch:         "main",
+			StateDirectory: "/var/lib/dengdeng/update",
+		},
 	}
 }
 
@@ -186,6 +204,12 @@ func applyEnv(cfg *Config) {
 	envStr("SMTP_FROM_NAME", &cfg.SMTP.FromName)
 	envStr("SMTP_FROM", &cfg.SMTP.From)
 	envStr("BACKUP_DIRECTORY", &cfg.Backup.Directory)
+	if v := os.Getenv("UPDATE_ENABLED"); v != "" {
+		cfg.Update.Enabled = v == "true" || v == "1"
+	}
+	envStr("UPDATE_REPOSITORY", &cfg.Update.Repository)
+	envStr("UPDATE_BRANCH", &cfg.Update.Branch)
+	envStr("UPDATE_STATE_DIRECTORY", &cfg.Update.StateDirectory)
 
 	envStr("ENCRYPTION_KEY", &cfg.EncryptionKey)
 	envStr("PROXY_URL", &cfg.Proxy.URL)

@@ -1,0 +1,10 @@
+# Root-owned updater configuration. Do not place application secrets here.
+REPOSITORY=https://github.com/Lincb522/dengdeng.git
+BRANCH=main
+SOURCE_DIRECTORY=/opt/dengdeng/source
+RELEASE_DIRECTORY=/opt/dengdeng/releases
+RUNTIME_BINARY=/opt/dengdeng/dengdeng
+SERVICE=dengdeng.service
+HEALTH_URL=http://127.0.0.1:9100/health
+STATE_DIRECTORY=/var/lib/dengdeng/update
+BUILD_JOBS=2

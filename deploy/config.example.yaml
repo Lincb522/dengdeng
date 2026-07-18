@@ -42,6 +42,14 @@ proxy:
   url: ""
   no_proxy: "localhost,127.0.0.1,::1"
 
+# 管理端版本更新。启用前必须按 docs/DEPLOYMENT.md 安装独立的 updater
+# systemd 单元和最小化 Polkit 规则。网页不能修改仓库地址或执行命令。
+update:
+  enabled: false
+  repository: "https://github.com/Lincb522/dengdeng.git"
+  branch: "main"
+  state_directory: "/var/lib/dengdeng/update"
+
 # 上游账号的浏览器 OAuth 登录(可选)。生产环境请在上游 OAuth 应用中登记
 # 完整的 callback URL；本地 localhost 开发会自动推导 callback URL。
 # openai / anthropic 的 authorize_url、token_url、scope 留空时使用项目内置值。

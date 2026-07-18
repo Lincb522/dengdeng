@@ -1,0 +1,10 @@
+// Keep the web service unprivileged: it may start the fixed updater unit and
+// nothing else. Repository selection remains in a root-owned configuration.
+polkit.addRule(function(action, subject) {
+  if (action.id === "org.freedesktop.systemd1.manage-units" &&
+      subject.user === "dengdeng" &&
+      action.lookup("unit") === "dengdeng-updater.service" &&
+      action.lookup("verb") === "start") {
+    return polkit.Result.YES;
+  }
+});
