@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- 前端构建 ----
-FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
+FROM --platform=$BUILDPLATFORM node:26-alpine AS frontend
 WORKDIR /app/frontend
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml* ./
@@ -12,7 +12,7 @@ RUN pnpm build
 # 产物输出到 /app/backend/internal/web/dist (vite outDir 配置为 ../backend/...)
 
 # ---- 后端构建 ----
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 WORKDIR /app/backend
@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -trimpath -ldflags="-s -w" -o /dengdeng ./cmd/server
 
 # ---- 运行时 ----
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 1000 dengdeng
 USER dengdeng
 WORKDIR /app
