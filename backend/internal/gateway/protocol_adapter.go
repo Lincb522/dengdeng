@@ -26,6 +26,7 @@ const (
 	adapterOpenAIResponsesToAnthropic
 	adapterAnthropicToOpenAIResponses
 	adapterAnthropicToOpenAIChat
+	adapterGeminiToOpenAIChat
 )
 
 // pipeAdapted keeps accounting tied to the real upstream protocol while
@@ -49,6 +50,8 @@ func (g *Gateway) pipeAdapted(c *gin.Context, resp *http.Response, platform stri
 			return streamAnthropicAsOpenAIResponses(c, resp.Body, platform, requestedModel), true
 		case adapterAnthropicToOpenAIChat:
 			return streamAnthropicAsOpenAIChat(c, resp.Body, platform, requestedModel), true
+		case adapterGeminiToOpenAIChat:
+			return streamGeminiAsOpenAIChat(c, resp.Body, platform, requestedModel), true
 		}
 	}
 
@@ -75,6 +78,8 @@ func (g *Gateway) pipeAdapted(c *gin.Context, resp *http.Response, platform stri
 		target = anthropicMessageAsOpenAIResponse(source, requestedModel)
 	case adapterAnthropicToOpenAIChat:
 		target = anthropicMessageAsOpenAIChat(source, requestedModel)
+	case adapterGeminiToOpenAIChat:
+		target = geminiMessageAsOpenAIChat(source, requestedModel)
 	}
 	writeAdapterJSON(c, resp.StatusCode, target)
 	return extractor.usage(), false

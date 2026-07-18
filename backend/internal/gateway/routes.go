@@ -129,7 +129,19 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 		g.relayOpenAIViaAnthropic(c, ak, converted, modelName, stream, adapterAnthropicToOpenAIChat)
 		return
 	}
-	platform := ak.Group.Platform // openai or grok; both are OpenAI-compatible
+	if ak.Group.Platform == model.PlatformGemini {
+		converted, modelName, stream, err := openAIChatToGemini(body)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		g.relayOpenAIViaGemini(c, ak, converted, modelName, stream)
+		return
+	}
+	platform, ok := openAICompatiblePlatform(c, ak) // openai or grok
+	if !ok {
+		return
+	}
 	modelName, _, body, ok := g.rewriteJSONModel(c, platform, fields, body, "")
 	if !ok {
 		return
@@ -180,7 +192,10 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 		g.relayOpenAIViaAnthropic(c, ak, converted, modelName, stream, adapterAnthropicToOpenAIResponses)
 		return
 	}
-	platform := ak.Group.Platform // openai or grok
+	platform, ok := openAICompatiblePlatform(c, ak) // openai or grok
+	if !ok {
+		return
+	}
 	modelName, _, body, ok := g.rewriteJSONModel(c, platform, fields, body, "")
 	if !ok {
 		return
@@ -195,6 +210,22 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 		Body:     body,
 		Billable: true,
 	})
+}
+
+// openAICompatiblePlatform returns the upstream platform for a request that
+// arrived on the OpenAI wire. Only OpenAI-compatible groups (openai, grok)
+// pass; Anthropic is bridged before this is called, and anything else (e.g. a
+// Gemini group) gets the standard cross-platform rejection instead of having
+// an OpenAI-shaped body forwarded to an incompatible upstream.
+func openAICompatiblePlatform(c *gin.Context, ak *authedKey) (string, bool) {
+	switch ak.Group.Platform {
+	case model.PlatformOpenAI, model.PlatformGrok:
+		return ak.Group.Platform, true
+	default:
+		util.Fail(c, http.StatusBadRequest,
+			fmt.Sprintf("this key belongs to a %s group and cannot call %s endpoints", ak.Group.Platform, model.PlatformOpenAI))
+		return "", false
+	}
 }
 
 // relayAnthropicViaResponses makes an OpenAI-Responses-compatible group
@@ -253,6 +284,37 @@ func (g *Gateway) relayOpenAIViaAnthropic(c *gin.Context, ak *authedKey, convert
 		Model:           modelName,
 		Stream:          stream,
 		ResponseAdapter: adapter,
+		Body:            encoded,
+		Billable:        true,
+	})
+}
+
+// relayOpenAIViaGemini makes a Gemini group available through the OpenAI Chat
+// Completions contract. The public model name is preserved for billing while
+// the upstream generateContent path uses the resolved provider model.
+func (g *Gateway) relayOpenAIViaGemini(c *gin.Context, ak *authedKey, converted map[string]any, modelName string, stream bool) {
+	resolved, err := g.resolveModel(model.PlatformGemini, modelName)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	encoded, err := json.Marshal(converted)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, "convert OpenAI request failed")
+		return
+	}
+	method := "generateContent"
+	path := "/v1beta/models/" + resolved.UpstreamModel + ":" + method
+	if stream {
+		method = "streamGenerateContent"
+		path = "/v1beta/models/" + resolved.UpstreamModel + ":" + method + "?alt=sse"
+	}
+	g.relay(c, ak, relayRequest{
+		Platform:        model.PlatformGemini,
+		Path:            path,
+		Model:           modelName,
+		Stream:          stream,
+		ResponseAdapter: adapterGeminiToOpenAIChat,
 		Body:            encoded,
 		Billable:        true,
 	})

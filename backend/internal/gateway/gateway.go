@@ -292,8 +292,9 @@ type relayRequest struct {
 	Path     string // upstream path (incl. query for gemini)
 	Model    string // resolved model name for billing
 	Stream   bool
-	// Effort is the effective OpenAI reasoning effort (client field first,
-	// key default second, empty for the model default).
+	// Effort is the effective OpenAI-wire reasoning effort of this request
+	// (client field first, key default second, "" for model default). It
+	// selects the per-effort billing multiplier and lands in the usage log.
 	Effort string
 	// ResponseAdapter presents a different public wire protocol while Platform
 	// remains the real upstream protocol used for routing and accounting.
@@ -302,13 +303,18 @@ type relayRequest struct {
 	ContentType     string // optional replacement after multipart model aliasing
 	Billable        bool
 	Image           bool
+	// SessionID is the relay's stable per-conversation identifier (if any). It
+	// pins scheduler account selection and seeds the upstream session headers
+	// that make OAuth traffic look like a continuous client session.
+	SessionID string
 	// UpstreamGroupID is only accepted for image requests. It lets a public
 	// image model use an account pool that is separate from the API key group.
 	UpstreamGroupID int64
 }
 
-// effortRates layers the configured reasoning charge onto text and cache
-// rates. Image rates are intentionally untouched.
+// effortRates applies the operator-configured per-effort billing multiplier
+// on top of the request's rate plan. Image pricing is left untouched: image
+// generation has no reasoning phase.
 func (g *Gateway) effortRates(rates service.RatePlan, effort string) service.RatePlan {
 	if effort == "" || g.policy == nil {
 		return rates
@@ -432,6 +438,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	var lastStatus int
 	var lastBody []byte
 	sessionID := relaySessionID(c, ak.Key.ID, req.Body)
+	req.SessionID = sessionID
 
 	for attempt := 0; attempt < g.relayAttempts(); attempt++ {
 		if c.Request.Context().Err() != nil {
@@ -587,7 +594,16 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 		}
 	}
 
-	upReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, base+req.Path, bytes.NewReader(req.Body))
+	// A Claude subscription OAuth credential is only authorized for Claude
+	// Code. Ensure the request carries the Claude Code identity so the upstream
+	// accepts it and the traffic matches the official CLI. API-key accounts are
+	// left untouched.
+	outboundBody := req.Body
+	if req.Platform == model.PlatformAnthropic && acc.AuthType == model.AuthOAuth && req.Path == "/v1/messages" {
+		outboundBody = injectClaudeCodeSystemPrompt(outboundBody)
+	}
+
+	upReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, base+req.Path, bytes.NewReader(outboundBody))
 	if err != nil {
 		return nil, err
 	}
@@ -665,8 +681,14 @@ func (g *Gateway) applyCredential(c *gin.Context, upReq *http.Request, acc *mode
 		switch platform {
 		case model.PlatformAnthropic:
 			// OAuth calls use the beta bearer flow, not the x-api-key flow.
+			// The token is a Claude Code credential: attach the CLI identity
+			// headers and mandatory beta flags so the upstream accepts it and
+			// the request is indistinguishable from the official client.
 			upReq.Header.Del("x-api-key")
-			upReq.Header.Set("anthropic-beta", mergeBeta(upReq.Header.Get("anthropic-beta"), "oauth-2025-04-20"))
+			for _, flag := range strings.Split(anthropicOAuthBeta, ",") {
+				upReq.Header.Set("anthropic-beta", mergeBeta(upReq.Header.Get("anthropic-beta"), flag))
+			}
+			applyAnthropicOAuthIdentityHeaders(upReq.Header)
 		case model.PlatformOpenAI:
 			if acc.AccountID != "" {
 				upReq.Header.Set("chatgpt-account-id", acc.AccountID)

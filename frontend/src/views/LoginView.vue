@@ -103,7 +103,7 @@ async function submit() {
       toast.show('两次输入的密码不一致', 'error')
       return
     }
-    if (!/^\d{6}$/.test(verificationCode.value.trim())) {
+    if (auth.registrationVerification && !/^\d{6}$/.test(verificationCode.value.trim())) {
       toast.show('请输入 6 位邮箱验证码', 'error')
       return
     }
@@ -152,7 +152,7 @@ async function submit() {
             <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" />
           </div>
 
-          <div v-if="mode === 'register'" class="login-field">
+          <div v-if="mode === 'register' && auth.registrationVerification" class="login-field">
             <label for="verification-code">邮箱验证码</label>
             <div class="login-code-row">
               <input id="verification-code" v-model="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />

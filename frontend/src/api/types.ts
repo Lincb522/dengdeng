@@ -58,6 +58,7 @@ export interface GatewayRuntimePolicy {
 	probe_timeout_seconds: number
 	probe_retention_days: number
 	probe_concurrency: number
+	// 按思考强度的计费倍率，键为 OpenAI 官方档位（none…xhigh）。
 	reasoning_effort_multipliers: Record<string, number>
 }
 

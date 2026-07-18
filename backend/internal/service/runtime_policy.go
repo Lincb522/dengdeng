@@ -18,6 +18,27 @@ const runtimePolicyKey = "runtime.gateway_policy.v1"
 // list because it means "do not inject a value; follow the client/model".
 var OfficialReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 
+// GatewayRuntimePolicy contains the operational switches that genuinely
+// affect relay selection and low-cost account health checks. Values are kept
+// intentionally bounded: this is a resilience control plane, not a way to
+// change how the service identifies itself to an upstream provider.
+type GatewayRuntimePolicy struct {
+	MaxAttempts                    int `json:"max_attempts"`
+	UnauthorizedCooldownSeconds    int `json:"unauthorized_cooldown_seconds"`
+	RateLimitCooldownSeconds       int `json:"rate_limit_cooldown_seconds"`
+	UpstreamFailureCooldownSeconds int `json:"upstream_failure_cooldown_seconds"`
+	NetworkFailureCooldownSeconds  int `json:"network_failure_cooldown_seconds"`
+	ProbeIntervalSeconds           int `json:"probe_interval_seconds"`
+	ProbeTimeoutSeconds            int `json:"probe_timeout_seconds"`
+	ProbeRetentionDays             int `json:"probe_retention_days"`
+	ProbeConcurrency               int `json:"probe_concurrency"`
+	// ReasoningEffortMultipliers scales the billed cost of an OpenAI-wire
+	// request by its effective reasoning effort. Token usage already grows
+	// with effort; this lets an operator additionally price the deeper tiers
+	// (subscription upstreams burn quota much faster on high/xhigh).
+	ReasoningEffortMultipliers map[string]float64 `json:"reasoning_effort_multipliers"`
+}
+
 func DefaultReasoningEffortMultipliers() map[string]float64 {
 	return map[string]float64{
 		"none":   0.8,
@@ -27,23 +48,6 @@ func DefaultReasoningEffortMultipliers() map[string]float64 {
 		"xhigh":  1.5,
 		"max":    2,
 	}
-}
-
-// GatewayRuntimePolicy contains the operational switches that genuinely
-// affect relay selection and low-cost account health checks. Values are kept
-// intentionally bounded: this is a resilience control plane, not a way to
-// change how the service identifies itself to an upstream provider.
-type GatewayRuntimePolicy struct {
-	MaxAttempts                    int                `json:"max_attempts"`
-	UnauthorizedCooldownSeconds    int                `json:"unauthorized_cooldown_seconds"`
-	RateLimitCooldownSeconds       int                `json:"rate_limit_cooldown_seconds"`
-	UpstreamFailureCooldownSeconds int                `json:"upstream_failure_cooldown_seconds"`
-	NetworkFailureCooldownSeconds  int                `json:"network_failure_cooldown_seconds"`
-	ProbeIntervalSeconds           int                `json:"probe_interval_seconds"`
-	ProbeTimeoutSeconds            int                `json:"probe_timeout_seconds"`
-	ProbeRetentionDays             int                `json:"probe_retention_days"`
-	ProbeConcurrency               int                `json:"probe_concurrency"`
-	ReasoningEffortMultipliers     map[string]float64 `json:"reasoning_effort_multipliers"`
 }
 
 func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
@@ -61,8 +65,9 @@ func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
 	}
 }
 
-// EffortMultiplier returns the commercial multiplier for the effective
-// effort. Unknown or model-default requests remain at face value.
+// EffortMultiplier returns the billing multiplier for one effective effort.
+// Unknown or empty efforts (client did not choose, model default applies)
+// bill at face value.
 func (p GatewayRuntimePolicy) EffortMultiplier(effort string) float64 {
 	if effort == "" || p.ReasoningEffortMultipliers == nil {
 		return 1
@@ -146,6 +151,8 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 		}
 	}
 
+	// Only official efforts are configurable, and each multiplier stays inside
+	// a sane commercial band. Missing entries fall back to 1x.
 	normalizedMultipliers := DefaultReasoningEffortMultipliers()
 	for _, effort := range OfficialReasoningEfforts {
 		value, ok := p.ReasoningEffortMultipliers[effort]

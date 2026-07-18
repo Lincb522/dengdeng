@@ -7,6 +7,8 @@ package gateway
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -48,7 +50,7 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 		if err != nil {
 			return nil, err
 		}
-		upstream, err := g.doOpenAIOAuth(c, acc, body)
+		upstream, err := g.doOpenAIOAuth(c, acc, body, req.SessionID)
 		if upstream, err = requireOAuthSSE(upstream, err); err != nil || upstream.StatusCode >= http.StatusBadRequest {
 			return upstream, err
 		}
@@ -62,7 +64,7 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 		if err != nil {
 			return nil, err
 		}
-		upstream, err := g.doOpenAIOAuth(c, acc, body)
+		upstream, err := g.doOpenAIOAuth(c, acc, body, req.SessionID)
 		if upstream, err = requireOAuthSSE(upstream, err); err != nil || upstream.StatusCode >= http.StatusBadRequest {
 			return upstream, err
 		}
@@ -76,7 +78,7 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 		if err != nil {
 			return nil, err
 		}
-		upstream, err := g.doOpenAIOAuth(c, acc, body)
+		upstream, err := g.doOpenAIOAuth(c, acc, body, req.SessionID)
 		if upstream, err = requireOAuthSSE(upstream, err); err != nil || upstream.StatusCode >= http.StatusBadRequest {
 			return upstream, err
 		}
@@ -91,12 +93,13 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 	}
 }
 
-func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body []byte) (*http.Response, error) {
+func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string) (*http.Response, error) {
 	token, err := g.oauth.AccessToken(c.Request.Context(), acc)
 	if err != nil {
 		return nil, fmt.Errorf("oauth token: %w", err)
 	}
-	upstream, err := g.doOpenAIOAuthRequest(c, acc, token, body)
+	sessionID := oauthSessionHeader(sessionSeed)
+	upstream, err := g.doOpenAIOAuthRequest(c, acc, token, body, sessionID)
 	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized {
 		return upstream, err
 	}
@@ -109,10 +112,10 @@ func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body
 	if err != nil {
 		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI OAuth session was rejected and could not be refreshed. Sign in again or import a fresh OAuth session."}}`), nil
 	}
-	return g.doOpenAIOAuthRequest(c, acc, token, body)
+	return g.doOpenAIOAuthRequest(c, acc, token, body, sessionID)
 }
 
-func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccount, token string, body []byte) (*http.Response, error) {
+func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccount, token string, body []byte, sessionID string) (*http.Response, error) {
 	upReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, openAIOAuthResponsesURL(acc.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -122,6 +125,12 @@ func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccoun
 	upReq.Header.Set("Accept", "text/event-stream")
 	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	applyOpenAIOAuthIdentityHeaders(upReq.Header)
+	if sessionID != "" {
+		// The Codex CLI sends a stable session_id per conversation; its absence
+		// is a fingerprint tell. Reuse the relay's session seed so a multi-turn
+		// conversation keeps one id.
+		upReq.Header.Set("session_id", sessionID)
+	}
 	if language := c.GetHeader("Accept-Language"); language != "" {
 		upReq.Header.Set("Accept-Language", language)
 	}
@@ -139,6 +148,26 @@ func applyOpenAIOAuthIdentityHeaders(headers http.Header) {
 	headers.Set("Originator", openAIOAuthOriginator)
 	headers.Set("Version", openAIOAuthVersion)
 	headers.Set("User-Agent", openAIOAuthUserAgent)
+}
+
+// oauthSessionHeader returns a UUID-shaped session id. A non-empty seed yields
+// a stable id (so a multi-turn conversation reuses one session, matching the
+// Codex CLI), while an empty seed yields a fresh random id per request.
+func oauthSessionHeader(seed string) string {
+	var raw [16]byte
+	if strings.TrimSpace(seed) == "" {
+		if _, err := rand.Read(raw[:]); err != nil {
+			return ""
+		}
+	} else {
+		sum := sha256.Sum256([]byte("dengdeng-codex-session:" + seed))
+		copy(raw[:], sum[:16])
+	}
+	// Set RFC 4122 version (4) and variant bits so the value is a well-formed
+	// UUID regardless of whether it came from the hash or the RNG.
+	raw[6] = (raw[6] & 0x0f) | 0x40
+	raw[8] = (raw[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", raw[0:4], raw[4:6], raw[6:8], raw[8:10], raw[10:16])
 }
 
 // requireOAuthSSE turns successful-looking HTML/JSON challenge pages into a

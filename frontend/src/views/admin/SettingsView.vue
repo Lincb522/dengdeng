@@ -83,13 +83,7 @@ async function load() {
       smtp_from: data.smtp_from,
     }
 		registrationSuffixesText.value = (data.registration_email_suffixes || []).join('\n')
-    runtimePolicy.value = {
-      ...policy,
-      reasoning_effort_multipliers: {
-        ...defaultReasoningMultipliers(),
-        ...(policy.reasoning_effort_multipliers || {}),
-      },
-    }
+    runtimePolicy.value = { ...policy, reasoning_effort_multipliers: { ...defaultReasoningMultipliers(), ...(policy.reasoning_effort_multipliers || {}) } }
     await loadAudit()
   } finally {
     loading.value = false
@@ -302,7 +296,6 @@ onMounted(load)
               </article>
             </div>
           </section>
-
         </template>
 
         <template v-else-if="activeSection === 'gateway'">

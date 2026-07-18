@@ -13,6 +13,7 @@ export const useAuth = defineStore('auth', () => {
   const siteName = ref('DengDeng AI · 蹬蹬ai')
   const siteSubtitle = ref('统一管理模型接入与用量')
   const allowRegister = ref(true)
+  const registrationVerification = ref(true)
   const loginAgreement = ref<LoginAgreement>({
     enabled: false,
     mode: 'modal',
@@ -27,6 +28,7 @@ export const useAuth = defineStore('auth', () => {
       siteName.value = s.site_name
 		 siteSubtitle.value = s.site_subtitle || siteSubtitle.value
       allowRegister.value = s.allow_register
+		 registrationVerification.value = s.registration_verification !== false
 		 loginAgreement.value = s.login_agreement || loginAgreement.value
       document.title = s.site_name
 		 return s
@@ -64,5 +66,5 @@ export const useAuth = defineStore('auth', () => {
     window.location.href = '/login'
   }
 
-  return { user, siteName, siteSubtitle, allowRegister, loginAgreement, loadPublicSettings, login, register, fetchMe, logout }
+  return { user, siteName, siteSubtitle, allowRegister, registrationVerification, loginAgreement, loadPublicSettings, login, register, fetchMe, logout }
 })

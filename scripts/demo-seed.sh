@@ -12,14 +12,17 @@ OUT="$(cd "$(dirname "$0")/.." && pwd)/backend/data/demo-keys.txt"
 
 jqget() { jq -r "$2" <<<"$1"; }
 
+# 登录协议开启时，登录/注册必须回传当前条款 revision。
+REV=$(curl -s "$BASE/api/settings" | jq -r '.data.login_agreement.revision // ""')
+
 echo "==> 管理员登录"
-ADMIN_RESP=$(curl -s "$BASE/api/auth/login" -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}")
+ADMIN_RESP=$(curl -s "$BASE/api/auth/login" -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\",\"terms_revision\":\"$REV\"}")
 ADMIN_TOKEN=$(jqget "$ADMIN_RESP" '.data.token')
 [[ -n "$ADMIN_TOKEN" && "$ADMIN_TOKEN" != "null" ]] || { echo "管理员登录失败: $ADMIN_RESP"; exit 1; }
 AH="Authorization: Bearer $ADMIN_TOKEN"
 
-echo "==> 创建三平台分组 + mock 上游账号"
-for P in anthropic openai gemini; do
+echo "==> 创建四平台分组 + mock 上游账号"
+for P in anthropic openai gemini grok; do
   G=$(curl -s "$BASE/api/admin/groups" -H "$AH" -d "{\"name\":\"grp-$P\",\"platform\":\"$P\",\"rate_multiplier\":1.0}")
   G_ID=$(jqget "$G" '.data.id')
   if [[ -z "$G_ID" || "$G_ID" == "null" ]]; then
@@ -34,11 +37,11 @@ for P in anthropic openai gemini; do
 done
 
 echo "==> 注册 demo 用户并充值 20 USD"
-USER_RESP=$(curl -s "$BASE/api/auth/register" -d '{"email":"demo@dengdeng.local","password":"demo12345"}')
+USER_RESP=$(curl -s "$BASE/api/auth/register" -d "{\"email\":\"demo@dengdeng.local\",\"password\":\"demo12345\",\"terms_revision\":\"$REV\"}")
 USER_TOKEN=$(jqget "$USER_RESP" '.data.token')
 if [[ -z "$USER_TOKEN" || "$USER_TOKEN" == "null" ]]; then
   # 已注册过则直接登录。
-  USER_RESP=$(curl -s "$BASE/api/auth/login" -d '{"email":"demo@dengdeng.local","password":"demo12345"}')
+  USER_RESP=$(curl -s "$BASE/api/auth/login" -d "{\"email\":\"demo@dengdeng.local\",\"password\":\"demo12345\",\"terms_revision\":\"$REV\"}")
   USER_TOKEN=$(jqget "$USER_RESP" '.data.token')
 fi
 [[ -n "$USER_TOKEN" && "$USER_TOKEN" != "null" ]] || { echo "demo 用户登录失败: $USER_RESP"; exit 1; }
@@ -46,10 +49,10 @@ USER_ID=$(jqget "$USER_RESP" '.data.user.id')
 curl -s -X PUT "$BASE/api/admin/users/$USER_ID" -H "$AH" -d '{"add_balance_micro":20000000}' >/dev/null
 UH="Authorization: Bearer $USER_TOKEN"
 
-echo "==> 为三个平台各建一个 API Key(写入 $OUT)"
+echo "==> 为四个平台各建一个 API Key(写入 $OUT)"
 mkdir -p "$(dirname "$OUT")"
 : >"$OUT"
-for P in anthropic openai gemini; do
+for P in anthropic openai gemini grok; do
   GID_VAR="GID_$P"
   K=$(curl -s "$BASE/api/user/keys" -H "$UH" -d "{\"name\":\"key-$P\",\"group_id\":${!GID_VAR}}")
   PLAIN=$(jqget "$K" '.data.plain')
@@ -73,6 +76,10 @@ for i in 1 2 3 4 5; do
     -H 'content-type: application/json' -d '{"contents":[{"parts":[{"text":"hi"}]}]}' >/dev/null
   curl -s -N "$BASE/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=$KEY_gemini" \
     -H 'content-type: application/json' -d '{"contents":[{"parts":[{"text":"hi"}]}]}' >/dev/null
+  curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_grok" -H 'content-type: application/json' \
+    -d '{"model":"grok-4.5","messages":[{"role":"user","content":"hi"}]}' >/dev/null
+  curl -s -N "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_grok" -H 'content-type: application/json' \
+    -d '{"model":"grok-composer-2.5-fast","stream":true,"messages":[{"role":"user","content":"hi"}]}' >/dev/null
 done
 
 sleep 1

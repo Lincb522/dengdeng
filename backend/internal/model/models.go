@@ -480,8 +480,9 @@ type UsageLog struct {
 	GroupID   int64  `gorm:"index" json:"group_id"`
 	Model     string `gorm:"size:128" json:"model"`
 	Stream    bool   `json:"stream"`
-	// ReasoningEffort is the effective outgoing OpenAI-wire value. Recording it
-	// keeps per-effort charges auditable after an administrator changes rates.
+	// ReasoningEffort is the effective OpenAI-wire reasoning effort of this
+	// call (client value first, key default otherwise). It is stored so the
+	// per-effort billing multiplier applied to CostMicro stays auditable.
 	ReasoningEffort  string `gorm:"size:16" json:"reasoning_effort,omitempty"`
 	InputTokens      int64  `json:"input_tokens"`
 	OutputTokens     int64  `json:"output_tokens"`

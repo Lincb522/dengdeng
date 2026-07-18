@@ -27,8 +27,8 @@ func upstreamReasoningEffort(value string) string {
 }
 
 // billableEffort normalizes a client-provided effort for the usage ledger.
-// Unknown values remain visible for diagnosis but never receive an operator
-// multiplier unless the upstream accepts the request successfully.
+// Unknown spellings are kept lowercase as-is: the upstream will reject or
+// accept them, and the ledger should reflect what was actually requested.
 func billableEffort(value string) string {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	if mapped := upstreamReasoningEffort(normalized); mapped != "" {
@@ -42,8 +42,9 @@ func billableEffort(value string) string {
 
 // applyOpenAIReasoningDefault only fills a missing client field. This lets a
 // key set a sensible default without blocking a request that deliberately
-// chooses another effort level. The second result is the effective effort
-// used by the billing ledger.
+// chooses another effort level. The second return value is the effective
+// effort of the outgoing request ("" when the model default applies), which
+// the gateway records for per-effort billing.
 func applyOpenAIReasoningDefault(fields map[string]json.RawMessage, body []byte, defaultEffort string, wire openAIReasoningWire) ([]byte, string) {
 	effort := upstreamReasoningEffort(defaultEffort)
 
@@ -97,7 +98,7 @@ func applyOpenAIReasoningDefault(fields map[string]json.RawMessage, body []byte,
 
 // applyOpenAIResponsesReasoningDefault is the same policy for the Claude
 // Code compatibility path, after its Messages payload is converted to an
-// OpenAI Responses request. It returns the effective effort for billing.
+// OpenAI Responses request. Returns the effective effort for billing.
 func applyOpenAIResponsesReasoningDefault(request map[string]any, defaultEffort string) string {
 	effort := upstreamReasoningEffort(defaultEffort)
 	reasoning, _ := request["reasoning"].(map[string]any)

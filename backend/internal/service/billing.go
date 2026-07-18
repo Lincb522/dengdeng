@@ -29,8 +29,8 @@ type BillContext struct {
 	GroupID   int64
 	Model     string
 	Stream    bool
-	// Effort is recorded for auditability; its multiplier is already folded
-	// into Rates by the gateway before Record is called.
+	// Effort is recorded for auditability: the per-effort multiplier is
+	// already folded into Rates by the gateway before Record is called.
 	Effort       string
 	Usage        Usage
 	Rates        RatePlan
@@ -123,21 +123,15 @@ func settleReferralCommission(tx *gorm.DB, usageLogID, referredUserID, costMicro
 		return nil
 	}
 	bps := int64(settlement.CommissionBps)
-	// Split the multiplication to avoid overflowing if an administrator ever
-	// credits an unusually large balance.
 	amount := (costMicro/10_000)*bps + (costMicro%10_000)*bps/10_000
 	if amount <= 0 {
 		return nil
 	}
 	commission := model.ReferralCommission{
-		UsageLogID:     usageLogID,
-		ReferralCodeID: settlement.ReferralCodeID,
-		ReferrerUserID: settlement.ReferrerUserID,
-		ReferredUserID: referredUserID,
-		BaseCostMicro:  costMicro,
-		CommissionBps:  settlement.CommissionBps,
-		AmountMicro:    amount,
-		CreatedAt:      time.Now().UTC(),
+		UsageLogID: usageLogID, ReferralCodeID: settlement.ReferralCodeID,
+		ReferrerUserID: settlement.ReferrerUserID, ReferredUserID: referredUserID,
+		BaseCostMicro: costMicro, CommissionBps: settlement.CommissionBps,
+		AmountMicro: amount, CreatedAt: time.Now().UTC(),
 	}
 	if err := tx.Create(&commission).Error; err != nil {
 		return err

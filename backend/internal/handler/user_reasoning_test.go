@@ -7,10 +7,13 @@ func TestNormalizeReasoningEffort(t *testing.T) {
 		input string
 		want  string
 	}{
+		// Official OpenAI enum passes through; legacy UI shortcuts are
+		// rewritten to their documented equivalents.
 		{"", "auto"}, {"AUTO", "auto"},
 		{"fast", "low"}, {"minimal", "low"},
-		{"none", "none"}, {"low", "low"}, {"medium", "medium"},
-		{"high", "high"}, {"xhigh", "xhigh"}, {"max", "max"},
+		{"none", "none"}, {"low", "low"},
+		{"medium", "medium"}, {"high", "high"}, {"xhigh", "xhigh"},
+		{"max", "max"},
 	} {
 		got, err := normalizeReasoningEffort(test.input)
 		if err != nil || got != test.want {

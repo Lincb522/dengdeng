@@ -88,8 +88,11 @@ type credentials struct {
 }
 
 type registrationCredentials struct {
-	Email         string `json:"email" binding:"required,email"`
-	Code          string `json:"code" binding:"required"`
+	Email string `json:"email" binding:"required,email"`
+	// Code is enforced in Register only while SMTP is configured; without a
+	// mailer there is no way to receive one, so registration falls back to
+	// plain email+password instead of locking everyone out.
+	Code          string `json:"code"`
 	Password      string `json:"password" binding:"required,min=8,max=72"`
 	TermsRevision string `json:"terms_revision"`
 	ReferralCode  string `json:"referral_code"`
@@ -210,7 +213,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		util.Fail(c, http.StatusForbidden, "latest terms must be accepted")
 		return
 	}
-	if len(code) != 6 {
+	// Email verification is only enforceable when a mailer can actually send
+	// codes. Without SMTP the flow degrades to email+password so a fresh
+	// deployment is still usable; the account is marked unverified.
+	verifyEmail := h.mailer != nil && h.mailer.Configured()
+	if verifyEmail && len(code) != 6 {
 		util.Fail(c, http.StatusBadRequest, "verification code must be 6 digits")
 		return
 	}
@@ -223,10 +230,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	user := model.User{}
 	now := time.Now()
 	err = h.db.Transaction(func(tx *gorm.DB) error {
-		var verification model.EmailVerification
-		if err := tx.Where("email = ? AND purpose = ? AND code_hash = ? AND used_at IS NULL AND expires_at > ?", email, registrationCodePurpose, h.verificationHash(email, registrationCodePurpose, code), now).
-			Order("id DESC").First(&verification).Error; err != nil {
-			return err
+		var verificationID int64
+		if verifyEmail {
+			var verification model.EmailVerification
+			if err := tx.Where("email = ? AND purpose = ? AND code_hash = ? AND used_at IS NULL AND expires_at > ?", email, registrationCodePurpose, h.verificationHash(email, registrationCodePurpose, code), now).
+				Order("id DESC").First(&verification).Error; err != nil {
+				return err
+			}
+			verificationID = verification.ID
 		}
 		var count int64
 		if err := tx.Model(&model.User{}).Where("email = ?", email).Count(&count).Error; err != nil {
@@ -249,7 +260,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		}
 		acceptedAt := now
 		user = model.User{
-			Email: email, EmailVerified: true, PasswordHash: hash,
+			Email: email, EmailVerified: verifyEmail, PasswordHash: hash,
 			Role: model.RoleUser, Status: model.StatusActive,
 			BalanceMicro: settings.InitBalanceMicro, RateMultiplier: 1,
 			TermsRevision: settings.LoginAgreement.Revision(), TermsAcceptedAt: &acceptedAt,
@@ -265,12 +276,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 				return err
 			}
 		}
-		res := tx.Model(&model.EmailVerification{}).Where("id = ? AND used_at IS NULL", verification.ID).Update("used_at", now)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
+		if verifyEmail {
+			res := tx.Model(&model.EmailVerification{}).Where("id = ? AND used_at IS NULL", verificationID).Update("used_at", now)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
 		}
 		return nil
 	})
@@ -362,10 +375,11 @@ func (h *AuthHandler) PublicSettings(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{
-		"site_name":                 settings.SiteName,
-		"site_subtitle":             settings.SiteSubtitle,
-		"allow_register":            settings.AllowRegister,
-		"registration_verification": true,
+		"site_name":      settings.SiteName,
+		"site_subtitle":  settings.SiteSubtitle,
+		"allow_register": settings.AllowRegister,
+		// Verification is only demanded when the deployment can send codes.
+		"registration_verification": h.mailer != nil && h.mailer.Configured(),
 		"login_agreement": gin.H{
 			"enabled":    settings.LoginAgreement.Enabled,
 			"mode":       settings.LoginAgreement.Mode,

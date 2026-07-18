@@ -16,23 +16,23 @@ need() { # need <desc> <actual> <expect-substr>
   if [[ "$2" == *"$3"* ]]; then ok "$1"; else bad "$1 | got: ${2:0:300}"; fi
 }
 
-jqget() { python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2" <<<"$1"; }
+jqget() { jq -r "$2 // empty" <<<"$1"; }
 
 # The seeded login agreement requires clients to echo the current revision on
 # login/registration. Fetch it once so the flow works whether or not the terms
 # gate is enabled.
-REV=$(jqget "$(curl -s "$BASE/api/settings")" "d['data'].get('login_agreement',{}).get('revision','')")
+REV=$(jqget "$(curl -s "$BASE/api/settings")" '.data.login_agreement.revision')
 
 say "管理员登录"
 ADMIN_RESP=$(curl -s "$BASE/api/auth/login" -d "{\"email\":\"admin@test.local\",\"password\":\"admin12345\",\"terms_revision\":\"$REV\"}")
-ADMIN_TOKEN=$(jqget "$ADMIN_RESP" "d['data']['token']")
+ADMIN_TOKEN=$(jqget "$ADMIN_RESP" '.data.token')
 [[ -n "$ADMIN_TOKEN" ]] && ok "admin login" || { bad "admin login"; exit 1; }
 AH="Authorization: Bearer $ADMIN_TOKEN"
 
 say "创建四个平台分组 + mock 上游账号"
 for P in anthropic openai gemini grok; do
   G=$(curl -s "$BASE/api/admin/groups" -H "$AH" -d "{\"name\":\"grp-$P\",\"platform\":\"$P\"}")
-  GID=$(jqget "$G" "d['data']['id']")
+  GID=$(jqget "$G" '.data.id')
   A=$(curl -s "$BASE/api/admin/accounts" -H "$AH" -d "{\"group_id\":$GID,\"name\":\"mock-$P\",\"base_url\":\"$MOCK\",\"api_key\":\"mock-key\"}")
   need "group+account [$P]" "$A" '"id"'
   eval "GID_$P=$GID"
@@ -40,8 +40,8 @@ done
 
 say "用户注册 + 管理员充值"
 USER_RESP=$(curl -s "$BASE/api/auth/register" -d "{\"email\":\"user1@test.local\",\"password\":\"user12345\",\"terms_revision\":\"$REV\"}")
-USER_TOKEN=$(jqget "$USER_RESP" "d['data']['token']")
-USER_ID=$(jqget "$USER_RESP" "d['data']['user']['id']")
+USER_TOKEN=$(jqget "$USER_RESP" '.data.token')
+USER_ID=$(jqget "$USER_RESP" '.data.user.id')
 [[ -n "$USER_TOKEN" ]] && ok "user register" || bad "user register"
 UH="Authorization: Bearer $USER_TOKEN"
 curl -s -X PUT "$BASE/api/admin/users/$USER_ID" -H "$AH" -d '{"add_balance_micro":5000000}' >/dev/null
@@ -52,7 +52,7 @@ say "用户为四个平台各建一个 API Key"
 for P in anthropic openai gemini grok; do
   GID_VAR="GID_$P"
   K=$(curl -s "$BASE/api/user/keys" -H "$UH" -d "{\"name\":\"key-$P\",\"group_id\":${!GID_VAR}}")
-  PLAIN=$(jqget "$K" "d['data']['plain']")
+  PLAIN=$(jqget "$K" '.data.plain')
   [[ "$PLAIN" == dd-* ]] && ok "create key [$P]" || bad "create key [$P]"
   eval "KEY_$P=$PLAIN"
 done
@@ -98,13 +98,42 @@ need "grok via claude messages bridge" "$R" 'mock reply from grok'
 say "计费校验(计费调用后余额应减少)"
 sleep 1
 ME=$(curl -s "$BASE/api/user/me" -H "$UH")
-BAL_NOW=$(jqget "$ME" "d['data']['balance_micro']")
+BAL_NOW=$(jqget "$ME" '.data.balance_micro')
 if [[ "$BAL_NOW" -lt 5000000 ]]; then ok "balance deducted ($BAL_NOW < 5000000)"; else bad "balance not deducted ($BAL_NOW)"; fi
 
 USAGE=$(curl -s "$BASE/api/user/usage?size=20" -H "$UH")
-CNT=$(jqget "$USAGE" "d['data']['total']")
+CNT=$(jqget "$USAGE" '.data.total')
 if [[ "$CNT" -ge 6 ]]; then ok "usage logs written ($CNT)"; else bad "usage logs missing ($CNT)"; fi
 need "usage has token detail" "$USAGE" '"input_tokens":120'
+
+say "思考强度:官方档位 + 按档位计费倍率"
+# 管理员把 high 档倍率调成 2x,其余保持 1x。
+POL=$(curl -s "$BASE/api/admin/runtime-settings" -H "$AH")
+POL_PUT=$(jq '.data | .reasoning_effort_multipliers.high = 2' <<<"$POL")
+R=$(curl -s -X PUT "$BASE/api/admin/runtime-settings" -H "$AH" -d "$POL_PUT")
+need "set high effort multiplier = 2" "$R" '"high":2'
+# 同一模型分别用 medium / high 发起,mock 上游返回固定 token 用量,
+# 因此 high 的费用应恰好是 medium 的 2 倍。
+curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_openai" -H 'content-type: application/json' \
+  -d '{"model":"gpt-4o","reasoning_effort":"medium","messages":[{"role":"user","content":"hi"}]}' >/dev/null
+curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_openai" -H 'content-type: application/json' \
+  -d '{"model":"gpt-4o","reasoning_effort":"high","messages":[{"role":"user","content":"hi"}]}' >/dev/null
+sleep 1
+USAGE=$(curl -s "$BASE/api/user/usage?size=10" -H "$UH")
+COST_MED=$(jq -r '[.data.items[] | select(.reasoning_effort=="medium")][0].cost_micro' <<<"$USAGE")
+COST_HIGH=$(jq -r '[.data.items[] | select(.reasoning_effort=="high")][0].cost_micro' <<<"$USAGE")
+if [[ -n "$COST_MED" && "$COST_MED" != "null" && "$COST_HIGH" == "$((COST_MED * 2))" ]]; then
+  ok "high effort billed at 2x ($COST_HIGH = 2 * $COST_MED)"
+else
+  bad "effort billing mismatch (medium=$COST_MED high=$COST_HIGH)"
+fi
+# 旧档位 fast/max 已并入官方档位;fast 建密钥会被存成 low。
+K=$(curl -s "$BASE/api/user/keys" -H "$UH" -d "{\"name\":\"key-effort\",\"group_id\":$GID_openai,\"reasoning_effort\":\"fast\"}")
+need "legacy fast stored as official low" "$K" '"reasoning_effort":"low"'
+R=$(curl -s "$BASE/api/user/keys" -H "$UH" -d "{\"name\":\"key-bad\",\"group_id\":$GID_openai,\"reasoning_effort\":\"turbo\"}")
+need "invalid effort rejected" "$R" 'invalid reasoning effort'
+# 恢复倍率,避免影响后续用例。
+curl -s -X PUT "$BASE/api/admin/runtime-settings" -H "$AH" -d "$(jq '.data' <<<"$POL")" >/dev/null
 
 say "故障转移:坏账号(高优先级)+ 好账号,请求仍成功"
 GID_VAR="GID_anthropic"
@@ -118,7 +147,7 @@ need "broken account got cooldown" "$ACCTS" '"cooldown_until"'
 
 say "兑换码:管理员生成 -> 用户兑换"
 GEN=$(curl -s "$BASE/api/admin/redeem-codes" -H "$AH" -d '{"count":1,"amount_micro":2000000}')
-CODE=$(jqget "$GEN" "d['data']['codes'][0]")
+CODE=$(jqget "$GEN" '.data.codes[0]')
 RED=$(curl -s "$BASE/api/user/redeem" -H "$UH" -d "{\"code\":\"$CODE\"}")
 need "redeem ok" "$RED" '"amount_micro":2000000'
 RED2=$(curl -s "$BASE/api/user/redeem" -H "$UH" -d "{\"code\":\"$CODE\"}")
@@ -129,8 +158,13 @@ R=$(curl -s "$BASE/api/admin/users" -H "$UH")
 need "non-admin blocked from admin api" "$R" 'admin only'
 R=$(curl -s "$BASE/v1/messages" -H "x-api-key: dd-invalid" -d '{"model":"m"}')
 need "invalid api key rejected" "$R" 'invalid API key'
-R=$(curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_anthropic" -H 'content-type: application/json' -d '{"model":"gpt-4o"}')
-need "cross-platform key rejected" "$R" 'cannot call'
+# Claude 和 Gemini 分组从 OpenAI Chat 入口进来都会走协议桥接。
+R=$(curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_gemini" -H 'content-type: application/json' \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}')
+need "gemini group via openai chat bridge" "$R" 'mock reply from gemini'
+R=$(curl -s "$BASE/v1/chat/completions" -H "Authorization: Bearer $KEY_anthropic" -H 'content-type: application/json' \
+  -d '{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hi"}]}')
+need "claude group via openai chat bridge" "$R" 'mock reply from anthropic'
 
 say "安全:上游 token 在数据库中已加密"
 DBFILE="${DENGDENG_DB:-/tmp/dengdeng-e2e/test.db}"
@@ -152,7 +186,7 @@ say "安全:JWT 失效(改密码后旧 token 作废)"
 OLD_UH="$UH"
 CP=$(curl -s "$BASE/api/user/password" -H "$OLD_UH" -d '{"old_password":"user12345","new_password":"user54321new"}')
 need "change password returns new token" "$CP" '"token"'
-NEW_TOKEN=$(jqget "$CP" "d['data']['token']")
+NEW_TOKEN=$(jqget "$CP" '.data.token')
 R=$(curl -s "$BASE/api/user/me" -H "$OLD_UH")
 need "old token rejected after password change" "$R" 'session expired'
 R=$(curl -s "$BASE/api/user/me" -H "Authorization: Bearer $NEW_TOKEN")

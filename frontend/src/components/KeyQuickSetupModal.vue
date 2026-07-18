@@ -26,6 +26,7 @@ const selectedModel = ref('')
 const modelsState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const modelsError = ref('')
 const workingApiKey = ref('')
+// 创建之后也能直接在这里调整默认思考强度，改动即时保存到该密钥。
 const reasoningEffort = ref('auto')
 const savingEffort = ref(false)
 
@@ -47,11 +48,11 @@ async function changeReasoningEffort(event: Event) {
     reasoningEffort.value = value
     return
   }
-  reasoningEffort.value = value
   savingEffort.value = true
+  reasoningEffort.value = value
   try {
     await api.put(`/api/user/keys/${props.keyId}`, { reasoning_effort: value })
-    toast.show('思考强度已更新', 'success')
+    toast.show('默认思考强度已更新', 'success')
     emit('effort-updated', value)
   } catch (error) {
     reasoningEffort.value = previous
