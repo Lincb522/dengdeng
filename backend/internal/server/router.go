@@ -12,6 +12,7 @@ import (
 	"dengdeng/internal/middleware"
 	"dengdeng/internal/oauth"
 	"dengdeng/internal/service"
+	"dengdeng/internal/version"
 	"dengdeng/internal/web"
 
 	"github.com/gin-gonic/gin"
@@ -38,6 +39,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	audit := service.NewAuditService(db)
 	alertService := service.NewAlertService(db, service.NewSMTPMailer(cfg.SMTP, cfg.Site.Name, cfg.Site.PublicURL), cfg.Admin.Email)
 	backupService := service.NewBackupService(db, cfg)
+	updateService := service.NewUpdateService(cfg)
 	scheduler := service.NewScheduler(db)
 	scheduler.SetRuntimePolicy(runtimePolicy)
 	billing := service.NewBillingService(db, pricing)
@@ -73,10 +75,14 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	runtimeSettingsH := handler.NewRuntimeSettingsHandler(db, runtimePolicy, audit)
 	alertH := handler.NewAlertHandler(db, audit)
 	backupH := handler.NewBackupHandler(backupService, audit)
+	updateH := handler.NewUpdateHandler(updateService, backupService, audit)
 	paymentH := handler.NewPaymentHandler(payments)
 	adminPaymentH := handler.NewAdminPaymentHandler(payments)
 
-	r.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	r.GET("/health", func(c *gin.Context) {
+		build := version.Info()
+		c.JSON(http.StatusOK, gin.H{"status": "ok", "version": build.Version, "commit": build.Commit, "build_time": build.BuildTime})
+	})
 
 	// Relay endpoints (client API keys)
 	gw.Register(r)
@@ -170,6 +176,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/backups", backupH.Create)
 			admin.GET("/backups/:id/download", backupH.Download)
 			admin.DELETE("/backups/:id", backupH.Delete)
+			admin.GET("/update/status", updateH.Status)
+			admin.POST("/update/check", updateH.Check)
+			admin.POST("/update/apply", updateH.Apply)
+			admin.POST("/update/rollback", updateH.Rollback)
 			admin.GET("/prices", adminH.ListPrices)
 			admin.POST("/prices", adminH.UpsertPrice)
 			admin.DELETE("/prices/:id", adminH.DeletePrice)

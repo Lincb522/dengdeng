@@ -1,0 +1,23 @@
+[Unit]
+Description=DengDeng AI repository updater
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/dengdeng/update/request.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/dengdeng
+Environment=HOME=/opt/dengdeng/.update-home
+ExecStart=/usr/local/sbin/dengdeng-update
+TimeoutStartSec=45min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/opt/dengdeng /var/lib/dengdeng
+NoNewPrivileges=true
+UMask=0027

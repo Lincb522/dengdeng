@@ -1047,3 +1047,92 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Repository updates ------------------------------------------------------ */
+.update-page { max-width: 76rem; }
+.update-skeleton { display: grid; gap: .8rem; min-height: 18rem; padding: 1.25rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
+.update-skeleton span { border-radius: .45rem; background: linear-gradient(90deg, var(--surface-muted) 15%, var(--surface) 45%, var(--surface-muted) 75%); background-size: 220% 100%; animation: dashboard-skeleton 1.5s linear infinite; }
+.update-skeleton span:first-child { width: 42%; min-height: 3rem; }
+.update-skeleton span:nth-child(2) { min-height: 7rem; }
+.update-skeleton span:last-child { width: 68%; min-height: 2.5rem; }
+
+.update-release { display: grid; grid-template-columns: minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line); border-radius: .85rem; background: var(--surface); }
+.update-release-main { min-width: 0; padding: 1.35rem 1.5rem; }
+.update-state-line { display: flex; min-width: 0; align-items: center; gap: .55rem; color: var(--ink); }
+.update-state-line strong { overflow: hidden; font-size: .92rem; font-weight: 820; text-overflow: ellipsis; white-space: nowrap; }
+.update-state-dot { width: .58rem; height: .58rem; flex: 0 0 auto; border-radius: 50%; background: var(--ink-faint); }
+.update-release.is-queued .update-state-dot,
+.update-release.is-running .update-state-dot { background: var(--accent); box-shadow: 0 0 0 .28rem color-mix(in srgb, var(--accent) 16%, transparent); animation: update-pulse 1.15s ease-in-out infinite alternate; }
+.update-release.is-succeeded .update-state-dot { background: rgb(var(--dd-signal-green)); }
+.update-release.is-failed .update-state-dot { background: rgb(var(--dd-signal-red)); }
+.update-live, .update-ready, .update-current, .update-pending, .update-failed { margin-left: auto; font-size: .68rem; font-weight: 800; white-space: nowrap; }
+.update-live, .update-ready { color: var(--accent); }
+.update-current { color: rgb(var(--dd-signal-green)); }
+.update-pending { color: var(--ink-soft); }
+.update-failed { color: rgb(var(--dd-signal-red)); }
+
+.update-version-row { display: flex; align-items: center; gap: 1.25rem; margin-top: 1.2rem; }
+.update-version-row > div { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: .28rem .7rem; min-width: 10rem; }
+.update-version-row span { grid-column: 1 / -1; color: var(--ink-soft); font-size: .68rem; }
+.update-version-row b { color: var(--ink); font-size: 1.05rem; font-weight: 760; }
+.update-version-row code, .update-details code { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; }
+.update-version-row > svg { width: 1.25rem; height: 1.25rem; color: var(--ink-faint); fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+.update-actions { display: flex; width: 15rem; flex-direction: column; justify-content: center; gap: .55rem; padding: 1.25rem; border-left: 1px solid var(--line); background: var(--surface-muted); }
+.update-actions button { width: 100%; min-height: 2.45rem; }
+.update-rollback { min-height: 2.25rem; color: var(--ink-soft); font-size: .72rem; font-weight: 750; transition: color .18s ease, background .18s ease; }
+.update-rollback:hover:not(:disabled) { color: rgb(var(--dd-signal-red)); background: color-mix(in srgb, rgb(var(--dd-signal-red)) 8%, transparent); }
+.update-rollback:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.update-rollback:disabled { cursor: not-allowed; opacity: .48; }
+.update-disabled { margin: .8rem 0 0; padding: .75rem .9rem; border: 1px solid color-mix(in srgb, rgb(var(--dd-signal-red)) 35%, var(--line)); border-radius: .65rem; background: color-mix(in srgb, rgb(var(--dd-signal-red)) 6%, var(--surface)); color: var(--ink); font-size: .75rem; line-height: 1.55; }
+
+.update-progress { margin-top: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--line); }
+.update-progress-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.update-progress-head h2 { margin: 0; color: var(--ink); font-size: .85rem; font-weight: 820; }
+.update-progress-head p { max-width: 65ch; margin: .28rem 0 0; color: var(--ink-soft); font-size: .72rem; line-height: 1.55; }
+.update-progress-head time { color: var(--ink-faint); font-size: .68rem; white-space: nowrap; }
+.update-progress ol { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 1.25rem 0 0; padding: 0; list-style: none; }
+.update-progress li { position: relative; display: grid; justify-items: start; gap: .48rem; color: var(--ink-faint); font-size: .68rem; font-weight: 720; }
+.update-progress li::before { position: absolute; z-index: 0; top: .38rem; right: 0; left: .78rem; height: 1px; background: var(--line); content: ''; }
+.update-progress li:last-child::before { display: none; }
+.update-progress li i { position: relative; z-index: 1; display: grid; width: .78rem; height: .78rem; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); }
+.update-progress li svg { width: .58rem; height: .58rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; }
+.update-progress li.is-done { color: rgb(var(--dd-signal-green)); }
+.update-progress li.is-done i { border-color: rgb(var(--dd-signal-green)); background: color-mix(in srgb, rgb(var(--dd-signal-green)) 10%, var(--surface)); }
+.update-progress li.is-active { color: var(--accent); }
+.update-progress li.is-active i { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 .22rem color-mix(in srgb, var(--accent) 14%, transparent); }
+.update-progress li.is-failed { color: rgb(var(--dd-signal-red)); }
+.update-progress li.is-failed i { border-color: rgb(var(--dd-signal-red)); background: rgb(var(--dd-signal-red)); }
+.update-progress li.is-skipped { color: var(--ink-faint); opacity: .56; }
+
+.update-details { display: grid; grid-template-columns: minmax(0, 2fr) repeat(3, minmax(8rem, 1fr)); gap: 0; margin-top: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
+.update-details > div { display: grid; min-width: 0; gap: .28rem; padding: .9rem 1rem; border-left: 1px solid var(--line); }
+.update-details > div:first-child { border-left: 0; }
+.update-details span { color: var(--ink-soft); font-size: .65rem; }
+.update-details a, .update-details time { overflow: hidden; color: var(--ink); font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.update-details a:hover { color: var(--accent); }
+.update-details a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@keyframes update-pulse { to { opacity: .62; transform: scale(.88); } }
+
+@media (max-width: 760px) {
+  .update-release { grid-template-columns: 1fr; }
+  .update-actions { width: auto; border-top: 1px solid var(--line); border-left: 0; }
+  .update-version-row { align-items: flex-start; flex-direction: column; gap: .7rem; }
+  .update-version-row > svg { transform: rotate(90deg); }
+  .update-progress { padding-right: 1rem; padding-left: 1rem; }
+  .update-progress ol { grid-template-columns: 1fr; gap: .72rem; }
+  .update-progress li { grid-template-columns: auto 1fr; align-items: center; justify-items: start; }
+  .update-progress li::before { top: .78rem; right: auto; bottom: -.75rem; left: .38rem; width: 1px; height: auto; }
+  .update-details { grid-template-columns: 1fr 1fr; }
+  .update-details > div:nth-child(odd) { border-left: 0; }
+  .update-details > div:nth-child(n+3) { border-top: 1px solid var(--line); }
+}
+
+@media (max-width: 460px) {
+  .update-release-main { padding: 1.1rem; }
+  .update-progress-head { flex-direction: column; }
+  .update-details { grid-template-columns: 1fr; }
+  .update-details > div { border-top: 1px solid var(--line); border-left: 0; }
+  .update-details > div:first-child { border-top: 0; }
+}

@@ -53,6 +53,8 @@ jobs:
         run: |
           echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
           echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$(git describe --tags --always)" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -96,6 +98,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.image.outputs.version }}
+            COMMIT=${{ steps.image.outputs.revision }}
+            BUILD_TIME=${{ steps.image.outputs.build_time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

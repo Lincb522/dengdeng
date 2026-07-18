@@ -136,6 +136,31 @@ export interface BackupRecord {
 	completed_at: string | null
 }
 
+export interface UpdateStatus {
+	enabled: boolean
+	repository: string
+	branch: string
+	status: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed'
+	action: '' | 'check' | 'apply' | 'rollback'
+	stage: string
+	message: string
+	current_version: string
+	current_commit: string
+	target_commit: string
+	previous_commit: string
+	update_available: boolean
+	can_rollback: boolean
+	requested_by: string
+	requested_at: string
+	started_at: string
+	finished_at: string
+}
+
+export interface UpdateActionResponse {
+	status: UpdateStatus
+	backup?: BackupRecord
+}
+
 export interface UserGroupRate {
 	id: number
 	user_id: number
