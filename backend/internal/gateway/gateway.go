@@ -132,8 +132,70 @@ type authedKey struct {
 	Key             model.APIKey
 	User            model.User
 	Group           model.Group
+	Groups          []model.Group
 	AccessActive    bool
 	RequestReserved bool
+}
+
+func (ak *authedKey) selectGroup(platforms ...string) bool {
+	if ak == nil {
+		return false
+	}
+	for _, platform := range platforms {
+		if ak.Group.ID > 0 && ak.Group.Platform == platform {
+			return true
+		}
+		for _, group := range ak.Groups {
+			if group.Platform == platform {
+				ak.Group = group
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (ak *authedKey) groupsForPlatform(platform string) []model.Group {
+	if ak == nil {
+		return nil
+	}
+	result := make([]model.Group, 0, len(ak.Groups))
+	seen := make(map[int64]struct{}, len(ak.Groups))
+	if ak.Group.ID > 0 && ak.Group.Platform == platform {
+		result = append(result, ak.Group)
+		seen[ak.Group.ID] = struct{}{}
+	}
+	for _, group := range ak.Groups {
+		if group.Platform != platform {
+			continue
+		}
+		if _, exists := seen[group.ID]; exists {
+			continue
+		}
+		result = append(result, group)
+		seen[group.ID] = struct{}{}
+	}
+	return result
+}
+
+func (g *Gateway) selectGroupForModel(ak *authedKey, modelName string, fallbacks ...string) bool {
+	modelName = strings.TrimSpace(modelName)
+	if modelName != "" {
+		var cfg model.ModelConfig
+		if err := g.db.Where("name = ? AND status = ?", modelName, model.StatusActive).First(&cfg).Error; err == nil {
+			allowed := len(fallbacks) == 0
+			for _, platform := range fallbacks {
+				if cfg.Platform == platform {
+					allowed = true
+					break
+				}
+			}
+			if allowed && ak.selectGroup(cfg.Platform) {
+				return true
+			}
+		}
+	}
+	return ak.selectGroup(fallbacks...)
 }
 
 type authOptions struct {
@@ -175,7 +237,8 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 	}
 
 	var key model.APIKey
-	err := g.db.Where("key_hash = ?", util.HashAPIKey(strings.TrimSpace(raw))).First(&key).Error
+	err := g.db.Preload("Groups", func(db *gorm.DB) *gorm.DB { return db.Order("groups.id ASC") }).
+		Where("key_hash = ?", util.HashAPIKey(strings.TrimSpace(raw))).First(&key).Error
 	if err != nil {
 		util.Fail(c, http.StatusUnauthorized, "invalid API key")
 		return nil, false
@@ -228,16 +291,41 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 		return nil, false
 	}
 
-	var group model.Group
-	if err := g.db.First(&group, key.GroupID).Error; err != nil || group.Status != model.StatusActive {
+	activeGroups := make([]model.Group, 0, len(key.Groups)+1)
+	var primaryGroup model.Group
+	for _, group := range key.Groups {
+		if group.Status != model.StatusActive {
+			continue
+		}
+		if group.ID == key.GroupID {
+			primaryGroup = group
+			continue
+		}
+		activeGroups = append(activeGroups, group)
+	}
+	if primaryGroup.ID == 0 {
+		if err := g.db.First(&primaryGroup, key.GroupID).Error; err != nil || primaryGroup.Status != model.StatusActive {
+			primaryGroup = model.Group{}
+		}
+	}
+	if primaryGroup.ID > 0 {
+		activeGroups = append([]model.Group{primaryGroup}, activeGroups...)
+	}
+	if len(activeGroups) == 0 {
 		util.Fail(c, http.StatusForbidden, "group disabled")
 		return nil, false
+	}
+	key.Group = &activeGroups[0]
+	key.Groups = activeGroups
+	key.GroupIDs = make([]int64, 0, len(activeGroups))
+	for _, group := range activeGroups {
+		key.GroupIDs = append(key.GroupIDs, group.ID)
 	}
 
 	if options.touchLastUsed {
 		go g.db.Model(&model.APIKey{}).Where("id = ?", key.ID).Update("last_used_at", time.Now())
 	}
-	return &authedKey{Key: key, User: user, Group: group, AccessActive: accessActive}, true
+	return &authedKey{Key: key, User: user, Group: activeGroups[0], Groups: activeGroups, AccessActive: accessActive}, true
 }
 
 func (g *Gateway) allowKeySourceIP(key model.APIKey, sourceIP string) bool {
@@ -392,12 +480,12 @@ func jsonStringPath(root map[string]any, path ...string) string {
 // relay runs the account failover loop and, on success, streams the response
 // while capturing usage for billing.
 func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
-	if ak.Group.Platform != req.Platform {
-		util.Fail(c, http.StatusBadRequest,
-			fmt.Sprintf("this key belongs to a %s group and cannot call %s endpoints", ak.Group.Platform, req.Platform))
+	routeGroups := ak.groupsForPlatform(req.Platform)
+	if len(routeGroups) == 0 {
+		util.Fail(c, http.StatusBadRequest, fmt.Sprintf("this key has no %s group", req.Platform))
 		return
 	}
-	routeGroup := ak.Group
+	routeGroup := routeGroups[0]
 	if req.UpstreamGroupID > 0 {
 		if !req.Image {
 			util.Fail(c, http.StatusBadRequest, "dedicated upstream groups are only supported for image requests")
@@ -411,6 +499,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			util.Fail(c, http.StatusBadRequest, "configured image upstream group has a different platform")
 			return
 		}
+		routeGroups = []model.Group{routeGroup}
 	}
 	activeRequest := g.runtime.Begin(req.Platform, routeGroup.ID, ak.User.ID)
 	defer activeRequest.Finish()
@@ -475,10 +564,30 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	var tried []int64
 	var lastStatus int
 	var lastBody []byte
+	lastAttemptGroup := routeGroup
 	sessionID := relaySessionID(c, ak.Key.ID, req.Body)
 	req.SessionID = sessionID
+	groupIndex := 0
+	unavailableGroups := make(map[int64]struct{}, len(routeGroups))
+	advanceGroup := func(markCurrentUnavailable bool) bool {
+		if markCurrentUnavailable {
+			unavailableGroups[routeGroup.ID] = struct{}{}
+		}
+		for offset := 1; offset <= len(routeGroups); offset++ {
+			candidateIndex := (groupIndex + offset) % len(routeGroups)
+			candidate := routeGroups[candidateIndex]
+			if _, unavailable := unavailableGroups[candidate.ID]; unavailable {
+				continue
+			}
+			groupIndex = candidateIndex
+			routeGroup = candidate
+			activeRequest.SetGroup(routeGroup.ID)
+			return true
+		}
+		return false
+	}
 
-	for attempt := 0; attempt < g.relayAttempts(); attempt++ {
+	for attempt := 0; attempt < g.relayAttempts(); {
 		if c.Request.Context().Err() != nil {
 			return
 		}
@@ -499,26 +608,34 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				return
 			}
 			if errors.Is(err, service.ErrAccountQueueFull) || errors.Is(err, service.ErrAccountWaitTimeout) || errors.Is(err, service.ErrAccountConcurrencyBusy) {
+				if advanceGroup(true) {
+					continue
+				}
 				c.Header("Retry-After", "1")
 				g.setRelayTimingHeaders(c, trace)
 				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusTooManyRequests, "upstream account concurrency limit reached")
 				util.Fail(c, http.StatusTooManyRequests, "upstream accounts are busy; retry later")
 				return
 			}
-			if errors.Is(err, service.ErrNoAccount) && lastStatus != 0 {
-				break // fall through to lastStatus passthrough
-			}
 			if errors.Is(err, service.ErrNoAccount) {
+				if advanceGroup(true) {
+					continue
+				}
+				if lastStatus != 0 {
+					break // fall through to lastStatus passthrough
+				}
 				g.setRelayTimingHeaders(c, trace)
-				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, "no available upstream account in this group")
-				util.Fail(c, http.StatusServiceUnavailable, "no available upstream account in this group")
+				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, "no available upstream account in the selected groups")
+				util.Fail(c, http.StatusServiceUnavailable, "no available upstream account in the selected groups")
 				return
 			}
 			util.Fail(c, http.StatusInternalServerError, "scheduler error")
 			return
 		}
 		tried = append(tried, acc.ID)
+		attempt++
 		trace.AttemptCount++
+		lastAttemptGroup = routeGroup
 		activeRequest.SetAccount(acc.ID)
 
 		upstreamStarted := time.Now()
@@ -533,6 +650,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			log.Printf("[gateway] account %d network error: %v", acc.ID, err)
 			g.scheduler.ReportFailure(acc.ID, 0, err.Error())
 			lastStatus, lastBody = http.StatusBadGateway, []byte(`{"error":{"message":"upstream connection failed"}}`)
+			if len(routeGroups) > 1 {
+				advanceGroup(false)
+			}
 			continue
 		}
 
@@ -543,6 +663,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			lastStatus, lastBody = resp.StatusCode, body
 			if retryableUpstream(resp.StatusCode, body) {
 				g.scheduler.ReportFailureForModel(acc.ID, req.Model, resp.StatusCode, string(body))
+				if len(routeGroups) > 1 {
+					advanceGroup(false)
+				}
 				continue
 			}
 			break
@@ -585,7 +708,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		lastStatus, lastBody = http.StatusServiceUnavailable, []byte(`{"error":{"message":"no available upstream account"}}`)
 	}
 	g.setRelayTimingHeaders(c, trace)
-	g.recordRelayFailure(c, ak, routeGroup, req, start, trace, lastStatus, truncate(string(lastBody), 500))
+	g.recordRelayFailure(c, ak, lastAttemptGroup, req, start, trace, lastStatus, truncate(string(lastBody), 500))
 	c.Data(lastStatus, "application/json", lastBody)
 }
 

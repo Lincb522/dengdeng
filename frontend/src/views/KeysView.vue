@@ -12,7 +12,7 @@ const keys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const showCreate = ref(false)
 const newName = ref('')
-const newGroupID = ref<number | null>(null)
+const newGroupIDs = ref<number[]>([])
 const newQuota = ref(0)
 const newDailyQuota = ref(0)
 const newConcurrency = ref(0)
@@ -24,12 +24,37 @@ const setupPlain = ref('')
 const showSetup = ref(false)
 const copiedKeyID = ref<number | null>(null)
 const settingKey = ref<ApiKey | null>(null)
-const settingsForm = ref({ name: '', group_id: 0, reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
+const settingsForm = ref({ name: '', group_ids: [] as number[], reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
 const reasoningOptions = REASONING_OPTIONS
 
-function groupPlatform(groupID: number | null | undefined) {
-  return groups.value.find((group) => group.id === groupID)?.platform || ''
+function selectedGroups(groupIDs: number[]) {
+  const selected = new Set(groupIDs)
+  return groups.value.filter((group) => selected.has(group.id))
+}
+
+function keyGroups(key: ApiKey | null | undefined) {
+  if (!key) return []
+  if (Array.isArray(key.groups) && key.groups.length) return key.groups
+  return key.group ? [key.group] : []
+}
+
+function keyGroupIDs(key: ApiKey) {
+  if (Array.isArray(key.group_ids) && key.group_ids.length) return [...key.group_ids]
+  const ids = keyGroups(key).map((group) => group.id)
+  return ids.length ? ids : key.group_id ? [key.group_id] : []
+}
+
+function hasPlatform(groupIDs: number[], platform: string) {
+  return selectedGroups(groupIDs).some((group) => group.platform === platform)
+}
+
+function keyHasPlatform(key: ApiKey, platform: string) {
+  return keyGroups(key).some((group) => group.platform === platform)
+}
+
+function keyPlatforms(key: ApiKey | null | undefined) {
+  return [...new Set(keyGroups(key).map((group) => group.platform))]
 }
 
 function quickSetupStorageKey(keyID: number) {
@@ -95,19 +120,19 @@ function toLocalDateTime(value: string | null | undefined) {
 async function load() {
   keys.value = await api.get<ApiKey[]>('/api/user/keys')
   groups.value = await api.get<Group[]>('/api/user/groups')
-  if (groups.value.length && newGroupID.value === null) {
-    newGroupID.value = groups.value[0].id
+  if (groups.value.length && !newGroupIDs.value.length) {
+    newGroupIDs.value = [groups.value[0].id]
   }
 }
 onMounted(load)
 
 async function createKey() {
-  if (!newName.value || !newGroupID.value) return
+  if (!newName.value || !newGroupIDs.value.length) return
   const result = await withToast(
     () => api.post<{ key: ApiKey; plain: string }>('/api/user/keys', {
       name: newName.value,
-      group_id: newGroupID.value,
-	  reasoning_effort: groupPlatform(newGroupID.value) === 'openai' ? newReasoningEffort.value : 'auto',
+      group_ids: newGroupIDs.value,
+	  reasoning_effort: hasPlatform(newGroupIDs.value, 'openai') ? newReasoningEffort.value : 'auto',
       quota_micro: toMicro(newQuota.value),
       daily_quota_micro: toMicro(newDailyQuota.value),
 		concurrency: Math.max(0, Math.floor(Number(newConcurrency.value) || 0)),
@@ -145,7 +170,7 @@ function openSettings(key: ApiKey) {
   settingKey.value = key
   settingsForm.value = {
     name: key.name,
-    group_id: key.group_id,
+	group_ids: keyGroupIDs(key),
 	  reasoning_effort: normalizeReasoningEffort(key.reasoning_effort),
     quota: fromMicro(key.quota_micro),
     daily_quota: fromMicro(key.daily_quota_micro),
@@ -159,11 +184,11 @@ function openSettings(key: ApiKey) {
 }
 
 async function saveSettings() {
-  if (!settingKey.value || !settingsForm.value.name || !settingsForm.value.group_id) return
+  if (!settingKey.value || !settingsForm.value.name || !settingsForm.value.group_ids.length) return
   const saved = await withToast(() => api.put(`/api/user/keys/${settingKey.value!.id}`, {
     name: settingsForm.value.name,
-    group_id: settingsForm.value.group_id,
-	  reasoning_effort: groupPlatform(settingsForm.value.group_id) === 'openai' ? settingsForm.value.reasoning_effort : 'auto',
+    group_ids: settingsForm.value.group_ids,
+	  reasoning_effort: hasPlatform(settingsForm.value.group_ids, 'openai') ? settingsForm.value.reasoning_effort : 'auto',
     quota_micro: toMicro(settingsForm.value.quota),
     daily_quota_micro: toMicro(settingsForm.value.daily_quota),
     status: settingsForm.value.status,
@@ -251,13 +276,13 @@ function onSetupEffortUpdated(value: string) {
     <div class="console-page-head">
       <div>
         <h1>API 密钥</h1>
-        <p class="mt-1 text-sm text-slate-500">密钥可独立绑定分组、总额度和每日额度；填 0 即不限制。</p>
+        <p class="mt-1 text-sm text-slate-500">一把密钥可绑定多个分组，并独立设置总额度和每日额度；填 0 即不限制。</p>
       </div>
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base">
+      <table class="table-base key-table">
         <thead>
           <tr>
             <th>名称</th>
@@ -271,7 +296,7 @@ function onSetupEffortUpdated(value: string) {
         </thead>
         <tbody>
           <tr v-for="k in keys" :key="k.id">
-            <td class="font-medium text-slate-200">{{ k.name }}</td>
+            <td class="whitespace-nowrap font-medium text-slate-200">{{ k.name }}</td>
             <td>
               <div class="flex items-center gap-2 whitespace-nowrap">
                 <code class="num text-xs text-slate-400">{{ k.key_preview }}</code>
@@ -285,13 +310,15 @@ function onSetupEffortUpdated(value: string) {
               </div>
             </td>
             <td>
-              <span class="tag-gray">{{ k.group?.name }}</span>
-              <span class="ml-1.5 text-xs text-slate-500">{{ PLATFORM_LABELS[k.group?.platform || ''] }}</span>
+				<div class="key-group-tags">
+					<span v-for="group in keyGroups(k)" :key="group.id" class="tag-gray">{{ group.name }} · {{ PLATFORM_LABELS[group.platform] }}</span>
+					<span v-if="!keyGroups(k).length" class="text-xs text-slate-500">未绑定</span>
+				</div>
             </td>
 				<td class="text-xs">
 					<div class="num text-slate-300">{{ k.quota_micro ? `${formatMoney(k.quota_used_micro)} / ${formatMoney(k.quota_micro)}` : '总额不限' }}</div>
 					<div class="mt-1 text-slate-500">每日 {{ quotaLabel(k.daily_quota_micro) }}</div>
-					<div v-if="k.group?.platform === 'openai'" class="mt-1 text-slate-500">思考强度 Reasoning Effort：{{ reasoningLabel(k.reasoning_effort) }}</div>
+					<div v-if="keyHasPlatform(k, 'openai')" class="mt-1 text-slate-500">思考强度 Reasoning Effort：{{ reasoningLabel(k.reasoning_effort) }}</div>
 					<div v-if="k.rpm || k.concurrency || k.expires_at || k.allowed_ips || k.blocked_ips" class="mt-1 text-slate-500">{{ k.rpm ? `${k.rpm} RPM · ` : '' }}{{ k.concurrency ? `并发 ${k.concurrency}` : '并发不限' }}{{ k.expires_at ? ` · 到期 ${new Date(k.expires_at).toLocaleDateString()}` : (k.allowed_ips || k.blocked_ips ? ' · 已设 IP 规则' : '') }}</div>
 				</td>
             <td>
@@ -319,7 +346,7 @@ function onSetupEffortUpdated(value: string) {
     <!-- 创建弹窗 -->
     <Teleport to="body">
       <div v-if="showCreate" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="closeCreate">
-        <div class="card w-full max-w-md p-6">
+        <div class="card max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto p-6">
           <template v-if="!createdPlain">
             <h3 class="mb-5 text-base font-semibold text-slate-100">新建 API 密钥</h3>
             <div class="space-y-4">
@@ -328,20 +355,22 @@ function onSetupEffortUpdated(value: string) {
                 <input v-model="newName" class="input" placeholder="例如:my-claude-code" maxlength="64" />
               </div>
               <div>
-                <label class="label">选择分组</label>
-                <select v-model="newGroupID" class="input">
-                  <option v-for="g in groups" :key="g.id" :value="g.id">
-                    {{ g.name }} ({{ PLATFORM_LABELS[g.platform] }}, 倍率 x{{ g.rate_multiplier }})
-                  </option>
-                </select>
+				<label class="label">选择分组（可多选）</label>
+				<div class="key-group-picker" role="group" aria-label="选择密钥分组">
+					<label v-for="g in groups" :key="g.id" :class="{ 'is-selected': newGroupIDs.includes(g.id) }">
+						<input v-model="newGroupIDs" type="checkbox" :value="g.id" />
+						<span><strong>{{ g.name }}</strong><small>{{ PLATFORM_LABELS[g.platform] }} · 倍率 ×{{ g.rate_multiplier }}</small></span>
+					</label>
+				</div>
+				<p v-if="newGroupIDs.length" class="key-group-picker-note">已选 {{ newGroupIDs.length }} 个分组；模型会按平台自动路由，同平台分组不可用时自动切换。</p>
                 <p v-if="!groups.length" class="mt-2 text-xs text-signal-red">暂无开放分组,请联系管理员</p>
               </div>
-					<div v-if="groupPlatform(newGroupID) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3">
+					<div v-if="hasPlatform(newGroupIDs, 'openai')" class="rounded-lg border border-amber/20 bg-amber/5 p-3">
 						<label class="label">默认思考强度 Reasoning Effort</label>
 						<select v-model="newReasoningEffort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
 						<p class="mt-2 text-xs leading-5 text-slate-500">档位与 GPT‑5.6 官方一致；客户端显式设置时优先。高档位会按后台设置的独立倍率计费，创建后仍可修改。</p>
 					</div>
-				<div class="grid grid-cols-2 gap-3 rounded-lg border border-slate-800 bg-slate-950/35 p-3">
+				<div class="key-policy-panel grid grid-cols-2 gap-3">
 					<label><span class="label">总额度（USD）</span><input v-model.number="newQuota" type="number" min="0" step="0.01" class="input" placeholder="0 = 不限制" /></label>
 					<label><span class="label">每日额度（USD）</span><input v-model.number="newDailyQuota" type="number" min="0" step="0.01" class="input" placeholder="0 = 不限制" /></label>
 					<p class="col-span-2 text-xs leading-5 text-slate-500">额度按实际调用费用扣减，与账户余额独立；总额度耗尽或达到当日额度后，该密钥会被拒绝调用。</p>
@@ -349,7 +378,7 @@ function onSetupEffortUpdated(value: string) {
 				<label><span class="label">并发上限</span><input v-model.number="newConcurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /><small class="mt-1 block text-[11px] text-slate-500">限制这把密钥同时进行中的完整请求数量，包含流式响应。</small></label>
               <div class="flex justify-end gap-3 pt-2">
                 <button class="btn-ghost" @click="closeCreate">取消</button>
-                <button class="btn-primary" :disabled="!newName || !newGroupID" @click="createKey">创建</button>
+                <button class="btn-primary" :disabled="!newName || !newGroupIDs.length" @click="createKey">创建</button>
               </div>
             </div>
           </template>
@@ -371,20 +400,20 @@ function onSetupEffortUpdated(value: string) {
 
 		<Teleport to="body">
 			<div v-if="settingKey" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="settingKey = null">
-				<div class="card w-full max-w-md p-6">
+				<div class="card max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto p-6">
 					<h3 class="mb-1 text-base font-semibold text-slate-100">密钥设置</h3>
 					<p class="mb-5 text-xs text-slate-500">预算按实际费用累计；设为 0 表示不设置该层上限。IP 规则和请求速率会在网关鉴权阶段执行。</p>
 					<div class="space-y-4">
 						<label><span class="label">密钥名称</span><input v-model.trim="settingsForm.name" class="input" maxlength="64" /></label>
-						<label><span class="label">分组</span><select v-model.number="settingsForm.group_id" class="input"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}（{{ PLATFORM_LABELS[group.platform] }}）</option></select></label>
-						<div v-if="groupPlatform(settingsForm.group_id) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度 Reasoning Effort</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">客户端显式设置时优先；费用按实际生效档位计算。</p></div>
+						<div><span class="label">分组（可多选）</span><div class="key-group-picker" role="group" aria-label="编辑密钥分组"><label v-for="group in groups" :key="group.id" :class="{ 'is-selected': settingsForm.group_ids.includes(group.id) }"><input v-model="settingsForm.group_ids" type="checkbox" :value="group.id" /><span><strong>{{ group.name }}</strong><small>{{ PLATFORM_LABELS[group.platform] }} · 倍率 ×{{ group.rate_multiplier }}</small></span></label></div><p v-if="settingsForm.group_ids.length" class="key-group-picker-note">已选 {{ settingsForm.group_ids.length }} 个分组；保存后立即生效，不需要重新生成密钥。</p></div>
+						<div v-if="hasPlatform(settingsForm.group_ids, 'openai')" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度 Reasoning Effort</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">客户端显式设置时优先；费用按实际生效档位计算。</p></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label><span class="label">并发上限</span><input v-model.number="settingsForm.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /><small class="mt-1 block text-[11px] text-slate-500">覆盖请求的完整生命周期。</small></label></div>
 						<label><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="mt-1 block text-[11px] text-slate-500">留空表示永久有效</small></label>
 						<label><span class="label">IP 白名单</span><input v-model.trim="settingsForm.allowed_ips" class="input font-mono text-xs" placeholder="203.0.113.8, 2001:db8::/32（留空不限）" /><small class="mt-1 block text-[11px] text-slate-500">仅允许列出的 IP 或 CIDR；多个规则用逗号或空格分隔。</small></label>
 						<label><span class="label">IP 黑名单</span><input v-model.trim="settingsForm.blocked_ips" class="input font-mono text-xs" placeholder="198.51.100.0/24（留空不拦截）" /><small class="mt-1 block text-[11px] text-slate-500">黑名单优先于白名单，用于立即阻断异常来源。</small></label>
 						<label><span class="label">状态</span><select v-model="settingsForm.status" class="input"><option value="active">启用</option><option value="disabled">停用</option></select></label>
-						<div class="flex justify-end gap-3 pt-2"><button class="btn-ghost" @click="settingKey = null">取消</button><button class="btn-primary" :disabled="!settingsForm.name || !settingsForm.group_id" @click="saveSettings">保存</button></div>
+						<div class="flex justify-end gap-3 pt-2"><button class="btn-ghost" @click="settingKey = null">取消</button><button class="btn-primary" :disabled="!settingsForm.name || !settingsForm.group_ids.length" @click="saveSettings">保存</button></div>
 					</div>
 				</div>
 			</div>
@@ -395,7 +424,8 @@ function onSetupEffortUpdated(value: string) {
 			:api-key="setupPlain"
 			:key-id="setupKey?.id || null"
 			:key-name="setupKey?.name || ''"
-			:platform="setupKey?.group?.platform || 'openai'"
+			:platform="keyGroups(setupKey)[0]?.platform || 'openai'"
+			:platforms="keyPlatforms(setupKey)"
 			:reasoning-effort="setupKey?.reasoning_effort || 'auto'"
       @close="closeQuickSetup"
 			@rotate="requestRotateForSetup"

@@ -63,6 +63,11 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	modelName := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok) {
+		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with Anthropic Messages")
+		return
+	}
 	// OpenAI/Codex and Grok groups both speak the OpenAI Responses contract,
 	// so Claude Code's Messages request is bridged to Responses upstream.
 	if ak.Group.Platform == model.PlatformOpenAI || ak.Group.Platform == model.PlatformGrok {
@@ -72,7 +77,7 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 	g.relay(c, ak, relayRequest{
 		Platform: model.PlatformAnthropic,
 		Path:     "/v1/messages",
-		Model:    jsonString(fields["model"]),
+		Model:    modelName,
 		Stream:   jsonBool(fields["stream"]),
 		Body:     body,
 		Billable: true,
@@ -87,6 +92,15 @@ func (g *Gateway) handleAnthropicCountTokens(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	fields := peekJSON(body)
+	modelName := ""
+	if fields != nil {
+		modelName = jsonString(fields["model"])
+	}
+	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok) {
+		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with Anthropic Messages")
 		return
 	}
 	// OpenAI has no equivalent of Anthropic's token-count endpoint. Claude
@@ -118,6 +132,11 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 	fields := peekJSON(body)
 	if fields == nil {
 		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic, model.PlatformGemini) {
+		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with OpenAI Chat Completions")
 		return
 	}
 	if ak.Group.Platform == model.PlatformAnthropic {
@@ -189,6 +208,11 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 	fields := peekJSON(body)
 	if fields == nil {
 		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic) {
+		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with OpenAI Responses")
 		return
 	}
 	if ak.Group.Platform == model.PlatformAnthropic {
@@ -364,6 +388,10 @@ func (g *Gateway) handleOpenAIImageGeneration(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ak.selectGroup(model.PlatformOpenAI) {
+		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI image group")
+		return
+	}
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
@@ -386,6 +414,10 @@ func (g *Gateway) handleOpenAIImageGeneration(c *gin.Context) {
 func (g *Gateway) handleOpenAIImageEdit(c *gin.Context) {
 	ak, ok := g.authenticate(c)
 	if !ok {
+		return
+	}
+	if !ak.selectGroup(model.PlatformOpenAI) {
+		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI image group")
 		return
 	}
 	body, err := readBody(c)
@@ -496,6 +528,10 @@ func (g *Gateway) handleGemini(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !ak.selectGroup(model.PlatformGemini) {
+		util.Fail(c, http.StatusBadRequest, "this key has no Gemini group")
+		return
+	}
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
@@ -539,8 +575,25 @@ func (g *Gateway) handleListModels(c *gin.Context) {
 	if !ok {
 		return
 	}
+	platformSet := make(map[string]struct{}, len(ak.Groups))
+	for _, group := range ak.Groups {
+		platformSet[group.Platform] = struct{}{}
+	}
+	platforms := make([]string, 0, len(platformSet))
+	requestedPlatform := strings.TrimSpace(c.Query("platform"))
+	if requestedPlatform != "" {
+		if _, allowed := platformSet[requestedPlatform]; !allowed {
+			util.Fail(c, http.StatusForbidden, "platform is not available to this key")
+			return
+		}
+		platforms = append(platforms, requestedPlatform)
+	} else {
+		for platform := range platformSet {
+			platforms = append(platforms, platform)
+		}
+	}
 	var configs []model.ModelConfig
-	if err := g.db.Where("platform = ? AND status = ?", ak.Group.Platform, model.StatusActive).Order("name").Find(&configs).Error; err != nil {
+	if err := g.db.Where("platform IN ? AND status = ?", platforms, model.StatusActive).Order("platform, name").Find(&configs).Error; err != nil {
 		util.Fail(c, http.StatusInternalServerError, "load model catalogue failed")
 		return
 	}

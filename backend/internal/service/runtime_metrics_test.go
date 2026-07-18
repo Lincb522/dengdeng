@@ -42,3 +42,21 @@ func TestRuntimeMetricsFinishReleasesWaiting(t *testing.T) {
 		t.Fatalf("finish leaked runtime counts: %+v", snapshot)
 	}
 }
+
+func TestRuntimeMetricsMovesRequestBetweenGroups(t *testing.T) {
+	metrics := NewRuntimeMetrics()
+	request := metrics.Begin("openai", 7, 11)
+	request.SetWaiting(true)
+	request.SetGroup(8)
+
+	if snapshot := metrics.Snapshot("", 7); snapshot.InFlight != 0 || snapshot.Waiting != 0 {
+		t.Fatalf("old group retained counts: %+v", snapshot)
+	}
+	if snapshot := metrics.Snapshot("", 8); snapshot.InFlight != 1 || snapshot.Waiting != 1 {
+		t.Fatalf("new group did not receive counts: %+v", snapshot)
+	}
+	request.Finish()
+	if snapshot := metrics.Snapshot("", 8); snapshot.InFlight != 0 || snapshot.Waiting != 0 {
+		t.Fatalf("finish leaked moved counts: %+v", snapshot)
+	}
+}

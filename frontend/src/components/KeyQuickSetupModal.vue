@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { api, copyText } from '../api/client'
 import { localizedApiError, localizeErrorMessage } from '../api/errors'
 import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS } from '../api/reasoning'
+import { PLATFORM_LABELS } from '../api/types'
 import { useToast } from '../stores/toast'
 
 type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch'
@@ -14,7 +15,7 @@ interface SetupFile {
   hint?: string
 }
 
-const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; platform: string; reasoningEffort: string }>()
+const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; platform: string; platforms: string[]; reasoningEffort: string }>()
 const emit = defineEmits<{ close: []; rotate: []; 'effort-updated': [value: string] }>()
 const toast = useToast()
 
@@ -26,6 +27,7 @@ const selectedModel = ref('')
 const modelsState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const modelsError = ref('')
 const workingApiKey = ref('')
+const activePlatform = ref(props.platform || 'openai')
 // 创建之后也能直接在这里调整默认思考强度，改动即时保存到该密钥。
 const reasoningEffort = ref('auto')
 const savingEffort = ref(false)
@@ -34,10 +36,15 @@ const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
 const geminiBase = computed(() => `${origin.value}/v1beta`)
 const configuredApiKey = computed(() => workingApiKey.value.trim())
+const isOpenAICompatible = computed(() => activePlatform.value === 'openai' || activePlatform.value === 'grok')
+const availablePlatforms = computed(() => {
+  const values = props.platforms?.length ? props.platforms : [props.platform || 'openai']
+  return [...new Set(values.filter(Boolean))]
+})
 const activeEndpoint = computed(() => {
   if (activeClient.value === 'claude') return origin.value
   if (activeClient.value === 'gemini') return geminiBase.value
-  if (activeClient.value === 'ccswitch') return props.platform === 'openai' ? apiBase.value : origin.value
+  if (activeClient.value === 'ccswitch') return isOpenAICompatible.value ? apiBase.value : origin.value
   return apiBase.value
 })
 
@@ -88,7 +95,7 @@ function rememberApiKey(value: string) {
 }
 
 const clientOptions = computed(() => {
-  if (props.platform === 'anthropic') {
+  if (activePlatform.value === 'anthropic') {
     return [
       { id: 'claude' as const, label: 'Claude Code' },
       { id: 'codex' as const, label: 'Codex CLI' },
@@ -96,7 +103,7 @@ const clientOptions = computed(() => {
       { id: 'ccswitch' as const, label: 'CCSwitch' },
     ]
   }
-  if (props.platform === 'gemini') {
+  if (activePlatform.value === 'gemini') {
     return [
       { id: 'gemini' as const, label: 'Gemini CLI' },
       { id: 'opencode' as const, label: 'OpenCode' },
@@ -132,10 +139,10 @@ const shellOptions = computed(() => {
 
 const activeDescription = computed(() => {
   const descriptions: Record<ClientID, string> = {
-    claude: props.platform === 'openai'
+    claude: activePlatform.value === 'openai'
       ? 'Claude Code 会通过兼容层使用当前 OpenAI / Codex 分组。'
       : '复制终端环境变量；也提供 Claude Code 的持久化 settings.json 文件。',
-    codex: props.platform === 'anthropic'
+    codex: activePlatform.value === 'anthropic'
       ? 'Codex CLI 会通过兼容层使用当前 Claude 分组。'
       : 'Codex CLI 需要 config.toml 和 auth.json 两个文件，分别复制到 ~/.codex 目录。',
     gemini: '使用环境变量启动 Gemini CLI；模型列表来自当前密钥所属分组。',
@@ -149,7 +156,8 @@ const activeDescription = computed(() => {
 
 const selectedModelLabel = computed(() => selectedModel.value || '暂未读取到模型')
 
-watch([() => props.show, () => props.platform, () => props.apiKey, () => props.keyId], ([show]) => {
+watch([() => props.show, () => props.platform, () => props.platforms.join(','), () => props.apiKey, () => props.keyId], ([show]) => {
+	activePlatform.value = availablePlatforms.value.includes(props.platform) ? props.platform : (availablePlatforms.value[0] || 'openai')
   activeClient.value = clientOptions.value[0]?.id || 'codex'
   activeShell.value = 'unix'
   copied.value = ''
@@ -173,6 +181,15 @@ watch(activeClient, () => {
   activeShell.value = 'unix'
 })
 
+watch(activePlatform, () => {
+	activeClient.value = clientOptions.value[0]?.id || 'codex'
+	models.value = []
+	selectedModel.value = ''
+	modelsState.value = 'idle'
+	modelsError.value = ''
+	if (props.show && configuredApiKey.value) void loadModels()
+})
+
 async function loadModels() {
   const apiKey = configuredApiKey.value
   if (!apiKey) {
@@ -185,7 +202,7 @@ async function loadModels() {
   modelsState.value = 'loading'
   modelsError.value = ''
   try {
-    const response = await fetch(`${apiBase.value}/models`, {
+    const response = await fetch(`${apiBase.value}/models?platform=${encodeURIComponent(activePlatform.value)}`, {
       headers: { Authorization: `Bearer ${apiKey}` },
     })
     const payload = await response.json().catch(() => null)
@@ -302,8 +319,8 @@ const currentFiles = computed<SetupFile[]>(() => {
   }
 
   if (activeClient.value === 'opencode') {
-    const provider = props.platform === 'anthropic' ? 'anthropic' : props.platform === 'gemini' ? 'google' : 'openai'
-    const baseURL = props.platform === 'anthropic' ? apiBase.value : props.platform === 'gemini' ? geminiBase.value : apiBase.value
+    const provider = activePlatform.value === 'anthropic' ? 'anthropic' : activePlatform.value === 'gemini' ? 'google' : 'openai'
+    const baseURL = activePlatform.value === 'anthropic' ? apiBase.value : activePlatform.value === 'gemini' ? geminiBase.value : apiBase.value
     return [{
       path: 'opencode.json',
       hint: '将此 provider 合并到已有文件；模型 ID 使用当前分组的可用模型。',
@@ -332,8 +349,8 @@ const ccSwitchUsageScript = `({
 })`
 
 const ccSwitchConfig = computed(() => {
-  const app = props.platform === 'anthropic' ? 'claude' : props.platform === 'gemini' ? 'gemini' : 'codex'
-  const endpoint = props.platform === 'openai' ? apiBase.value : origin.value
+  const app = activePlatform.value === 'anthropic' ? 'claude' : activePlatform.value === 'gemini' ? 'gemini' : 'codex'
+  const endpoint = isOpenAICompatible.value ? apiBase.value : origin.value
   return {
     resource: 'provider',
     app,
@@ -388,7 +405,8 @@ function openCCSwitch() {
         <div class="key-setup-summary">
           <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
           <div class="key-setup-secret"><span>接口地址</span><code>{{ activeEndpoint }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
-			<div v-if="platform === 'openai'" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
+			<div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><span class="text-[10px] text-slate-500">{{ availablePlatforms.length }} 个</span></div>
+			<div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" aria-label="思考强度 Effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
         </div>
 
         <div v-if="configuredApiKey" class="key-setup-model-row">
@@ -396,7 +414,7 @@ function openCCSwitch() {
           <button class="btn-ghost !px-3 !py-2 text-xs" :disabled="modelsState === 'loading'" @click="loadModels">{{ modelsState === 'loading' ? '检测中…' : '检测密钥并刷新模型' }}</button>
         </div>
         <template v-if="configuredApiKey">
-          <p v-if="modelsState === 'ready'" class="key-setup-status is-ok">密钥验证成功，当前分组可用 {{ models.length }} 个模型。</p>
+          <p v-if="modelsState === 'ready'" class="key-setup-status is-ok">密钥验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 分组可用 {{ models.length }} 个模型。</p>
           <p v-else-if="modelsState === 'error'" class="key-setup-status is-error">{{ modelsError }}</p>
 
           <div class="key-setup-tabs"><button v-for="item in clientOptions" :key="item.id" :class="{ 'is-active': activeClient === item.id }" @click="activeClient = item.id">{{ item.label }}</button></div>

@@ -16,6 +16,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -47,7 +48,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	if err := db.AutoMigrate(
-		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
+		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
 		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.BackupRecord{},
@@ -78,6 +79,20 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		Where("reasoning_effort IN ?", []string{"fast", "minimal"}).
 		Update("reasoning_effort", "low").Error; err != nil {
 		return nil, fmt.Errorf("migrate legacy reasoning effort: %w", err)
+	}
+	// Every pre-multi-group key starts with its existing group selected. This is
+	// idempotent, so it also repairs a partially completed deployment safely.
+	var legacyKeyGroups []model.APIKeyGroup
+	if err := db.Model(&model.APIKey{}).
+		Select("id AS api_key_id, group_id AS group_id").
+		Where("group_id > 0").
+		Scan(&legacyKeyGroups).Error; err != nil {
+		return nil, fmt.Errorf("load legacy key groups: %w", err)
+	}
+	if len(legacyKeyGroups) > 0 {
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(legacyKeyGroups, 500).Error; err != nil {
+			return nil, fmt.Errorf("backfill key groups: %w", err)
+		}
 	}
 	if err := normalizeSQLiteUsageTimes(db, cfg); err != nil {
 		return nil, fmt.Errorf("normalize usage timestamps: %w", err)

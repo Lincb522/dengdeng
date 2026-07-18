@@ -462,7 +462,12 @@ func (h *AdminHandler) UpdateGroup(c *gin.Context) {
 func (h *AdminHandler) DeleteGroup(c *gin.Context) {
 	id := c.Param("id")
 	var keyCount int64
-	h.db.Model(&model.APIKey{}).Where("group_id = ?", id).Count(&keyCount)
+	h.db.Model(&model.APIKeyGroup{}).Where("group_id = ?", id).Count(&keyCount)
+	if keyCount == 0 {
+		// Keep the legacy column in the guard for databases that have not yet
+		// completed the relation backfill.
+		h.db.Model(&model.APIKey{}).Where("group_id = ?", id).Count(&keyCount)
+	}
 	if keyCount > 0 {
 		util.Fail(c, http.StatusBadRequest, "group still has API keys bound to it")
 		return

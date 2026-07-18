@@ -70,6 +70,30 @@ func (r *RuntimeRequest) SetAccount(accountID int64) {
 	m.mu.Unlock()
 }
 
+// SetGroup moves an in-flight request between selected groups while the
+// gateway performs cross-group failover. Platform and user totals stay the
+// same; group and waiting-group counters follow the pool currently being
+// scheduled.
+func (r *RuntimeRequest) SetGroup(groupID int64) {
+	if r == nil || r.metrics == nil || groupID <= 0 || r.finished || r.groupID == groupID {
+		return
+	}
+	m := r.metrics
+	m.mu.Lock()
+	if r.finished || r.groupID == groupID {
+		m.mu.Unlock()
+		return
+	}
+	decrement(m.group, r.groupID)
+	m.group[groupID]++
+	if r.waiting {
+		decrement(m.waitingGroup, r.groupID)
+		m.waitingGroup[groupID]++
+	}
+	r.groupID = groupID
+	m.mu.Unlock()
+}
+
 // SetWaiting marks the request while it is blocked on a user/key or upstream
 // account slot. It is idempotent so callers can bracket every bounded wait
 // without double-counting transitions between the two limiter layers.

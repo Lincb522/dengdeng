@@ -74,7 +74,7 @@ onMounted(load)
       <div>
         <div class="model-plaza-eyebrow"><span></span> 模型广场</div>
         <h1>选择适合你的模型</h1>
-        <p>价格来自当前模型定价；实际扣费还会叠加密钥所属分组的倍率。</p>
+        <p>价格来自当前模型定价；实际扣费会使用本次请求所路由分组的倍率。</p>
       </div>
       <RouterLink class="btn-primary" to="/keys">创建 API 密钥</RouterLink>
     </header>
