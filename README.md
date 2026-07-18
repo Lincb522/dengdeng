@@ -105,15 +105,36 @@ client = OpenAI(
 
 ## 部署
 
+### GitHub Packages
+
+公开镜像发布在 `ghcr.io/lincb522/dengdeng`，同时支持 Linux amd64 和 arm64。生产环境建议固定版本标签：
+
+```bash
+docker pull ghcr.io/lincb522/dengdeng:0.1.0
+
+docker run -d --name dengdeng --restart unless-stopped \
+  -p 127.0.0.1:9100:9100 \
+  -v "$(pwd)/data:/app/data" \
+  --env-file .env \
+  -e SERVER_HOST=0.0.0.0 \
+  -e DATABASE_PATH=/app/data/dengdeng.db \
+  ghcr.io/lincb522/dengdeng:0.1.0
+```
+
+`latest` 指向最新正式版，`edge` 跟随 `main`，`sha-*` 可精确定位构建提交。每个镜像都附带 SBOM、构建来源证明和 OCI 源码标签。
+
 ### Docker Compose
 
 ```bash
 cd deploy
 cp .env.example .env
 # 填写 JWT_SECRET、ENCRYPTION_KEY、管理员账号和站点地址
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 curl -fsS http://127.0.0.1:9100/health
 ```
+
+需要从当前源码构建时改用 `docker compose up -d --build`。
 
 默认只监听 `127.0.0.1:9100`。对外服务时请用 Nginx 或 Caddy 提供 HTTPS；支付和 OAuth 回调依赖最终的 HTTPS 域名。
 
