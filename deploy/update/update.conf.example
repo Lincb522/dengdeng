@@ -8,3 +8,4 @@ SERVICE=dengdeng.service
 HEALTH_URL=http://127.0.0.1:9100/health
 STATE_DIRECTORY=/var/lib/dengdeng/update
 BUILD_JOBS=2
+GOPROXY=https://proxy.golang.org,direct

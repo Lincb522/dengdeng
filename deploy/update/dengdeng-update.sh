@@ -11,6 +11,7 @@ SERVICE="dengdeng.service"
 HEALTH_URL="http://127.0.0.1:9100/health"
 STATE_DIRECTORY="/var/lib/dengdeng/update"
 BUILD_JOBS="2"
+GOPROXY="https://proxy.golang.org,direct"
 
 if [[ -r "$CONFIG_FILE" ]]; then
   while IFS='=' read -r key value; do
@@ -28,6 +29,7 @@ if [[ -r "$CONFIG_FILE" ]]; then
       HEALTH_URL) HEALTH_URL="$value" ;;
       STATE_DIRECTORY) STATE_DIRECTORY="$value" ;;
       BUILD_JOBS) BUILD_JOBS="$value" ;;
+      GOPROXY) GOPROXY="$value" ;;
     esac
   done < "$CONFIG_FILE"
 fi
@@ -204,6 +206,7 @@ build_release() {
   git -C "$SOURCE_DIRECTORY" clean -ffd
   export HOME="$HOME_DIRECTORY"
   export PNPM_HOME="$HOME_DIRECTORY/pnpm"
+  export GOPROXY
   export PATH="$PNPM_HOME:/usr/local/bin:/usr/bin:/bin"
   cd "$SOURCE_DIRECTORY/frontend"
   pnpm install --frozen-lockfile --prefer-offline

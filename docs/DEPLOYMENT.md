@@ -96,6 +96,8 @@ sudo bash deploy/update/install.sh
 
 仓库和分支由 root 独占的 `/etc/dengdeng/update.conf` 决定。调整后无需把 GitHub 凭据交给网页；私有仓库请只给 root 的 Git 客户端配置只读 deploy key。日常流程如下：
 
+`GOPROXY` 也在该文件中显式配置，默认使用 `https://proxy.golang.org,direct`；网络环境有要求时可由 root 改为可信的内部模块代理。
+
 1. 「检查更新」只执行 `git fetch` 并比较提交，不重启服务。
 2. 「更新到最新版本」先通过应用创建一致性 SQLite 快照，再在独立 systemd 任务中构建。
 3. 构建成功后原子替换二进制，短暂重启并连续检查 `/health`。
