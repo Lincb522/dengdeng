@@ -177,6 +177,7 @@ restore_after_failure() {
 on_error() {
   local code=$?
   trap - ERR
+  git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html 2>/dev/null || true
   restore_after_failure
   exit "$code"
 }
@@ -220,6 +221,7 @@ build_release() {
   ldflags="-s -w -X dengdeng/internal/version.Version=$version_name -X dengdeng/internal/version.Commit=$TARGET_COMMIT -X dengdeng/internal/version.BuildTime=$build_time"
   cd "$SOURCE_DIRECTORY/backend"
   GOMAXPROCS="$BUILD_JOBS" CGO_ENABLED=0 go build -p "$BUILD_JOBS" -trimpath -ldflags "$ldflags" -o "$release.tmp" ./cmd/server
+  git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html
   chmod 0755 "$release.tmp"
   mv -f "$release.tmp" "$release"
   TARGET_VERSION="$version_name"
