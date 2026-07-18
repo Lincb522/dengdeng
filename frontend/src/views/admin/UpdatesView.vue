@@ -78,7 +78,6 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
     <div class="console-page-head">
       <div>
         <h1>版本更新</h1>
-        <p class="mt-1 text-sm text-slate-500">服务器直接跟随受信任仓库，构建完成后才切换运行版本。</p>
       </div>
       <button class="btn-ghost" :disabled="loading || busy" @click="load()">刷新状态</button>
     </div>
