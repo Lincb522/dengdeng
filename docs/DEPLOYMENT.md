@@ -101,6 +101,8 @@ sudo bash deploy/update/install.sh
 3. 构建成功后原子替换二进制，短暂重启并连续检查 `/health`。
 4. 健康检查失败会自动恢复旧二进制；「恢复上一版本」也会在切换前创建数据库快照。
 
+更新成功后，执行器会从同一个已验证提交同步自身脚本、systemd 单元和 Polkit 规则；root 独占的 `/etc/dengdeng/update.conf` 不会被网页或自动更新覆盖。
+
 当前部署是单实例监听 `127.0.0.1:9100`，版本切换期间通常会有数秒连接重试窗口。它是受控热更新，不承诺多实例蓝绿架构才具备的绝对零停机。更新状态保存在 `/var/lib/dengdeng/update/status.json`，详细构建输出使用：
 
 ```bash

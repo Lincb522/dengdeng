@@ -222,6 +222,16 @@ build_release() {
   TARGET_VERSION="$version_name"
 }
 
+sync_updater_components() {
+  set_stage "health_check" "正在同步更新组件"
+  bash -n "$SOURCE_DIRECTORY/deploy/update/dengdeng-update.sh" "$SOURCE_DIRECTORY/deploy/update/install.sh"
+  install -m 0755 "$SOURCE_DIRECTORY/deploy/update/dengdeng-update.sh" /usr/local/sbin/dengdeng-update.next
+  mv -f /usr/local/sbin/dengdeng-update.next /usr/local/sbin/dengdeng-update
+  install -m 0644 "$SOURCE_DIRECTORY/deploy/systemd/dengdeng-updater.service" /etc/systemd/system/dengdeng-updater.service
+  install -m 0644 "$SOURCE_DIRECTORY/deploy/polkit/49-dengdeng-updater.rules" /etc/polkit-1/rules.d/49-dengdeng-updater.rules
+  systemctl daemon-reload
+}
+
 apply_release() {
   if [[ "$UPDATE_AVAILABLE" != "true" ]]; then
     STATUS="succeeded"
@@ -248,11 +258,12 @@ apply_release() {
   healthy
   install -m 0755 "$RESTORE_BINARY" "$PREVIOUS_BINARY"
   printf '%s\n' "$RESTORE_COMMIT" > "$PREVIOUS_COMMIT_FILE"
-  rm -f "$RESTORE_BINARY"
   CURRENT_COMMIT="$TARGET_COMMIT"
   CURRENT_VERSION="$TARGET_VERSION"
   PREVIOUS_COMMIT="$RESTORE_COMMIT"
   UPDATE_AVAILABLE="false"
+  sync_updater_components
+  rm -f "$RESTORE_BINARY"
   SWITCHED="false"
   STATUS="succeeded"
   STAGE="completed"

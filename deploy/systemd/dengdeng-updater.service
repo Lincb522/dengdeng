@@ -18,6 +18,6 @@ IOSchedulingPriority=7
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=full
-ReadWritePaths=/opt/dengdeng /var/lib/dengdeng
+ReadWritePaths=/opt/dengdeng /var/lib/dengdeng /usr/local/sbin /etc/systemd/system /etc/polkit-1/rules.d
 NoNewPrivileges=true
 UMask=0027
