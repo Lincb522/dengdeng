@@ -174,6 +174,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.GET("/channel-monitor/history", alertH.ChannelHistory)
 			admin.GET("/backups", backupH.List)
 			admin.POST("/backups", backupH.Create)
+			admin.GET("/backups/policy", backupH.Policy)
+			admin.PUT("/backups/policy", backupH.UpdatePolicy)
+			admin.POST("/backups/cleanup", backupH.Cleanup)
 			admin.GET("/backups/:id/download", backupH.Download)
 			admin.DELETE("/backups/:id", backupH.Delete)
 			admin.GET("/update/status", updateH.Status)
@@ -207,6 +210,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 	mountFrontend(r)
 	accountMonitor.Start()
+	backupService.StartScheduler()
 	return r
 }
 

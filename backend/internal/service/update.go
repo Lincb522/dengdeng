@@ -23,23 +23,30 @@ var (
 )
 
 type UpdateStatus struct {
-	Enabled         bool   `json:"enabled"`
-	Repository      string `json:"repository"`
-	Branch          string `json:"branch"`
-	Status          string `json:"status"` // idle | queued | running | succeeded | failed
-	Action          string `json:"action"` // check | apply | rollback
-	Stage           string `json:"stage"`
-	Message         string `json:"message"`
-	CurrentVersion  string `json:"current_version"`
-	CurrentCommit   string `json:"current_commit"`
-	TargetCommit    string `json:"target_commit"`
-	PreviousCommit  string `json:"previous_commit"`
-	UpdateAvailable bool   `json:"update_available"`
-	CanRollback     bool   `json:"can_rollback"`
-	RequestedBy     string `json:"requested_by"`
-	RequestedAt     string `json:"requested_at"`
-	StartedAt       string `json:"started_at"`
-	FinishedAt      string `json:"finished_at"`
+	Enabled         bool           `json:"enabled"`
+	Repository      string         `json:"repository"`
+	Branch          string         `json:"branch"`
+	Status          string         `json:"status"` // idle | queued | running | succeeded | failed
+	Action          string         `json:"action"` // check | apply | rollback
+	Stage           string         `json:"stage"`
+	Message         string         `json:"message"`
+	CurrentVersion  string         `json:"current_version"`
+	CurrentCommit   string         `json:"current_commit"`
+	TargetCommit    string         `json:"target_commit"`
+	PreviousCommit  string         `json:"previous_commit"`
+	UpdateAvailable bool           `json:"update_available"`
+	CanRollback     bool           `json:"can_rollback"`
+	RequestedBy     string         `json:"requested_by"`
+	RequestedAt     string         `json:"requested_at"`
+	StartedAt       string         `json:"started_at"`
+	FinishedAt      string         `json:"finished_at"`
+	Changes         []UpdateChange `json:"changes"`
+}
+
+type UpdateChange struct {
+	Commit      string `json:"commit"`
+	Title       string `json:"title"`
+	CommittedAt string `json:"committed_at"`
 }
 
 type updateRequest struct {
@@ -106,6 +113,7 @@ func (s *UpdateService) Status() (UpdateStatus, error) {
 		Message:        "等待检查更新",
 		CurrentVersion: version.Version,
 		CurrentCommit:  version.Commit,
+		Changes:        []UpdateChange{},
 	}
 	if s == nil {
 		return status, nil
@@ -138,6 +146,9 @@ func (s *UpdateService) Status() (UpdateStatus, error) {
 		persisted.CurrentCommit = version.Commit
 	}
 	persisted.CanRollback = persisted.PreviousCommit != ""
+	if persisted.Changes == nil {
+		persisted.Changes = []UpdateChange{}
+	}
 	return persisted, nil
 }
 
@@ -175,6 +186,7 @@ func (s *UpdateService) Request(ctx context.Context, action, requestedBy string)
 	status.RequestedAt = now
 	status.StartedAt = ""
 	status.FinishedAt = ""
+	status.Changes = []UpdateChange{}
 	if err := writeUpdateJSON(s.statusPath(), status); err != nil {
 		return UpdateStatus{}, fmt.Errorf("write update status: %w", err)
 	}

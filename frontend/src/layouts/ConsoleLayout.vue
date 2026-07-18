@@ -86,13 +86,12 @@ function isActive(to: string) {
     </div>
 
     <div class="console-shell">
-      <button
+      <div
         v-if="railOpen"
-        type="button"
         class="fixed inset-0 z-30 bg-ink-950/20 lg:hidden"
-        aria-label="关闭导航"
+        aria-hidden="true"
         @click="closeRail"
-      ></button>
+      ></div>
 
       <aside id="primary-navigation" class="side-rail" :class="{ 'is-open': railOpen }">
         <div class="rail-brand">
@@ -102,6 +101,9 @@ function isActive(to: string) {
             <div class="rail-brand-caption">蹬蹬ai</div>
           </div>
           <span class="rail-brand-state"><i></i>在线</span>
+          <button type="button" class="rail-close" aria-label="关闭导航" @click="closeRail">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
         </div>
 
         <nav class="rail-nav" aria-label="主导航">

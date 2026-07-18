@@ -36,6 +36,7 @@ fi
 
 REQUEST_FILE="$STATE_DIRECTORY/request.json"
 STATUS_FILE="$STATE_DIRECTORY/status.json"
+CHANGELOG_FILE="$STATE_DIRECTORY/changelog.json"
 LOCK_FILE="$STATE_DIRECTORY/update.lock"
 CURRENT_COMMIT_FILE="$RELEASE_DIRECTORY/CURRENT_COMMIT"
 CURRENT_VERSION_FILE="$RELEASE_DIRECTORY/CURRENT_VERSION"
@@ -108,9 +109,16 @@ write_state() {
   export DD_UPDATE_TARGET_COMMIT="$TARGET_COMMIT" DD_UPDATE_PREVIOUS_COMMIT="$PREVIOUS_COMMIT"
   export DD_UPDATE_AVAILABLE="$UPDATE_AVAILABLE" DD_UPDATE_REQUESTED_BY="$REQUESTED_BY" DD_UPDATE_REQUESTED_AT="$REQUESTED_AT"
   export DD_UPDATE_STARTED_AT="$STARTED_AT" DD_UPDATE_FINISHED_AT="$FINISHED_AT" DD_UPDATE_STATUS_FILE="$STATUS_FILE"
+  export DD_UPDATE_CHANGELOG_FILE="$CHANGELOG_FILE"
   python3 <<'PY'
 import json, os, pathlib
 path = pathlib.Path(os.environ["DD_UPDATE_STATUS_FILE"])
+try:
+    changes = json.loads(pathlib.Path(os.environ["DD_UPDATE_CHANGELOG_FILE"]).read_text(encoding="utf-8"))
+    if not isinstance(changes, list):
+        changes = []
+except (OSError, ValueError, TypeError):
+    changes = []
 data = {
     "enabled": True,
     "repository": os.environ["DD_UPDATE_REPOSITORY"],
@@ -129,6 +137,7 @@ data = {
     "requested_at": os.environ["DD_UPDATE_REQUESTED_AT"],
     "started_at": os.environ["DD_UPDATE_STARTED_AT"],
     "finished_at": os.environ["DD_UPDATE_FINISHED_AT"],
+    "changes": changes,
 }
 temporary = path.with_suffix(".tmp")
 temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -136,6 +145,49 @@ temporary.chmod(0o640)
 os.replace(temporary, path)
 PY
   chown dengdeng:dengdeng "$STATUS_FILE"
+}
+
+write_changelog() {
+  export DD_UPDATE_SOURCE="$SOURCE_DIRECTORY" DD_UPDATE_CURRENT_COMMIT="$CURRENT_COMMIT"
+  export DD_UPDATE_TARGET_COMMIT="$TARGET_COMMIT" DD_UPDATE_CHANGELOG_FILE="$CHANGELOG_FILE"
+  python3 <<'PY'
+import json, os, pathlib, subprocess
+
+source = os.environ["DD_UPDATE_SOURCE"]
+current = os.environ["DD_UPDATE_CURRENT_COMMIT"]
+target = os.environ["DD_UPDATE_TARGET_COMMIT"]
+path = pathlib.Path(os.environ["DD_UPDATE_CHANGELOG_FILE"])
+changes = []
+
+if target and target != current:
+    revision = target
+    if current:
+        exists = subprocess.run(
+            ["git", "-C", source, "cat-file", "-e", current + "^{commit}"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        ancestor = exists and subprocess.run(
+            ["git", "-C", source, "merge-base", "--is-ancestor", current, target],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ).returncode == 0
+        if ancestor:
+            revision = current + ".." + target
+    result = subprocess.run(
+        ["git", "-C", source, "log", "--max-count=30", "--format=%H%x1f%s%x1f%cI", revision],
+        check=False, capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        for line in result.stdout.splitlines():
+            fields = line.split("\x1f", 2)
+            if len(fields) == 3:
+                changes.append({"commit": fields[0], "title": fields[1], "committed_at": fields[2]})
+
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps(changes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+temporary.chmod(0o640)
+os.replace(temporary, path)
+PY
+  chown dengdeng:dengdeng "$CHANGELOG_FILE"
 }
 
 set_stage() {
@@ -198,6 +250,7 @@ prepare_repository() {
   else
     UPDATE_AVAILABLE="true"
   fi
+  write_changelog
 }
 
 build_release() {
@@ -317,6 +370,9 @@ REQUESTED_BY="$(json_field requested_by)"
 REQUESTED_AT="$(json_field requested_at)"
 [[ "$ACTION" == "check" || "$ACTION" == "apply" || "$ACTION" == "rollback" ]]
 load_markers
+printf '[]\n' > "$CHANGELOG_FILE"
+chmod 0640 "$CHANGELOG_FILE"
+chown dengdeng:dengdeng "$CHANGELOG_FILE"
 write_state
 
 case "$ACTION" in

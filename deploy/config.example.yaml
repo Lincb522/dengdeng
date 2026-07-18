@@ -42,6 +42,15 @@ proxy:
   url: ""
   no_proxy: "localhost,127.0.0.1,::1"
 
+# SQLite 快照默认每 24 小时自动创建一次。保留策略只清理系统自动备份，
+# 管理员在网页手动创建的备份始终需要手动删除。
+backup:
+  directory: ""
+  auto_enabled: true
+  interval_hours: 24
+  retention_days: 30
+  retention_count: 30
+
 # 管理端版本更新。启用前必须按 docs/DEPLOYMENT.md 安装独立的 updater
 # systemd 单元和最小化 Polkit 规则。网页不能修改仓库地址或执行命令。
 update:

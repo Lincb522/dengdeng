@@ -45,6 +45,48 @@ func (h *BackupHandler) Create(c *gin.Context) {
 	util.OK(c, record)
 }
 
+func (h *BackupHandler) Policy(c *gin.Context) {
+	policy, err := h.backups.GetPolicy()
+	if err != nil {
+		util.Fail(c, 500, "load backup policy failed")
+		return
+	}
+	util.OK(c, policy)
+}
+
+func (h *BackupHandler) UpdatePolicy(c *gin.Context) {
+	var input service.BackupPolicy
+	if err := c.ShouldBindJSON(&input); err != nil {
+		util.Fail(c, 400, "invalid backup policy")
+		return
+	}
+	policy, err := h.backups.UpdatePolicy(input)
+	if err != nil {
+		util.Fail(c, 500, "save backup policy failed")
+		return
+	}
+	actor := middleware.CurrentUser(c)
+	detail := "enabled=" + strconv.FormatBool(policy.Enabled) + ", interval_hours=" + strconv.Itoa(policy.IntervalHours) + ", retention_days=" + strconv.Itoa(policy.RetentionDays) + ", retention_count=" + strconv.Itoa(policy.RetentionCount)
+	_ = h.audit.Record(actor, "backup.policy.updated", "backup_policy", "default", detail, c.ClientIP())
+	util.OK(c, policy)
+}
+
+func (h *BackupHandler) Cleanup(c *gin.Context) {
+	policy, err := h.backups.GetPolicy()
+	if err != nil {
+		util.Fail(c, 500, "load backup policy failed")
+		return
+	}
+	deleted, err := h.backups.PruneAuto(policy)
+	if err != nil {
+		util.Fail(c, 500, "cleanup automatic backups failed")
+		return
+	}
+	actor := middleware.CurrentUser(c)
+	_ = h.audit.Record(actor, "backup.cleaned", "backup", "automatic", "deleted="+strconv.Itoa(deleted), c.ClientIP())
+	util.OK(c, gin.H{"deleted": deleted})
+}
+
 func (h *BackupHandler) Download(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
