@@ -78,7 +78,7 @@ curl -fsS https://your-domain.example/health
 
 ## 服务器直连仓库与版本更新
 
-二进制 + systemd 部署可以安装独立更新器，让管理员在「系统维护 → 版本更新」检查 `main`、执行更新或恢复上一版本。源码固定放在 `/opt/dengdeng/source`，运行二进制仍是 `/opt/dengdeng/dengdeng`；前端和后端全部构建成功前不会触碰线上进程。
+二进制 + systemd 部署可以安装独立更新器，让管理员在「系统维护 → 版本更新」检查 `main`、执行更新或恢复上一版本。源码固定放在 `/opt/dengdeng/source`，运行二进制仍是 `/opt/dengdeng/dengdeng`；前端和后端全部构建成功前不会触碰线上进程，构建结束后也会恢复仓库中的前端占位文件以保持工作区干净。
 
 首次安装需要 root 权限：
 
