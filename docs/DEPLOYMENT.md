@@ -89,7 +89,7 @@ sudo bash deploy/update/install.sh
 
 安装脚本会完成以下一次性配置：
 
-- 安装 Git、Go、Node.js、pnpm 与 Python 3，并克隆受信任仓库；
+- 安装并校验 Git、Go 1.25.6+、Node.js 22+、pnpm 与 Python 3，并克隆受信任仓库；
 - 安装 `dengdeng-updater.service` 和 `/usr/local/sbin/dengdeng-update`；
 - 写入最小化 Polkit 规则：应用账户只能启动固定 updater 单元，不能传入命令或仓库地址；
 - 开启 `UPDATE_ENABLED`，重启主服务以显示管理端入口。
