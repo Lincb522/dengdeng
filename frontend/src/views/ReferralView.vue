@@ -10,7 +10,9 @@ const data = ref<ReferralDashboard | null>(null)
 const loading = ref(true)
 const bindCode = ref('')
 
-const primaryCode = computed(() => data.value?.codes[0] || null)
+const referralCodes = computed(() => Array.isArray(data.value?.codes) ? data.value.codes : [])
+const commissions = computed(() => Array.isArray(data.value?.commissions) ? data.value.commissions : [])
+const primaryCode = computed(() => referralCodes.value[0] || null)
 const referralLink = computed(() => primaryCode.value
   ? `${window.location.origin}/login?ref=${encodeURIComponent(primaryCode.value.code)}`
   : '')
@@ -18,7 +20,14 @@ const referralLink = computed(() => primaryCode.value
 async function load() {
   loading.value = true
   try {
-    data.value = await api.get<ReferralDashboard>('/api/user/referrals')
+    const payload = await api.get<ReferralDashboard>('/api/user/referrals')
+    data.value = {
+      ...payload,
+      binding: payload?.binding || null,
+      codes: Array.isArray(payload?.codes) ? payload.codes : [],
+      commissions: Array.isArray(payload?.commissions) ? payload.commissions : [],
+      total_commission_micro: Number(payload?.total_commission_micro) || 0,
+    }
   } finally {
     loading.value = false
   }
@@ -122,7 +131,7 @@ onMounted(load)
         <table class="table-base">
           <thead><tr><th>时间</th><th>用户</th><th>推广码</th><th class="text-right">用户消费</th><th class="text-right">比例</th><th class="text-right">佣金</th></tr></thead>
           <tbody>
-            <tr v-for="item in data.commissions" :key="item.id">
+            <tr v-for="item in commissions" :key="item.id">
               <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(item.created_at).toLocaleString() }}</td>
               <td class="text-xs text-slate-300">{{ item.referred_email || `#${item.referred_user_id}` }}</td>
               <td><span class="tag-gray font-mono">{{ item.code }}</span></td>
@@ -130,7 +139,7 @@ onMounted(load)
               <td class="num text-right text-xs">{{ (item.commission_bps / 100).toFixed(2) }}%</td>
               <td class="num text-right text-xs text-signal-green">+{{ formatMoney(item.amount_micro) }}</td>
             </tr>
-            <tr v-if="!data.commissions.length"><td colspan="6" class="py-10 text-center text-sm text-slate-500">暂无佣金记录</td></tr>
+            <tr v-if="!commissions.length"><td colspan="6" class="py-10 text-center text-sm text-slate-500">暂无佣金记录</td></tr>
           </tbody>
         </table>
       </section>

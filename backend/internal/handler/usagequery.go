@@ -304,7 +304,7 @@ func writeUsageCSV(c *gin.Context, db *gorm.DB, filter usageQuery, userID *int64
 	w := csv.NewWriter(c.Writer)
 	header := []string{"请求 ID", "时间", "密钥", "分组", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
 	if includeInternal {
-		header = []string{"请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "状态码", "错误"}
+		header = []string{"请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "耗时(ms)", "排队(ms)", "调度(ms)", "上游(ms)", "尝试次数", "状态码", "错误"}
 	}
 	_ = w.Write(header)
 	for _, entry := range logs {
@@ -315,7 +315,9 @@ func writeUsageCSV(c *gin.Context, db *gorm.DB, filter usageQuery, userID *int64
 			strconv.FormatInt(entry.ImageCount, 10), fmt.Sprintf("%.6f", float64(entry.CostMicro)/1_000_000), strconv.FormatInt(entry.DurationMs, 10), strconv.Itoa(entry.StatusCode), entry.ErrorMessage,
 		}
 		if includeInternal {
-			row = append([]string{entry.RequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.UserEmail, entry.KeyName, entry.GroupName, entry.AccountName}, row[4:]...)
+			baseRow := row
+			row = append([]string{entry.RequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.UserEmail, entry.KeyName, entry.GroupName, entry.AccountName}, baseRow[4:16]...)
+			row = append(row, strconv.FormatInt(entry.QueueMs, 10), strconv.FormatInt(entry.ScheduleMs, 10), strconv.FormatInt(entry.UpstreamMs, 10), strconv.Itoa(entry.AttemptCount), baseRow[16], baseRow[17])
 		}
 		_ = w.Write(row)
 	}

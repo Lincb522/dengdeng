@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,7 +16,12 @@ import (
 	"gorm.io/gorm"
 )
 
-var ErrNoAccount = errors.New("no available upstream account")
+var (
+	ErrNoAccount              = errors.New("no available upstream account")
+	ErrAccountConcurrencyBusy = errors.New("all eligible upstream accounts are at concurrency limit")
+	ErrAccountQueueFull       = errors.New("upstream account queue is full")
+	ErrAccountWaitTimeout     = errors.New("upstream account concurrency wait timed out")
+)
 
 const (
 	defaultSchedulerSnapshotTTL      = 2 * time.Second
@@ -27,11 +34,16 @@ const (
 	modelFailureShortCooldown        = 10 * time.Second
 	modelFailureLongCooldown         = 45 * time.Second
 	modelPermissionCooldown          = 5 * time.Minute
+	freshQuotaWindow                 = 15 * time.Minute
+	schedulerScoreHysteresis         = 50.0
 )
 
 type schedulerAccountEntry struct {
 	account      model.UpstreamAccount
 	lastSelected time.Time
+	inFlight     int
+	latencyEWMA  float64
+	errorEWMA    float64
 }
 
 type schedulerGroupSnapshot struct {
@@ -76,6 +88,8 @@ type Scheduler struct {
 	sessionCapacity       int
 	modelFailureCapacity  int
 	lastCacheCleanup      time.Time
+	slotNotify            chan struct{}
+	waiters               int
 	now                   func() time.Time
 }
 
@@ -87,6 +101,7 @@ func NewScheduler(db *gorm.DB) *Scheduler {
 		snapshotTTL:   defaultSchedulerSnapshotTTL, lastPersistedInterval: defaultLastUsedPersistInterval,
 		sessionTTL: defaultSessionAffinityTTL, sessionCapacity: defaultSessionAffinityCapacity,
 		modelFailureCapacity: defaultModelFailureCapacity, now: time.Now,
+		slotNotify: make(chan struct{}),
 	}
 }
 
@@ -110,6 +125,58 @@ func (s *Scheduler) PickForSession(groupID int64, modelName, sessionID string, e
 	return s.pick(groupID, modelName, sessionID, exclude)
 }
 
+// PickForSessionWait waits for an upstream slot only when otherwise-eligible
+// accounts are saturated. It never queues an empty, cooling or incompatible
+// group, so configuration errors still fail immediately.
+func (s *Scheduler) PickForSessionWait(ctx context.Context, groupID int64, modelName, sessionID string, exclude []int64, wait time.Duration, maxWaiters int) (*model.UpstreamAccount, time.Duration, error) {
+	started := time.Now()
+	account, err := s.pick(groupID, modelName, sessionID, exclude)
+	if !errors.Is(err, ErrAccountConcurrencyBusy) {
+		return account, 0, err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if wait <= 0 {
+		return nil, 0, ErrAccountWaitTimeout
+	}
+
+	s.mu.Lock()
+	if maxWaiters <= 0 || s.waiters >= maxWaiters {
+		s.mu.Unlock()
+		return nil, 0, ErrAccountQueueFull
+	}
+	s.waiters++
+	notify := s.slotNotify
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		if s.waiters > 0 {
+			s.waiters--
+		}
+		s.mu.Unlock()
+	}()
+
+	timer := time.NewTimer(wait)
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer timer.Stop()
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, time.Since(started), ctx.Err()
+		case <-timer.C:
+			return nil, time.Since(started), ErrAccountWaitTimeout
+		case <-ticker.C:
+		case <-notify:
+		}
+		account, err = s.pick(groupID, modelName, sessionID, exclude)
+		if !errors.Is(err, ErrAccountConcurrencyBusy) {
+			return account, time.Since(started), err
+		}
+	}
+}
+
 func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []int64) (*model.UpstreamAccount, error) {
 	now := s.nowTime()
 	snapshot, err := s.snapshot(groupID, now)
@@ -124,11 +191,16 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	s.mu.Lock()
 	s.cleanupCachesLocked(now)
 	var selected *schedulerAccountEntry
+	busy := false
 	sessionKey := schedulerSessionKey(groupID, modelName, sessionID)
 	if sessionKey != "" {
 		if binding, ok := s.sessions[sessionKey]; ok && binding.expiresAt.After(now) {
-			if entry := snapshot.accounts[binding.accountID]; s.entryAvailableLocked(entry, modelName, excluded, now) {
-				selected = entry
+			if entry := snapshot.accounts[binding.accountID]; s.entryRoutableLocked(entry, modelName, excluded, now) {
+				if s.entryHasConcurrencySlot(entry) {
+					selected = entry
+				} else {
+					busy = true
+				}
 			} else {
 				delete(s.sessions, sessionKey)
 			}
@@ -136,19 +208,27 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	}
 	if selected == nil {
 		for _, entry := range snapshot.accounts {
-			if !s.entryAvailableLocked(entry, modelName, excluded, now) {
+			if !s.entryRoutableLocked(entry, modelName, excluded, now) {
 				continue
 			}
-			if selected == nil || schedulerEntryBefore(entry, selected) {
+			if !s.entryHasConcurrencySlot(entry) {
+				busy = true
+				continue
+			}
+			if selected == nil || schedulerEntryBefore(entry, selected, now) {
 				selected = entry
 			}
 		}
 	}
 	if selected == nil {
 		s.mu.Unlock()
+		if busy {
+			return nil, ErrAccountConcurrencyBusy
+		}
 		return nil, ErrNoAccount
 	}
 	selected.lastSelected = now
+	selected.inFlight++
 	account := selected.account
 	account.LastUsedAt = timePointer(now)
 	if sessionKey != "" {
@@ -167,6 +247,10 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 }
 
 func (s *Scheduler) entryAvailableLocked(entry *schedulerAccountEntry, modelName string, excluded map[int64]struct{}, now time.Time) bool {
+	return s.entryRoutableLocked(entry, modelName, excluded, now) && s.entryHasConcurrencySlot(entry)
+}
+
+func (s *Scheduler) entryRoutableLocked(entry *schedulerAccountEntry, modelName string, excluded map[int64]struct{}, now time.Time) bool {
 	if entry == nil || entry.account.Status != model.StatusActive {
 		return false
 	}
@@ -174,6 +258,9 @@ func (s *Scheduler) entryAvailableLocked(entry *schedulerAccountEntry, modelName
 		return false
 	}
 	if entry.account.CooldownUntil != nil && entry.account.CooldownUntil.After(now) {
+		return false
+	}
+	if quotaDefinitelyExhausted(&entry.account, now) {
 		return false
 	}
 	key, ok := schedulerModelKey(entry.account.ID, modelName)
@@ -193,9 +280,20 @@ func (s *Scheduler) entryAvailableLocked(entry *schedulerAccountEntry, modelName
 	return false
 }
 
-func schedulerEntryBefore(candidate, current *schedulerAccountEntry) bool {
+func (s *Scheduler) entryHasConcurrencySlot(entry *schedulerAccountEntry) bool {
+	return entry != nil && (entry.account.Concurrency <= 0 || entry.inFlight < entry.account.Concurrency)
+}
+
+func schedulerEntryBefore(candidate, current *schedulerAccountEntry, now time.Time) bool {
 	if candidate.account.Priority != current.account.Priority {
 		return candidate.account.Priority > current.account.Priority
+	}
+	candidateScore := schedulerEntryScore(candidate, now)
+	currentScore := schedulerEntryScore(current, now)
+	// Small score differences keep the old least-recently-used rotation. Only a
+	// material health/load/quota advantage overrides fair distribution.
+	if math.Abs(candidateScore-currentScore) > schedulerScoreHysteresis {
+		return candidateScore > currentScore
 	}
 	if candidate.lastSelected.IsZero() != current.lastSelected.IsZero() {
 		return candidate.lastSelected.IsZero()
@@ -204,6 +302,99 @@ func schedulerEntryBefore(candidate, current *schedulerAccountEntry) bool {
 		return candidate.lastSelected.Before(current.lastSelected)
 	}
 	return candidate.account.ID < current.account.ID
+}
+
+// schedulerEntryScore combines live load, observed latency/error rate and
+// provider quota headroom inside an administrator priority tier. Priority stays
+// authoritative, while equal-priority accounts no longer rotate blindly into
+// a nearly exhausted or consistently slow upstream.
+func schedulerEntryScore(entry *schedulerAccountEntry, now time.Time) float64 {
+	if entry == nil {
+		return math.Inf(-1)
+	}
+	headroom := accountQuotaHeadroom(&entry.account, now)
+	latencyPenalty := math.Min(entry.latencyEWMA, 10_000) / 20
+	loadPenalty := float64(entry.inFlight) * 250
+	errorPenalty := entry.errorEWMA*400 + float64(entry.account.ErrorCount)*20
+	return headroom*8 - latencyPenalty - loadPenalty - errorPenalty
+}
+
+func accountQuotaHeadroom(account *model.UpstreamAccount, now time.Time) float64 {
+	if account == nil {
+		return 0
+	}
+	// Unknown quota is neutral rather than bad. API-key providers commonly do
+	// not expose balance data and must remain routable.
+	headroom := 50.0
+	if quota := account.CodexQuota; quota != nil && schedulerSnapshotFresh(quota.FetchedAt, now) {
+		values := make([]float64, 0, 2)
+		if quota.HasPrimaryWindow {
+			values = append(values, 100-schedulerClampPercent(quota.PrimaryUsedPercent))
+		}
+		if quota.HasSecondaryWindow {
+			values = append(values, 100-schedulerClampPercent(quota.SecondaryUsedPercent))
+		}
+		if len(values) > 0 {
+			headroom = minFloat(values)
+		}
+	}
+	if quota := account.Quota; quota != nil && quota.FetchedAt != nil && schedulerSnapshotFresh(*quota.FetchedAt, now) {
+		values := make([]float64, 0, len(quota.Windows))
+		for _, window := range quota.Windows {
+			switch {
+			case window.UsedPercent != nil:
+				values = append(values, 100-schedulerClampPercent(*window.UsedPercent))
+			case window.Remaining != nil && window.Limit != nil && *window.Limit > 0:
+				values = append(values, schedulerClampPercent(*window.Remaining / *window.Limit * 100))
+			}
+		}
+		if len(values) > 0 {
+			headroom = math.Min(headroom, minFloat(values))
+		}
+	}
+	return headroom
+}
+
+func quotaDefinitelyExhausted(account *model.UpstreamAccount, now time.Time) bool {
+	quota := account.CodexQuota
+	if quota == nil || !schedulerSnapshotFresh(quota.FetchedAt, now) {
+		return false
+	}
+	if !quota.Allowed {
+		return true
+	}
+	if !quota.LimitReached {
+		return false
+	}
+	// Do not keep an account excluded after a cached reset boundary. The quota
+	// refresher will replace the snapshot shortly; allowing a probe request here
+	// avoids turning a stale limit flag into a false 503.
+	if quota.PrimaryResetAt != nil && !quota.PrimaryResetAt.After(now) {
+		return false
+	}
+	if quota.SecondaryResetAt != nil && !quota.SecondaryResetAt.After(now) {
+		return false
+	}
+	return true
+}
+
+func schedulerSnapshotFresh(fetchedAt, now time.Time) bool {
+	if fetchedAt.IsZero() {
+		return false
+	}
+	return !fetchedAt.Before(now.Add(-freshQuotaWindow)) && !fetchedAt.After(now.Add(5*time.Minute))
+}
+
+func schedulerClampPercent(value float64) float64 {
+	return math.Max(0, math.Min(100, value))
+}
+
+func minFloat(values []float64) float64 {
+	result := values[0]
+	for _, value := range values[1:] {
+		result = math.Min(result, value)
+	}
+	return result
 }
 
 func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnapshot, error) {
@@ -215,7 +406,7 @@ func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnaps
 	s.mu.Unlock()
 
 	var accounts []model.UpstreamAccount
-	err := s.db.Preload("Proxy").
+	err := s.db.Preload("Proxy").Preload("Quota").Preload("CodexQuota").
 		Where("group_id = ? AND status = ?", groupID, model.StatusActive).
 		Find(&accounts).Error
 	if err != nil {
@@ -235,10 +426,65 @@ func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnaps
 	if cached := s.groups[groupID]; cached != nil && cached.loadedAt.After(fresh.loadedAt) {
 		fresh = cached
 	} else {
+		// Preserve process-local routing observations when the database snapshot
+		// refreshes. They intentionally reset on process restart.
+		if cached := s.groups[groupID]; cached != nil {
+			for id, entry := range fresh.accounts {
+				if previous := cached.accounts[id]; previous != nil {
+					if previous.lastSelected.After(entry.lastSelected) {
+						entry.lastSelected = previous.lastSelected
+					}
+					entry.inFlight = previous.inFlight
+					entry.latencyEWMA = previous.latencyEWMA
+					entry.errorEWMA = previous.errorEWMA
+				}
+			}
+		}
 		s.groups[groupID] = fresh
 	}
 	s.mu.Unlock()
 	return fresh, nil
+}
+
+// Release removes one live request from the account load signal. It is safe to
+// call after every relay attempt, including failed attempts.
+func (s *Scheduler) Release(accountID int64) {
+	if s == nil || accountID <= 0 {
+		return
+	}
+	released := false
+	s.mu.Lock()
+	for _, group := range s.groups {
+		if entry := group.accounts[accountID]; entry != nil && entry.inFlight > 0 {
+			entry.inFlight--
+			released = true
+		}
+	}
+	s.mu.Unlock()
+	if released {
+		s.signalSlot()
+	}
+}
+
+func (s *Scheduler) signalSlot() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.slotNotify != nil {
+		close(s.slotNotify)
+	}
+	s.slotNotify = make(chan struct{})
+	s.mu.Unlock()
+}
+
+func (s *Scheduler) WaitingCount() int {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.waiters
 }
 
 // InvalidateGroup makes administrative writes visible immediately when the
@@ -279,6 +525,7 @@ func (s *Scheduler) ReportFailure(accountID int64, statusCode int, message strin
 	s.invalidateSessionsForAccountLocked(accountID)
 	for _, group := range s.groups {
 		if entry := group.accounts[accountID]; entry != nil {
+			entry.errorEWMA = ewma(entry.errorEWMA, 1)
 			entry.account.ErrorCount++
 			entry.account.CooldownUntil = timePointer(until)
 			entry.account.LastError = message
@@ -332,6 +579,7 @@ func (s *Scheduler) ReportFailureForModel(accountID int64, modelName string, sta
 	s.modelFailures[key] = entry
 	for _, group := range s.groups {
 		if account := group.accounts[accountID]; account != nil {
+			account.errorEWMA = ewma(account.errorEWMA, 1)
 			account.account.ErrorCount++
 			account.account.LastError = message
 		}
@@ -372,12 +620,35 @@ func (s *Scheduler) ReportSuccess(accountID int64) {
 // ReportSuccessForModel clears the short-lived model circuit and then repairs
 // any persisted account failure state.
 func (s *Scheduler) ReportSuccessForModel(accountID int64, modelName string) {
+	s.ReportSuccessForModelWithLatency(accountID, modelName, 0)
+}
+
+// ReportSuccessForModelWithLatency updates the adaptive scheduling signals and
+// then clears the model/account failure circuit exactly like the legacy API.
+func (s *Scheduler) ReportSuccessForModelWithLatency(accountID int64, modelName string, latencyMs int64) {
+	s.mu.Lock()
+	for _, group := range s.groups {
+		if entry := group.accounts[accountID]; entry != nil {
+			if latencyMs > 0 {
+				entry.latencyEWMA = ewma(entry.latencyEWMA, float64(latencyMs))
+			}
+			entry.errorEWMA = ewma(entry.errorEWMA, 0)
+		}
+	}
+	s.mu.Unlock()
 	if key, ok := schedulerModelKey(accountID, modelName); ok {
 		s.mu.Lock()
 		delete(s.modelFailures, key)
 		s.mu.Unlock()
 	}
 	s.ReportSuccess(accountID)
+}
+
+func ewma(current, sample float64) float64 {
+	if current == 0 {
+		return sample
+	}
+	return current*0.8 + sample*0.2
 }
 
 func schedulerSessionKey(groupID int64, modelName, sessionID string) string {
@@ -406,7 +677,8 @@ func modelScopedSchedulerFailure(statusCode int, modelName string) bool {
 		return false
 	}
 	switch {
-	case statusCode == 403, statusCode == 404, statusCode == 408, statusCode == 409, statusCode == 425:
+	case statusCode == 400, statusCode == 403, statusCode == 404, statusCode == 405,
+		statusCode == 408, statusCode == 409, statusCode == 413, statusCode == 422, statusCode == 425:
 		return true
 	case statusCode >= 500:
 		return true

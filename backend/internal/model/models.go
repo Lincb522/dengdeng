@@ -66,7 +66,10 @@ type User struct {
 	AccessExpiresAt   *time.Time `gorm:"index" json:"access_expires_at"`
 	RemainingRequests int64      `gorm:"not null;default:0" json:"remaining_requests"`
 	RateMultiplier    float64    `gorm:"not null;default:1" json:"rate_multiplier"`
-	Note              string     `gorm:"size:512" json:"note"`
+	// Concurrency is the maximum number of simultaneous relay requests owned
+	// by this user. Zero preserves the legacy unlimited behaviour.
+	Concurrency int    `gorm:"not null;default:0" json:"concurrency"`
+	Note        string `gorm:"size:512" json:"note"`
 	// TokenVersion is bumped to invalidate all previously issued JWTs
 	// (password change, ban, role change).
 	TokenVersion int `gorm:"not null;default:0" json:"-"`
@@ -122,6 +125,9 @@ type APIKey struct {
 	// DailyQuotaMicro is an optional rolling calendar-day budget for one key.
 	// Its actual consumption is derived from the immutable usage ledger.
 	DailyQuotaMicro int64 `gorm:"not null;default:0" json:"daily_quota_micro"`
+	// Concurrency optionally narrows the owning user's concurrency for this one
+	// credential. Zero means no additional key-level cap.
+	Concurrency int `gorm:"not null;default:0" json:"concurrency"`
 	// RPM and IP rules are optional per-key protection. They are enforced in
 	// gateway authentication before any upstream request is made.
 	RPM        int        `gorm:"not null;default:0" json:"rpm"`
@@ -219,6 +225,9 @@ type UpstreamAccount struct {
 	Extra crypto.EncryptedString `gorm:"size:8192" json:"-"`
 
 	Priority int `gorm:"not null;default:10" json:"priority"`
+	// Concurrency is a hard upstream slot count. Zero means unlimited. The slot
+	// remains held for the complete lifetime of a streaming response.
+	Concurrency int `gorm:"not null;default:0" json:"concurrency"`
 	// DisplayOrder is a console-only order chosen by administrators. It is not
 	// consulted by the gateway scheduler, which continues to use Priority.
 	DisplayOrder  int        `gorm:"not null;default:0;index" json:"display_order"`
@@ -491,14 +500,21 @@ type UsageLog struct {
 	// CacheWrite5mTokens and CacheWrite1hTokens preserve Anthropic's detailed
 	// cache-creation response. CacheWriteTokens remains the aggregate for
 	// backwards-compatible API responses and reporting.
-	CacheWrite5mTokens int64     `json:"cache_write_5m_tokens"`
-	CacheWrite1hTokens int64     `json:"cache_write_1h_tokens"`
-	ImageCount         int64     `json:"image_count"`
-	CostMicro          int64     `json:"cost_micro"`
-	DurationMs         int64     `json:"duration_ms"`
-	StatusCode         int       `json:"status_code"`
-	ErrorMessage       string    `gorm:"size:512" json:"error_message"`
-	CreatedAt          time.Time `gorm:"index" json:"created_at"`
+	CacheWrite5mTokens int64 `json:"cache_write_5m_tokens"`
+	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens"`
+	ImageCount         int64 `json:"image_count"`
+	CostMicro          int64 `json:"cost_micro"`
+	DurationMs         int64 `json:"duration_ms"`
+	// ScheduleMs and UpstreamMs split internal routing time from time spent
+	// waiting on selected providers. AttemptCount makes failover visible without
+	// disclosing which upstream credentials were tried.
+	ScheduleMs   int64     `gorm:"not null;default:0" json:"schedule_ms"`
+	QueueMs      int64     `gorm:"not null;default:0" json:"queue_ms"`
+	UpstreamMs   int64     `gorm:"not null;default:0" json:"upstream_ms"`
+	AttemptCount int       `gorm:"not null;default:0" json:"attempt_count"`
+	StatusCode   int       `json:"status_code"`
+	ErrorMessage string    `gorm:"size:512" json:"error_message"`
+	CreatedAt    time.Time `gorm:"index" json:"created_at"`
 
 	UserEmail   string `gorm:"-" json:"user_email,omitempty"`
 	KeyName     string `gorm:"-" json:"key_name,omitempty"`

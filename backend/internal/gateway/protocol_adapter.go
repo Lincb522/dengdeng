@@ -296,6 +296,7 @@ func anthropicToolsToResponses(raw any) []any {
 		for _, key := range []string{"description", "input_schema"} {
 			if value, exists := tool[key]; exists {
 				if key == "input_schema" {
+					normalizeObjectRootUnionBranchTypes(value)
 					item["parameters"] = value
 				} else {
 					item[key] = value

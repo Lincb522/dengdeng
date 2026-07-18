@@ -27,4 +27,7 @@ func TestRequestIDAddsStableResponseHeader(t *testing.T) {
 	if response.Body.String() != id {
 		t.Fatalf("context id = %q, header id = %q", response.Body.String(), id)
 	}
+	if traceID := response.Header().Get("X-DengDeng-Trace-ID"); traceID != id {
+		t.Fatalf("trace id = %q, request id = %q", traceID, id)
+	}
 }

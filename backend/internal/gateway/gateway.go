@@ -52,6 +52,7 @@ type Gateway struct {
 	oauth        *oauth.Manager
 	runtime      *service.RuntimeMetrics
 	policy       *service.RuntimePolicyService
+	concurrency  *service.ClientConcurrencyLimiter
 	client       *http.Client
 	proxyClients sync.Map // map[proxy-id:updated-at]*http.Client
 	keyWindows   sync.Map // map[api-key-id]*keyRPMWindow
@@ -82,12 +83,13 @@ func New(db *gorm.DB, scheduler *service.Scheduler, billing *service.BillingServ
 		client = &http.Client{}
 	}
 	return &Gateway{
-		db:        db,
-		scheduler: scheduler,
-		billing:   billing,
-		rates:     rates,
-		oauth:     oauthManager,
-		runtime:   runtime,
+		db:          db,
+		scheduler:   scheduler,
+		billing:     billing,
+		rates:       rates,
+		oauth:       oauthManager,
+		runtime:     runtime,
+		concurrency: service.NewClientConcurrencyLimiter(),
 		// No global timeout: streaming responses can legitimately run for
 		// many minutes. Dial/TLS limits come from DefaultTransport.
 		client: client,
@@ -312,6 +314,13 @@ type relayRequest struct {
 	UpstreamGroupID int64
 }
 
+type relayTrace struct {
+	QueueMs      int64
+	ScheduleMs   int64
+	UpstreamMs   int64
+	AttemptCount int
+}
+
 // effortRates applies the operator-configured per-effort billing multiplier
 // on top of the request's rate plan. Image pricing is left untouched: image
 // generation has no reasoning phase.
@@ -405,6 +414,36 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	}
 	activeRequest := g.runtime.Begin(req.Platform, routeGroup.ID, ak.User.ID)
 	defer activeRequest.Finish()
+	start := time.Now()
+	trace := relayTrace{}
+	runtimePolicy := service.DefaultGatewayRuntimePolicy()
+	if g.policy != nil {
+		runtimePolicy = g.policy.Current()
+	}
+	concurrencyWait := time.Duration(runtimePolicy.ConcurrencyWaitMilliseconds) * time.Millisecond
+	activeRequest.SetWaiting(true)
+	lease, waited, err := g.concurrency.Acquire(
+		c.Request.Context(),
+		ak.User.ID,
+		ak.User.Concurrency,
+		ak.Key.ID,
+		ak.Key.Concurrency,
+		concurrencyWait,
+		runtimePolicy.ConcurrencyQueueDepth,
+	)
+	activeRequest.SetWaiting(false)
+	trace.QueueMs += waited.Milliseconds()
+	if err != nil {
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		c.Header("Retry-After", "1")
+		g.setRelayTimingHeaders(c, trace)
+		g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusTooManyRequests, "concurrency limit reached")
+		util.Fail(c, http.StatusTooManyRequests, "concurrency limit reached; retry later")
+		return
+	}
+	defer lease.Release()
 
 	// Day passes take precedence. Otherwise, use a request entitlement before
 	// falling back to the cash balance. This is deliberately done only after
@@ -433,7 +472,6 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		}
 	}
 
-	start := time.Now()
 	var tried []int64
 	var lastStatus int
 	var lastBody []byte
@@ -444,13 +482,35 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		if c.Request.Context().Err() != nil {
 			return
 		}
-		acc, err := g.scheduler.PickForSession(routeGroup.ID, req.Model, sessionID, tried)
+		scheduleStarted := time.Now()
+		activeRequest.SetWaiting(true)
+		acc, queuedForAccount, err := g.scheduler.PickForSessionWait(
+			c.Request.Context(), routeGroup.ID, req.Model, sessionID, tried,
+			concurrencyWait, runtimePolicy.ConcurrencyQueueDepth,
+		)
+		activeRequest.SetWaiting(false)
+		scheduleElapsed := time.Since(scheduleStarted)
+		trace.QueueMs += queuedForAccount.Milliseconds()
+		if scheduling := scheduleElapsed - queuedForAccount; scheduling > 0 {
+			trace.ScheduleMs += scheduling.Milliseconds()
+		}
 		if err != nil {
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			if errors.Is(err, service.ErrAccountQueueFull) || errors.Is(err, service.ErrAccountWaitTimeout) || errors.Is(err, service.ErrAccountConcurrencyBusy) {
+				c.Header("Retry-After", "1")
+				g.setRelayTimingHeaders(c, trace)
+				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusTooManyRequests, "upstream account concurrency limit reached")
+				util.Fail(c, http.StatusTooManyRequests, "upstream accounts are busy; retry later")
+				return
+			}
 			if errors.Is(err, service.ErrNoAccount) && lastStatus != 0 {
 				break // fall through to lastStatus passthrough
 			}
 			if errors.Is(err, service.ErrNoAccount) {
-				g.recordRelayFailure(c, ak, routeGroup, req, start, http.StatusServiceUnavailable, "no available upstream account in this group")
+				g.setRelayTimingHeaders(c, trace)
+				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, "no available upstream account in this group")
 				util.Fail(c, http.StatusServiceUnavailable, "no available upstream account in this group")
 				return
 			}
@@ -458,10 +518,15 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			return
 		}
 		tried = append(tried, acc.ID)
+		trace.AttemptCount++
 		activeRequest.SetAccount(acc.ID)
 
+		upstreamStarted := time.Now()
 		resp, err := g.forward(c, acc, req)
+		attemptUpstreamMs := time.Since(upstreamStarted).Milliseconds()
+		trace.UpstreamMs += attemptUpstreamMs
 		if err != nil {
+			g.scheduler.Release(acc.ID)
 			if c.Request.Context().Err() != nil {
 				return
 			}
@@ -474,8 +539,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 			resp.Body.Close()
+			g.scheduler.Release(acc.ID)
 			lastStatus, lastBody = resp.StatusCode, body
-			if retryable(resp.StatusCode) {
+			if retryableUpstream(resp.StatusCode, body) {
 				g.scheduler.ReportFailureForModel(acc.ID, req.Model, resp.StatusCode, string(body))
 				continue
 			}
@@ -483,25 +549,31 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		}
 
 		// Success: stream through and bill afterwards.
-		g.scheduler.ReportSuccessForModel(acc.ID, req.Model)
+		g.scheduler.ReportSuccessForModelWithLatency(acc.ID, req.Model, attemptUpstreamMs)
+		g.setRelayTimingHeaders(c, trace)
 		usage, streamed := g.pipeAdapted(c, resp, req.Platform, req.Image, req.ResponseAdapter, req.Model)
 		resp.Body.Close()
+		g.scheduler.Release(acc.ID)
 
 		if req.Billable {
 			g.billing.Record(service.BillContext{
-				RequestID:   middleware.RequestIDFromContext(c),
-				UserID:      ak.User.ID,
-				APIKeyID:    ak.Key.ID,
-				AccountID:   acc.ID,
-				GroupID:     routeGroup.ID,
-				Model:       req.Model,
-				Stream:      streamed,
-				Effort:      req.Effort,
-				Usage:       usage,
-				Rates:       g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
-				DurationMs:  time.Since(start).Milliseconds(),
-				StatusCode:  resp.StatusCode,
-				SkipBalance: ak.AccessActive || ak.RequestReserved,
+				RequestID:    middleware.RequestIDFromContext(c),
+				UserID:       ak.User.ID,
+				APIKeyID:     ak.Key.ID,
+				AccountID:    acc.ID,
+				GroupID:      routeGroup.ID,
+				Model:        req.Model,
+				Stream:       streamed,
+				Effort:       req.Effort,
+				Usage:        usage,
+				Rates:        g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
+				DurationMs:   time.Since(start).Milliseconds(),
+				QueueMs:      trace.QueueMs,
+				ScheduleMs:   trace.ScheduleMs,
+				UpstreamMs:   trace.UpstreamMs,
+				AttemptCount: trace.AttemptCount,
+				StatusCode:   resp.StatusCode,
+				SkipBalance:  ak.AccessActive || ak.RequestReserved,
 			})
 		}
 		completed = true
@@ -512,7 +584,8 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	if lastStatus == 0 {
 		lastStatus, lastBody = http.StatusServiceUnavailable, []byte(`{"error":{"message":"no available upstream account"}}`)
 	}
-	g.recordRelayFailure(c, ak, routeGroup, req, start, lastStatus, truncate(string(lastBody), 500))
+	g.setRelayTimingHeaders(c, trace)
+	g.recordRelayFailure(c, ak, routeGroup, req, start, trace, lastStatus, truncate(string(lastBody), 500))
 	c.Data(lastStatus, "application/json", lastBody)
 }
 
@@ -520,7 +593,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 // produced an upstream success. This is intentionally cost-neutral, but makes
 // scheduler exhaustion and final upstream failures visible in the same ledger
 // that powers monitoring and user-side troubleshooting.
-func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.Group, req relayRequest, started time.Time, status int, message string) {
+func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.Group, req relayRequest, started time.Time, trace relayTrace, status int, message string) {
 	if !req.Billable || g.billing == nil {
 		return
 	}
@@ -534,10 +607,22 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		Effort:       req.Effort,
 		Rates:        billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
 		DurationMs:   time.Since(started).Milliseconds(),
+		QueueMs:      trace.QueueMs,
+		ScheduleMs:   trace.ScheduleMs,
+		UpstreamMs:   trace.UpstreamMs,
+		AttemptCount: trace.AttemptCount,
 		StatusCode:   status,
 		ErrorMessage: message,
 		SkipBalance:  true,
 	})
+}
+
+func (g *Gateway) setRelayTimingHeaders(c *gin.Context, trace relayTrace) {
+	if c == nil {
+		return
+	}
+	c.Header("Server-Timing", fmt.Sprintf("queue;dur=%d, route;dur=%d, upstream;dur=%d", trace.QueueMs, trace.ScheduleMs, trace.UpstreamMs))
+	c.Header("X-DengDeng-Upstream-Attempts", strconv.Itoa(trace.AttemptCount))
 }
 
 func normalizedMultiplier(v float64) float64 {
@@ -567,8 +652,37 @@ func billingRates(user model.User, group model.Group, groupRate float64) service
 	}
 }
 
-func retryable(status int) bool {
-	return status == 401 || status == 403 || status == 429 || status >= 500
+func retryableUpstream(status int, body []byte) bool {
+	switch {
+	case status == http.StatusUnauthorized,
+		status == http.StatusForbidden,
+		status == http.StatusNotFound,
+		status == http.StatusMethodNotAllowed,
+		status == http.StatusRequestTimeout,
+		status == http.StatusConflict,
+		status == http.StatusRequestEntityTooLarge,
+		status == http.StatusTooEarly,
+		status == http.StatusTooManyRequests,
+		status >= http.StatusInternalServerError:
+		return true
+	case status != http.StatusBadRequest && status != http.StatusUnprocessableEntity:
+		return false
+	}
+	// A generic malformed client request should be returned immediately. Only
+	// retry 400/422 responses that identify an account/model capability mismatch.
+	message := strings.ToLower(string(body))
+	for _, marker := range []string{
+		"model_not_found", "unsupported model", "model is not supported",
+		"model not supported", "model is not available", "model unavailable",
+		"not supported when using codex", "does not support image",
+		"does not support this model", "unsupported endpoint",
+		"capability is not available", "capability not supported",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // forward builds and executes the upstream request for one account.

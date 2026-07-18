@@ -15,6 +15,7 @@ const newName = ref('')
 const newGroupID = ref<number | null>(null)
 const newQuota = ref(0)
 const newDailyQuota = ref(0)
+const newConcurrency = ref(0)
 const newReasoningEffort = ref('auto')
 const createdPlain = ref('')
 const createdKey = ref<ApiKey | null>(null)
@@ -23,7 +24,7 @@ const setupPlain = ref('')
 const showSetup = ref(false)
 const copiedKeyID = ref<number | null>(null)
 const settingKey = ref<ApiKey | null>(null)
-const settingsForm = ref({ name: '', group_id: 0, reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
+const settingsForm = ref({ name: '', group_id: 0, reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
 const reasoningOptions = REASONING_OPTIONS
 
@@ -109,6 +110,7 @@ async function createKey() {
 	  reasoning_effort: groupPlatform(newGroupID.value) === 'openai' ? newReasoningEffort.value : 'auto',
       quota_micro: toMicro(newQuota.value),
       daily_quota_micro: toMicro(newDailyQuota.value),
+		concurrency: Math.max(0, Math.floor(Number(newConcurrency.value) || 0)),
     }),
     '密钥已创建',
   )
@@ -121,6 +123,7 @@ async function createKey() {
     newName.value = ''
     newQuota.value = 0
     newDailyQuota.value = 0
+		newConcurrency.value = 0
 	newReasoningEffort.value = 'auto'
     await load()
   }
@@ -148,6 +151,7 @@ function openSettings(key: ApiKey) {
     daily_quota: fromMicro(key.daily_quota_micro),
     status: key.status,
     rpm: key.rpm || 0,
+		concurrency: key.concurrency || 0,
     allowed_ips: key.allowed_ips || '',
     blocked_ips: key.blocked_ips || '',
     expires_at: toLocalDateTime(key.expires_at),
@@ -164,6 +168,7 @@ async function saveSettings() {
     daily_quota_micro: toMicro(settingsForm.value.daily_quota),
     status: settingsForm.value.status,
     rpm: Math.max(0, Math.floor(Number(settingsForm.value.rpm) || 0)),
+		concurrency: Math.max(0, Math.floor(Number(settingsForm.value.concurrency) || 0)),
     allowed_ips: settingsForm.value.allowed_ips,
     blocked_ips: settingsForm.value.blocked_ips,
     expires_at: settingsForm.value.expires_at ? new Date(settingsForm.value.expires_at).toISOString() : null,
@@ -287,7 +292,7 @@ function onSetupEffortUpdated(value: string) {
 					<div class="num text-slate-300">{{ k.quota_micro ? `${formatMoney(k.quota_used_micro)} / ${formatMoney(k.quota_micro)}` : '总额不限' }}</div>
 					<div class="mt-1 text-slate-500">每日 {{ quotaLabel(k.daily_quota_micro) }}</div>
 					<div v-if="k.group?.platform === 'openai'" class="mt-1 text-slate-500">思考强度 Reasoning Effort：{{ reasoningLabel(k.reasoning_effort) }}</div>
-					<div v-if="k.rpm || k.expires_at || k.allowed_ips || k.blocked_ips" class="mt-1 text-slate-500">{{ k.rpm ? `${k.rpm} RPM` : '' }}{{ k.rpm && (k.expires_at || k.allowed_ips || k.blocked_ips) ? ' · ' : '' }}{{ k.expires_at ? `到期 ${new Date(k.expires_at).toLocaleDateString()}` : (k.allowed_ips || k.blocked_ips ? '已设 IP 规则' : '') }}</div>
+					<div v-if="k.rpm || k.concurrency || k.expires_at || k.allowed_ips || k.blocked_ips" class="mt-1 text-slate-500">{{ k.rpm ? `${k.rpm} RPM · ` : '' }}{{ k.concurrency ? `并发 ${k.concurrency}` : '并发不限' }}{{ k.expires_at ? ` · 到期 ${new Date(k.expires_at).toLocaleDateString()}` : (k.allowed_ips || k.blocked_ips ? ' · 已设 IP 规则' : '') }}</div>
 				</td>
             <td>
               <span :class="k.status === 'active' ? 'tag-green' : 'tag-red'">
@@ -341,6 +346,7 @@ function onSetupEffortUpdated(value: string) {
 					<label><span class="label">每日额度（USD）</span><input v-model.number="newDailyQuota" type="number" min="0" step="0.01" class="input" placeholder="0 = 不限制" /></label>
 					<p class="col-span-2 text-xs leading-5 text-slate-500">额度按实际调用费用扣减，与账户余额独立；总额度耗尽或达到当日额度后，该密钥会被拒绝调用。</p>
 				</div>
+				<label><span class="label">并发上限</span><input v-model.number="newConcurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /><small class="mt-1 block text-[11px] text-slate-500">限制这把密钥同时进行中的完整请求数量，包含流式响应。</small></label>
               <div class="flex justify-end gap-3 pt-2">
                 <button class="btn-ghost" @click="closeCreate">取消</button>
                 <button class="btn-primary" :disabled="!newName || !newGroupID" @click="createKey">创建</button>
@@ -373,7 +379,8 @@ function onSetupEffortUpdated(value: string) {
 						<label><span class="label">分组</span><select v-model.number="settingsForm.group_id" class="input"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}（{{ PLATFORM_LABELS[group.platform] }}）</option></select></label>
 						<div v-if="groupPlatform(settingsForm.group_id) === 'openai'" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度 Reasoning Effort</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">客户端显式设置时优先；费用按实际生效档位计算。</p></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label></div>
-						<div class="grid grid-cols-2 gap-3"><label><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="mt-1 block text-[11px] text-slate-500">留空表示永久有效</small></label></div>
+						<div class="grid grid-cols-2 gap-3"><label><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label><span class="label">并发上限</span><input v-model.number="settingsForm.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /><small class="mt-1 block text-[11px] text-slate-500">覆盖请求的完整生命周期。</small></label></div>
+						<label><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="mt-1 block text-[11px] text-slate-500">留空表示永久有效</small></label>
 						<label><span class="label">IP 白名单</span><input v-model.trim="settingsForm.allowed_ips" class="input font-mono text-xs" placeholder="203.0.113.8, 2001:db8::/32（留空不限）" /><small class="mt-1 block text-[11px] text-slate-500">仅允许列出的 IP 或 CIDR；多个规则用逗号或空格分隔。</small></label>
 						<label><span class="label">IP 黑名单</span><input v-model.trim="settingsForm.blocked_ips" class="input font-mono text-xs" placeholder="198.51.100.0/24（留空不拦截）" /><small class="mt-1 block text-[11px] text-slate-500">黑名单优先于白名单，用于立即阻断异常来源。</small></label>
 						<label><span class="label">状态</span><select v-model="settingsForm.status" class="input"><option value="active">启用</option><option value="disabled">停用</option></select></label>

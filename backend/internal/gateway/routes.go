@@ -157,6 +157,14 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 			}
 		}
 	}
+	if _, hasTools := fields["tools"]; hasTools {
+		if normalized, err := normalizeOpenAIChatRequest(body); err == nil {
+			body = normalized
+		} else {
+			util.Fail(c, http.StatusBadRequest, "invalid OpenAI tool schema")
+			return
+		}
+	}
 	g.relay(c, ak, relayRequest{
 		Platform: platform,
 		Path:     "/v1/chat/completions",
@@ -201,6 +209,19 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 		return
 	}
 	body, effort := applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningResponses)
+	_, hasTools := fields["tools"]
+	_, hasParallel := fields["parallel_tool_calls"]
+	_, hasMetadata := fields["client_metadata"]
+	inputHasItemID := bytes.Contains(fields["input"], []byte(`"id"`))
+	responsesLite := strings.EqualFold(strings.TrimSpace(c.GetHeader(codexResponsesLiteHeader)), "true")
+	if hasTools || hasParallel || hasMetadata || inputHasItemID || responsesLite {
+		if normalized, err := normalizeOpenAIResponsesRequest(body, c.Request.Header); err == nil {
+			body = normalized
+		} else {
+			util.Fail(c, http.StatusBadRequest, "invalid OpenAI Responses request")
+			return
+		}
+	}
 	g.relay(c, ak, relayRequest{
 		Platform: platform,
 		Path:     "/v1/responses",
@@ -248,6 +269,11 @@ func (g *Gateway) relayAnthropicViaResponses(c *gin.Context, ak *authedKey, body
 	encoded, err := json.Marshal(converted)
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, "convert Anthropic request failed")
+		return
+	}
+	encoded, err = normalizeOpenAIResponsesRequest(encoded, c.Request.Header)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, "normalize Anthropic tools failed")
 		return
 	}
 	g.relay(c, ak, relayRequest{

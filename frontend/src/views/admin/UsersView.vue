@@ -14,6 +14,7 @@ const form = ref({
   status: 'active',
   role: 'user',
   rate_multiplier: 1,
+	concurrency: 0,
   add_balance_usd: 0,
   password: '',
   note: '',
@@ -32,7 +33,7 @@ onMounted(load)
 
 async function openEdit(u: User) {
   editing.value = u
-  form.value = { status: u.status, role: u.role, rate_multiplier: u.rate_multiplier, add_balance_usd: 0, password: '', note: u.note || '' }
+  form.value = { status: u.status, role: u.role, rate_multiplier: u.rate_multiplier, concurrency: u.concurrency || 0, add_balance_usd: 0, password: '', note: u.note || '' }
 	groupRates.value = {}
 	try {
 		const rates = await api.get<UserGroupRate[]>(`/api/admin/users/${u.id}/group-rates`)
@@ -57,6 +58,7 @@ async function save() {
     status: form.value.status,
     role: form.value.role,
     rate_multiplier: Number(form.value.rate_multiplier),
+		concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
     note: form.value.note,
   }
   if (form.value.add_balance_usd) {
@@ -98,6 +100,7 @@ async function save() {
             <th>状态</th>
             <th class="text-right">余额</th>
             <th class="text-right">倍率</th>
+						<th class="text-right">并发</th>
             <th>备注</th>
             <th>注册时间</th>
             <th class="text-right">操作</th>
@@ -112,6 +115,7 @@ async function save() {
               {{ formatMoney(u.balance_micro) }}
             </td>
             <td class="num text-right">x{{ u.rate_multiplier }}</td>
+						<td class="num text-right">{{ u.concurrency > 0 ? u.concurrency : '不限' }}</td>
             <td class="max-w-[160px] truncate text-xs text-slate-500" :title="u.note">{{ u.note }}</td>
             <td class="text-xs text-slate-500">{{ new Date(u.created_at).toLocaleDateString() }}</td>
             <td class="text-right">
@@ -119,7 +123,7 @@ async function save() {
             </td>
           </tr>
           <tr v-if="!users.length">
-            <td colspan="8" class="py-10 text-center text-sm text-slate-500">暂无用户</td>
+						<td colspan="9" class="py-10 text-center text-sm text-slate-500">暂无用户</td>
           </tr>
         </tbody>
       </table>
@@ -147,6 +151,11 @@ async function save() {
                 </select>
               </div>
             </div>
+						<div>
+							<label class="label">用户并发上限</label>
+							<input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" />
+							<p class="mt-1 text-xs text-slate-500">该用户所有密钥共享此上限；密钥还可以设置更小的独立上限。</p>
+						</div>
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="label">计费倍率</label>

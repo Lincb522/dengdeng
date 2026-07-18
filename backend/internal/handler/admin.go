@@ -115,6 +115,7 @@ type adminUpdateUserReq struct {
 	Status         *string  `json:"status"`
 	Role           *string  `json:"role"`
 	RateMultiplier *float64 `json:"rate_multiplier"`
+	Concurrency    *int     `json:"concurrency"`
 	AddBalance     *int64   `json:"add_balance_micro"`
 	Password       *string  `json:"password"`
 	Note           *string  `json:"note"`
@@ -154,6 +155,13 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 	}
 	if req.RateMultiplier != nil && *req.RateMultiplier > 0 {
 		updates["rate_multiplier"] = *req.RateMultiplier
+	}
+	if req.Concurrency != nil {
+		if *req.Concurrency < 0 || *req.Concurrency > 10000 {
+			util.Fail(c, http.StatusBadRequest, "user concurrency must be between 0 and 10000")
+			return
+		}
+		updates["concurrency"] = *req.Concurrency
 	}
 	if req.Note != nil {
 		updates["note"] = *req.Note
@@ -758,6 +766,7 @@ type accountReq struct {
 	Email        string     `json:"email"`
 	AccountID    string     `json:"account_id"`
 	Priority     *int       `json:"priority"`
+	Concurrency  *int       `json:"concurrency"`
 	Status       string     `json:"status"`
 }
 
@@ -777,6 +786,10 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	}
 	if authType == model.AuthOAuth && req.AccessToken == "" && req.RefreshToken == "" {
 		util.Fail(c, http.StatusBadRequest, "access_token or refresh_token is required for oauth accounts")
+		return
+	}
+	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
+		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
 		return
 	}
 	var group model.Group
@@ -805,6 +818,9 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	}
 	if req.Priority != nil {
 		acc.Priority = *req.Priority
+	}
+	if req.Concurrency != nil {
+		acc.Concurrency = *req.Concurrency
 	}
 	if err := h.db.Create(&acc).Error; err != nil {
 		util.Fail(c, http.StatusInternalServerError, "create account failed")
@@ -860,6 +876,13 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 	if req.Priority != nil {
 		updates["priority"] = *req.Priority
 	}
+	if req.Concurrency != nil {
+		if *req.Concurrency < 0 || *req.Concurrency > 10000 {
+			util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
+			return
+		}
+		updates["concurrency"] = *req.Concurrency
+	}
 	if req.ProxyID != nil {
 		if err := h.validateProxyAssignment(*req.ProxyID); err != nil {
 			util.Fail(c, http.StatusBadRequest, err.Error())
@@ -886,6 +909,7 @@ type importReq struct {
 	Data        string `json:"data"`   // raw export JSON
 	BaseURL     string `json:"base_url"`
 	Priority    *int   `json:"priority"`
+	Concurrency *int   `json:"concurrency"`
 	SkipExpired bool   `json:"skip_expired"`
 }
 
@@ -895,6 +919,10 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	var req importReq
 	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == 0 || req.Data == "" {
 		util.Fail(c, http.StatusBadRequest, "group_id and data are required")
+		return
+	}
+	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
+		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
 		return
 	}
 	var group model.Group
@@ -915,6 +943,10 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	for _, p := range parsed {
+		if p.Concurrency != nil && (*p.Concurrency < 0 || *p.Concurrency > 10000) {
+			skipped = append(skipped, gin.H{"name": p.Name, "reason": "invalid concurrency"})
+			continue
+		}
 		if p.Platform != "" && p.Platform != group.Platform {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "platform " + p.Platform + " != group " + group.Platform})
 			continue
@@ -949,6 +981,11 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		} else if req.Priority != nil {
 			acc.Priority = *req.Priority
 		}
+		if p.Concurrency != nil {
+			acc.Concurrency = *p.Concurrency
+		} else if req.Concurrency != nil {
+			acc.Concurrency = *req.Concurrency
+		}
 		if err := h.db.Create(&acc).Error; err != nil {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 			continue
@@ -976,10 +1013,11 @@ func firstNonEmpty(vals ...string) string {
 // ---- browser OAuth sign-in ----
 
 type oauthStartReq struct {
-	GroupID  int64  `json:"group_id"`
-	Name     string `json:"name"`
-	BaseURL  string `json:"base_url"`
-	Priority *int   `json:"priority"`
+	GroupID     int64  `json:"group_id"`
+	Name        string `json:"name"`
+	BaseURL     string `json:"base_url"`
+	Priority    *int   `json:"priority"`
+	Concurrency *int   `json:"concurrency"`
 }
 
 // StartOAuthLogin creates a short-lived PKCE flow. The frontend opens the
@@ -1005,17 +1043,25 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "selected group does not match OAuth platform")
 		return
 	}
+	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
+		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
+		return
+	}
 	callbackURL, completionURL, err := h.oauth.CallbackURLs(platform, c.Request.Host, c.Request.TLS != nil)
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	priority := 10
+	concurrency := 0
 	if req.Priority != nil {
 		priority = *req.Priority
 	}
+	if req.Concurrency != nil {
+		concurrency = *req.Concurrency
+	}
 	authorizeURL, err := h.oauth.BeginLoginWithCompletion(platform, callbackURL, completionURL, oauth.LoginIntent{
-		GroupID: group.ID, Name: trimAccountName(req.Name), BaseURL: strings.TrimSpace(req.BaseURL), Priority: priority,
+		GroupID: group.ID, Name: trimAccountName(req.Name), BaseURL: strings.TrimSpace(req.BaseURL), Priority: priority, Concurrency: concurrency,
 	})
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "start oauth login failed")
@@ -1075,7 +1121,7 @@ func (h *AdminHandler) CompleteOAuthLogin(c *gin.Context) {
 		AuthType:    model.AuthOAuth,
 		AccessToken: crypto.EncryptedString(result.AccessToken), RefreshToken: crypto.EncryptedString(result.RefreshToken),
 		ExpiresAt: result.ExpiresAt, Email: identity.Email, AccountID: identity.AccountID,
-		Extra: encodedExtra, Priority: result.Intent.Priority, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
+		Extra: encodedExtra, Priority: result.Intent.Priority, Concurrency: result.Intent.Concurrency, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
 	}
 	if err := h.db.Create(&account).Error; err != nil {
 		h.oauthCallbackPage(c, http.StatusInternalServerError, "创建上游账号失败，请关闭此窗口后重试。", "error", result.Origin)
@@ -1271,7 +1317,7 @@ func (h *AdminHandler) DeleteModel(c *gin.Context) {
 // ---- redeem codes ----
 
 func (h *AdminHandler) ListRedeemCodes(c *gin.Context) {
-	var codes []model.RedeemCode
+	codes := make([]model.RedeemCode, 0)
 	h.db.Order("id DESC").Limit(500).Find(&codes)
 
 	userIDs := map[int64]bool{}

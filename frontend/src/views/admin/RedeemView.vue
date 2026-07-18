@@ -15,7 +15,8 @@ const entitlementValue = ref(30)
 const generated = ref<string[]>([])
 
 async function load() {
-  codes.value = await api.get<RedeemCode[]>('/api/admin/redeem-codes')
+  const result = await api.get<RedeemCode[] | null>('/api/admin/redeem-codes')
+  codes.value = Array.isArray(result) ? result : []
 }
 onMounted(load)
 
@@ -31,7 +32,7 @@ async function generate() {
     '生成成功',
   )
   if (result) {
-    generated.value = result.codes
+    generated.value = Array.isArray(result.codes) ? result.codes : []
     await load()
   }
 }

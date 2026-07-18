@@ -78,6 +78,7 @@ type createKeyReq struct {
 	QuotaMicro      int64      `json:"quota_micro"`
 	DailyQuotaMicro int64      `json:"daily_quota_micro"`
 	RPM             int64      `json:"rpm"`
+	Concurrency     int        `json:"concurrency"`
 	AllowedIPs      string     `json:"allowed_ips"`
 	BlockedIPs      string     `json:"blocked_ips"`
 	ExpiresAt       *time.Time `json:"expires_at"`
@@ -92,6 +93,10 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 	}
 	if req.QuotaMicro < 0 || req.DailyQuotaMicro < 0 {
 		util.Fail(c, http.StatusBadRequest, "key quotas cannot be negative")
+		return
+	}
+	if req.Concurrency < 0 || req.Concurrency > 10000 {
+		util.Fail(c, http.StatusBadRequest, "key concurrency must be between 0 and 10000")
 		return
 	}
 	reasoningEffort, err := normalizeReasoningEffort(req.ReasoningEffort)
@@ -123,7 +128,7 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 		Status:          model.StatusActive,
 		ReasoningEffort: reasoningEffort,
 		QuotaMicro:      req.QuotaMicro, DailyQuotaMicro: req.DailyQuotaMicro,
-		RPM: policy.rpm, AllowedIPs: policy.allowedIPs, BlockedIPs: policy.blockedIPs, ExpiresAt: policy.expiresAt,
+		RPM: policy.rpm, Concurrency: req.Concurrency, AllowedIPs: policy.allowedIPs, BlockedIPs: policy.blockedIPs, ExpiresAt: policy.expiresAt,
 	}
 	if err := h.db.Create(&key).Error; err != nil {
 		util.Fail(c, http.StatusInternalServerError, "create key failed")
@@ -149,6 +154,7 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		QuotaMicro      *int64           `json:"quota_micro"`
 		DailyQuotaMicro *int64           `json:"daily_quota_micro"`
 		RPM             *int64           `json:"rpm"`
+		Concurrency     *int             `json:"concurrency"`
 		AllowedIPs      *string          `json:"allowed_ips"`
 		BlockedIPs      *string          `json:"blocked_ips"`
 		ExpiresAt       *json.RawMessage `json:"expires_at"`
@@ -197,6 +203,13 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 			return
 		}
 		updates["daily_quota_micro"] = *req.DailyQuotaMicro
+	}
+	if req.Concurrency != nil {
+		if *req.Concurrency < 0 || *req.Concurrency > 10000 {
+			util.Fail(c, http.StatusBadRequest, "key concurrency must be between 0 and 10000")
+			return
+		}
+		updates["concurrency"] = *req.Concurrency
 	}
 	if req.RPM != nil || req.AllowedIPs != nil || req.BlockedIPs != nil || req.ExpiresAt != nil {
 		rpm, allowed, blocked, expiresAt := int64(key.RPM), key.AllowedIPs, key.BlockedIPs, key.ExpiresAt

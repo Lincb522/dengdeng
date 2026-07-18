@@ -321,10 +321,11 @@ func truncate(s string, n int) string {
 // LoginIntent describes the account to create after a browser-based OAuth
 // authorization succeeds. It is kept server-side alongside the PKCE verifier.
 type LoginIntent struct {
-	GroupID  int64
-	Name     string
-	BaseURL  string
-	Priority int
+	GroupID     int64
+	Name        string
+	BaseURL     string
+	Priority    int
+	Concurrency int
 }
 
 // LoginResult is the provider response plus the original, one-time intent.
