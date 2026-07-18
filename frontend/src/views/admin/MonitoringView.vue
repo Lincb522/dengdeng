@@ -112,7 +112,7 @@ function normalizeSnapshot(data: OpsSnapshot): OpsSnapshot {
   const emptyWindow = { requests: 0, success_rate: 0, error_rate: 0, tokens: 0, cost_micro: 0, requests_per_minute: 0, requests_per_second: 0, tokens_per_second: 0, average_latency_ms: 0 }
   const realtime = data.realtime && typeof data.realtime === 'object'
     ? data.realtime
-    : { captured_at: '', in_flight: 0, last_minute: emptyWindow, breakdown: [] }
+    : { captured_at: '', in_flight: 0, waiting: 0, last_minute: emptyWindow, breakdown: [] }
   return {
     ...data,
     trend: Array.isArray(data.trend) ? data.trend : [],
@@ -213,6 +213,7 @@ onBeforeUnmount(() => {
           <div class="ops-section-title"><div><h3>实时流量</h3><p>已完成请求按最近 1 分钟统计；进行中的流式请求单独计数。</p></div><span class="ops-live-indicator"><i></i> 实时</span></div>
           <dl class="ops-realtime-metrics">
             <div><dt>进行中</dt><dd>{{ snapshot?.realtime.in_flight ?? 0 }}</dd><small>正在转发的请求</small></div>
+							<div><dt>等待槽位</dt><dd>{{ snapshot?.realtime.waiting ?? 0 }}</dd><small>并发队列中</small></div>
             <div><dt>最近 1 分钟</dt><dd>{{ snapshot?.realtime.last_minute.requests ?? 0 }}</dd><small>已完成请求</small></div>
             <div><dt>QPS</dt><dd>{{ (snapshot?.realtime.last_minute.requests_per_second ?? 0).toFixed(2) }}</dd><small>每秒请求</small></div>
             <div><dt>TPS</dt><dd>{{ (snapshot?.realtime.last_minute.tokens_per_second ?? 0).toFixed(1) }}</dd><small>每秒 Token</small></div>

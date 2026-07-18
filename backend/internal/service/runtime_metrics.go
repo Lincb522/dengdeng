@@ -7,16 +7,20 @@ import "sync"
 // tracker fills the gap while a stream is still in flight and never persists
 // user prompts, credentials, or response data.
 type RuntimeMetrics struct {
-	mu       sync.Mutex
-	all      int
-	platform map[string]int
-	group    map[int64]int
-	account  map[int64]int
-	user     map[int64]int
+	mu              sync.Mutex
+	all             int
+	waiting         int
+	platform        map[string]int
+	waitingPlatform map[string]int
+	group           map[int64]int
+	waitingGroup    map[int64]int
+	account         map[int64]int
+	user            map[int64]int
 }
 
 type RuntimeSnapshot struct {
 	InFlight int
+	Waiting  int
 	Platform map[string]int
 	Group    map[int64]int
 	Account  map[int64]int
@@ -29,12 +33,13 @@ type RuntimeRequest struct {
 	groupID   int64
 	userID    int64
 	accountID int64
+	waiting   bool
 	finished  bool
 }
 
 func NewRuntimeMetrics() *RuntimeMetrics {
 	return &RuntimeMetrics{
-		platform: map[string]int{}, group: map[int64]int{}, account: map[int64]int{}, user: map[int64]int{},
+		platform: map[string]int{}, waitingPlatform: map[string]int{}, group: map[int64]int{}, waitingGroup: map[int64]int{}, account: map[int64]int{}, user: map[int64]int{},
 	}
 }
 
@@ -65,6 +70,34 @@ func (r *RuntimeRequest) SetAccount(accountID int64) {
 	m.mu.Unlock()
 }
 
+// SetWaiting marks the request while it is blocked on a user/key or upstream
+// account slot. It is idempotent so callers can bracket every bounded wait
+// without double-counting transitions between the two limiter layers.
+func (r *RuntimeRequest) SetWaiting(waiting bool) {
+	if r == nil || r.metrics == nil || r.finished || r.waiting == waiting {
+		return
+	}
+	m := r.metrics
+	m.mu.Lock()
+	if r.finished || r.waiting == waiting {
+		m.mu.Unlock()
+		return
+	}
+	r.waiting = waiting
+	if waiting {
+		m.waiting++
+		m.waitingPlatform[r.platform]++
+		m.waitingGroup[r.groupID]++
+	} else {
+		if m.waiting > 0 {
+			m.waiting--
+		}
+		decrement(m.waitingPlatform, r.platform)
+		decrement(m.waitingGroup, r.groupID)
+	}
+	m.mu.Unlock()
+}
+
 func (r *RuntimeRequest) Finish() {
 	if r == nil || r.metrics == nil || r.finished {
 		return
@@ -76,6 +109,14 @@ func (r *RuntimeRequest) Finish() {
 		return
 	}
 	r.finished = true
+	if r.waiting {
+		r.waiting = false
+		if m.waiting > 0 {
+			m.waiting--
+		}
+		decrement(m.waitingPlatform, r.platform)
+		decrement(m.waitingGroup, r.groupID)
+	}
 	if m.all > 0 {
 		m.all--
 	}
@@ -111,7 +152,7 @@ func (m *RuntimeMetrics) Snapshot(platform string, groupID int64) RuntimeSnapsho
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if platform == "" && groupID == 0 {
-		return RuntimeSnapshot{InFlight: m.all, Platform: copyCounts(m.platform), Group: copyCounts(m.group), Account: copyCounts(m.account), User: copyCounts(m.user)}
+		return RuntimeSnapshot{InFlight: m.all, Waiting: m.waiting, Platform: copyCounts(m.platform), Group: copyCounts(m.group), Account: copyCounts(m.account), User: copyCounts(m.user)}
 	}
 	// A filtered page must not claim it knows account-level values which cannot
 	// be safely reconstructed from independent maps. Group is exact; the
@@ -119,12 +160,14 @@ func (m *RuntimeMetrics) Snapshot(platform string, groupID int64) RuntimeSnapsho
 	filtered := RuntimeSnapshot{Platform: map[string]int{}, Group: map[int64]int{}, Account: map[int64]int{}, User: map[int64]int{}}
 	if groupID > 0 {
 		filtered.InFlight = m.group[groupID]
+		filtered.Waiting = m.waitingGroup[groupID]
 		if filtered.InFlight > 0 {
 			filtered.Group[groupID] = filtered.InFlight
 		}
 		return filtered
 	}
 	filtered.InFlight = m.platform[platform]
+	filtered.Waiting = m.waitingPlatform[platform]
 	if filtered.InFlight > 0 {
 		filtered.Platform[platform] = filtered.InFlight
 	}

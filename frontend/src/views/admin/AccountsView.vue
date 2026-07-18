@@ -42,6 +42,7 @@ const form = ref({
   email: '',
   proxy_id: 0,
   priority: 10,
+	concurrency: 0,
   status: 'active',
 })
 
@@ -126,7 +127,7 @@ function openCreate() {
     group_id: groups.value[0]?.id ?? 0,
     name: '', base_url: '', auth_type: 'api_key',
     api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
-		priority: 10, status: 'active',
+		priority: 10, concurrency: 0, status: 'active',
   }
   showForm.value = true
 }
@@ -136,7 +137,7 @@ function openEdit(a: UpstreamAccount) {
   form.value = {
     group_id: a.group_id, name: a.name, base_url: a.base_url, auth_type: a.auth_type,
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
-		priority: a.priority, status: a.status,
+		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
   showForm.value = true
 }
@@ -155,6 +156,7 @@ async function save() {
     base_url: form.value.base_url,
     auth_type: form.value.auth_type,
     priority: Number(form.value.priority),
+		concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
     status: form.value.status,
     proxy_id: Number(form.value.proxy_id),
   }
@@ -200,6 +202,7 @@ async function startOAuthLogin() {
         name: form.value.name,
         base_url: form.value.base_url,
         priority: Number(form.value.priority),
+				concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
       },
     )
     if (popup) {
@@ -681,6 +684,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         <dl class="account-card-meta">
           <div><dt>分组</dt><dd class="truncate" :title="a.group?.name">{{ a.group?.name || '未分组' }}</dd></div>
           <div><dt>优先级</dt><dd class="num">{{ a.priority }}</dd></div>
+							<div><dt>并发上限</dt><dd class="num">{{ a.concurrency > 0 ? a.concurrency : '不限' }}</dd></div>
           <div><dt>最近使用</dt><dd>{{ a.last_used_at ? new Date(a.last_used_at).toLocaleString() : '从未使用' }}</dd></div>
           <div><dt>可用度</dt><dd :class="availability(a).cls">{{ availability(a).label }}</dd></div>
         </dl>
@@ -720,6 +724,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             <th>Base URL</th>
             <th>代理</th>
             <th>优先级</th>
+							<th>并发</th>
 			<th>上游额度 / 用量</th>
             <th>可用度</th>
             <th>最后使用</th>
@@ -747,6 +752,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               <span :class="[a.proxy ? 'tag-cyan' : 'tag-gray', 'max-w-full truncate whitespace-nowrap align-middle']" :title="a.proxy?.name || '默认出口'">{{ a.proxy?.name || '默认出口' }}</span>
             </td>
             <td class="num">{{ a.priority }}</td>
+							<td class="num">{{ a.concurrency > 0 ? a.concurrency : '不限' }}</td>
 			<td class="min-w-56">
 				<div v-if="a.quota" class="space-y-2">
 					<div class="flex items-center gap-2 whitespace-nowrap"><strong class="text-xs text-slate-200">{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
@@ -773,7 +779,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             </td>
           </tr>
           <tr v-if="!sortedAccounts.length">
-			<td colspan="10" class="py-10 text-center text-sm text-slate-500">
+			<td colspan="11" class="py-10 text-center text-sm text-slate-500">
               {{ groups.length ? '暂无账号' : '请先在「分组管理」创建分组' }}
             </td>
           </tr>
@@ -878,7 +884,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 <label class="label">优先级(大者优先)</label>
                 <input v-model.number="form.priority" type="number" class="input" />
               </div>
-				<div>
+              <div>
                 <label class="label">状态</label>
                 <select v-model="form.status" class="input">
                   <option value="active">启用</option>
@@ -886,6 +892,11 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 </select>
               </div>
             </div>
+							<div>
+								<label class="label">账号并发上限</label>
+								<input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" />
+								<p class="mt-1 text-xs text-slate-500">达到上限后请求会等待可用槽位；0 表示不限。</p>
+							</div>
             <div class="flex justify-end gap-3 pt-2">
               <button class="btn-ghost" @click="showForm = false">取消</button>
               <button class="btn-primary" :disabled="!canSave" @click="save">保存</button>

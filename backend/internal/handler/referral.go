@@ -130,7 +130,7 @@ func (h *UserHandler) ReferralDashboard(c *gin.Context) {
 		ReferredEmail string `json:"referred_email"`
 		Code          string `json:"code"`
 	}
-	var commissions []commissionRow
+	commissions := make([]commissionRow, 0)
 	h.db.Table("referral_commissions").
 		Select("referral_commissions.*, users.email AS referred_email, referral_codes.code").
 		Joins("LEFT JOIN users ON users.id = referral_commissions.referred_user_id").

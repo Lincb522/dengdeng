@@ -18,8 +18,8 @@ async function load() {
     api.get<ReferralCodeStats[]>('/api/admin/referral-codes'),
     api.get<User[]>('/api/admin/users'),
   ])
-  items.value = codes.map((item) => ({ ...item, commission_percent: item.commission_bps / 100 }))
-  users.value = userList
+  items.value = (Array.isArray(codes) ? codes : []).map((item) => ({ ...item, commission_percent: item.commission_bps / 100 }))
+  users.value = Array.isArray(userList) ? userList : []
   if (!ownerUserID.value && users.value.length) ownerUserID.value = users.value[0].id
 }
 

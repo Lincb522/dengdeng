@@ -7,6 +7,7 @@ export interface User {
   access_expires_at: string | null
   remaining_requests: number
   rate_multiplier: number
+	concurrency: number
   note?: string
 	terms_revision?: string
 	terms_accepted_at?: string | null
@@ -58,6 +59,8 @@ export interface GatewayRuntimePolicy {
 	probe_timeout_seconds: number
 	probe_retention_days: number
 	probe_concurrency: number
+	concurrency_wait_milliseconds: number
+	concurrency_queue_depth: number
 	// 按思考强度的计费倍率，键为 OpenAI 官方档位（none…xhigh）。
 	reasoning_effort_multipliers: Record<string, number>
 }
@@ -208,6 +211,7 @@ export interface ApiKey {
 	quota_used_micro: number
 	daily_quota_micro: number
 	rpm: number
+	concurrency: number
 	allowed_ips: string
 	blocked_ips: string
 	expires_at: string | null
@@ -228,6 +232,7 @@ export interface UpstreamAccount {
   email: string
   account_id: string
   priority: number
+	concurrency: number
   // Console-only display position. Gateway scheduling continues to use
   // `priority`, so moving a card never changes which account receives traffic.
   display_order: number
@@ -384,6 +389,10 @@ export interface UsageLog {
 	image_count: number
   cost_micro: number
   duration_ms: number
+	queue_ms: number
+	schedule_ms: number
+	upstream_ms: number
+	attempt_count: number
   status_code: number
   error_message: string
   created_at: string
@@ -485,6 +494,7 @@ export interface OpsLiveCount {
 export interface OpsRealtime {
 	captured_at: string
 	in_flight: number
+	waiting: number
 	last_minute: OpsWindow
 	breakdown: OpsLiveCount[]
 }

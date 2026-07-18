@@ -29,6 +29,7 @@ type Account struct {
 	AccountID    string
 	BaseURL      string
 	Priority     *int
+	Concurrency  *int
 	GroupIDs     []int64
 	Extra        map[string]any
 }
@@ -100,6 +101,7 @@ func parseSub2API(raw []byte) ([]Account, error) {
 	for i, entry := range entries {
 		acc := parseEntry(entry, "")
 		acc.Priority = intPointer(value(entry, "priority"))
+		acc.Concurrency = intPointer(value(entry, "concurrency"))
 		acc.GroupIDs = int64Slice(value(entry, "group_ids", "groupIds"))
 		if acc.Name == "" {
 			acc.Name = defaultName(acc, i)
@@ -224,6 +226,7 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 		Email:        email,
 		AccountID:    accountID,
 		BaseURL:      get("base_url", "baseUrl", "api_base", "apiBase"),
+		Concurrency:  intPointer(getAny("concurrency")),
 		Extra:        extra,
 	}
 }

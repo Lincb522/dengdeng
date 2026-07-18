@@ -32,6 +32,11 @@ type GatewayRuntimePolicy struct {
 	ProbeTimeoutSeconds            int `json:"probe_timeout_seconds"`
 	ProbeRetentionDays             int `json:"probe_retention_days"`
 	ProbeConcurrency               int `json:"probe_concurrency"`
+	// ConcurrencyWaitMilliseconds bounds both user/key and upstream-account
+	// queues. ConcurrencyQueueDepth prevents a saturated pool from accumulating
+	// an unbounded number of waiting HTTP requests.
+	ConcurrencyWaitMilliseconds int `json:"concurrency_wait_milliseconds"`
+	ConcurrencyQueueDepth       int `json:"concurrency_queue_depth"`
 	// ReasoningEffortMultipliers scales the billed cost of an OpenAI-wire
 	// request by its effective reasoning effort. Token usage already grows
 	// with effort; this lets an operator additionally price the deeper tiers
@@ -61,6 +66,8 @@ func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
 		ProbeTimeoutSeconds:            12,
 		ProbeRetentionDays:             30,
 		ProbeConcurrency:               4,
+		ConcurrencyWaitMilliseconds:    5000,
+		ConcurrencyQueueDepth:          256,
 		ReasoningEffortMultipliers:     DefaultReasoningEffortMultipliers(),
 	}
 }
@@ -130,6 +137,12 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 	if p.ProbeConcurrency == 0 {
 		p.ProbeConcurrency = defaults.ProbeConcurrency
 	}
+	if p.ConcurrencyWaitMilliseconds == 0 {
+		p.ConcurrencyWaitMilliseconds = defaults.ConcurrencyWaitMilliseconds
+	}
+	if p.ConcurrencyQueueDepth == 0 {
+		p.ConcurrencyQueueDepth = defaults.ConcurrencyQueueDepth
+	}
 
 	checks := []struct {
 		label           string
@@ -144,6 +157,8 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 		{"probe_timeout_seconds", p.ProbeTimeoutSeconds, 2, 120},
 		{"probe_retention_days", p.ProbeRetentionDays, 1, 365},
 		{"probe_concurrency", p.ProbeConcurrency, 1, 32},
+		{"concurrency_wait_milliseconds", p.ConcurrencyWaitMilliseconds, 100, 60000},
+		{"concurrency_queue_depth", p.ConcurrencyQueueDepth, 1, 10000},
 	}
 	for _, check := range checks {
 		if check.value < check.min || check.value > check.max {

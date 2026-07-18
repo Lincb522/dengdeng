@@ -75,6 +75,7 @@ type opsLiveCount struct {
 type opsRealtime struct {
 	CapturedAt time.Time      `json:"captured_at"`
 	InFlight   int            `json:"in_flight"`
+	Waiting    int            `json:"waiting"`
 	LastMinute *opsWindow     `json:"last_minute"`
 	Breakdown  []opsLiveCount `json:"breakdown"`
 }
@@ -446,6 +447,7 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 	}
 	snapshot := h.runtime.Snapshot(filter.Platform, filter.GroupID)
 	result.InFlight = snapshot.InFlight
+	result.Waiting = snapshot.Waiting
 	for platform, count := range snapshot.Platform {
 		result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "platform", Name: platform, InFlight: count})
 	}

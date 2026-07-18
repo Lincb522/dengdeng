@@ -74,6 +74,7 @@ func TestParseSub2APIWithCamelCaseCredentials(t *testing.T) {
     "platform":"openai",
     "auth_type":"oauth",
     "priority":42,
+    "concurrency":3,
     "group_ids":[1,2],
     "credentials":{"accessToken":"access","refreshToken":"refresh","accountId":"acct-2"}
   }]
@@ -91,6 +92,9 @@ func TestParseSub2APIWithCamelCaseCredentials(t *testing.T) {
 	}
 	if got.Priority == nil || *got.Priority != 42 || len(got.GroupIDs) != 2 {
 		t.Fatalf("sub2api routing metadata was not retained: %#v", got)
+	}
+	if got.Concurrency == nil || *got.Concurrency != 3 {
+		t.Fatalf("sub2api concurrency was not retained: %#v", got)
 	}
 }
 

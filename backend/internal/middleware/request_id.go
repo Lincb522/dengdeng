@@ -17,6 +17,9 @@ func RequestID() gin.HandlerFunc {
 		id := newRequestID()
 		c.Set(CtxRequestID, id)
 		c.Header("X-Request-ID", id)
+		// A provider-neutral alias makes the identifier's purpose explicit to
+		// clients while X-Request-ID remains fully backwards compatible.
+		c.Header("X-DengDeng-Trace-ID", id)
 		c.Next()
 	}
 }

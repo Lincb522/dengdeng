@@ -36,6 +36,7 @@
 
 - [部署手册](docs/DEPLOYMENT.md)：Docker、二进制、Nginx、备份和回滚
 - [架构说明](docs/ARCHITECTURE.md)：请求如何经过网关、调度器和结算模块
+- [更新记录](CHANGELOG.md)：重要功能、兼容性修复和升级说明
 - [开发说明](CONTRIBUTING.md)：本地环境、测试和提交要求
 - [安全说明](SECURITY.md)：凭据边界、上线检查和漏洞反馈
 

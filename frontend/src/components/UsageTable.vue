@@ -64,7 +64,12 @@ async function copyRequestID(id: string) {
 				</td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
           <td class="num text-right text-xs text-amber">{{ formatMoney(l.cost_micro) }}</td>
-          <td class="num text-right text-xs text-slate-500">{{ (l.duration_ms / 1000).toFixed(1) }}s</td>
+          <td class="num whitespace-nowrap text-right text-xs text-slate-500">
+				<div>{{ (l.duration_ms / 1000).toFixed(1) }}s</div>
+				<div v-if="showUser && (l.queue_ms || l.schedule_ms || l.upstream_ms || l.attempt_count)" class="mt-0.5 text-[10px] text-slate-600" :title="`排队 ${l.queue_ms || 0}ms，调度 ${l.schedule_ms || 0}ms，上游 ${l.upstream_ms || 0}ms，尝试 ${l.attempt_count || 0} 次`">
+					<span v-if="l.queue_ms">排队 {{ l.queue_ms }}ms · </span>路由 {{ l.schedule_ms || 0 }}ms · 上游 {{ l.upstream_ms || 0 }}ms<span v-if="l.attempt_count > 1"> · {{ l.attempt_count }} 次</span>
+				</div>
+			</td>
           <td>
             <span :class="l.status_code < 400 ? 'tag-green' : 'tag-red'" :title="l.error_message">{{ l.status_code }}</span>
           </td>

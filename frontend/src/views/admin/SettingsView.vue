@@ -44,6 +44,8 @@ const runtimePolicy = ref<GatewayRuntimePolicy>({
   probe_timeout_seconds: 12,
   probe_retention_days: 30,
   probe_concurrency: 4,
+	concurrency_wait_milliseconds: 5000,
+	concurrency_queue_depth: 256,
   reasoning_effort_multipliers: defaultReasoningMultipliers(),
 })
 const auditItems = ref<AuditLog[]>([])
@@ -333,6 +335,17 @@ onMounted(load)
               <label class="settings-field"><span>网络错误冷却（秒）</span><input v-model.number="runtimePolicy.network_failure_cooldown_seconds" class="input" type="number" min="1" max="3600" /></label>
             </div>
           </section>
+
+					<section class="settings-section">
+						<header>
+							<h2>并发保护</h2>
+							<p>用户、密钥或上游账号达到并发上限后进入有界等待；超时或队列满时返回 429，避免请求堆积拖垮网关。</p>
+						</header>
+						<div class="settings-form-grid settings-form-grid--three">
+							<label class="settings-field"><span>最长等待（毫秒）</span><input v-model.number="runtimePolicy.concurrency_wait_milliseconds" class="input" type="number" min="100" max="60000" step="100" /><small>范围 100–60000，覆盖客户端槽和上游账号槽。</small></label>
+							<label class="settings-field"><span>最大等待请求数</span><input v-model.number="runtimePolicy.concurrency_queue_depth" class="input" type="number" min="1" max="10000" step="1" /><small>超过后立即返回 429，并带 Retry-After。</small></label>
+						</div>
+					</section>
 
           <section class="settings-section">
             <header>

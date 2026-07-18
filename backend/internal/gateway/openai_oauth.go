@@ -251,6 +251,9 @@ func normalizeOAuthResponsesRequest(body []byte) ([]byte, bool, error) {
 	if input, ok := request["input"].([]any); ok {
 		request["input"] = normalizeOAuthInput(input)
 	}
+	normalizeResponsesTools(request["tools"])
+	normalizeResponsesParallelToolCalls(request, nil)
+	normalizeResponsesInputItemIDs(request["input"])
 	request["store"] = false
 	request["stream"] = true
 	encoded, err := json.Marshal(request)
@@ -288,6 +291,8 @@ func chatCompletionsToOAuthResponses(body []byte) ([]byte, bool, string, error) 
 			responses["text"] = map[string]any{"format": map[string]any{"type": "json_object"}}
 		}
 	}
+	normalizeResponsesTools(responses["tools"])
+	normalizeResponsesInputItemIDs(responses["input"])
 	encoded, err := json.Marshal(responses)
 	return encoded, boolValue(request["stream"]), modelName, err
 }

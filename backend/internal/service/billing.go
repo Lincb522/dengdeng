@@ -35,6 +35,10 @@ type BillContext struct {
 	Usage        Usage
 	Rates        RatePlan
 	DurationMs   int64
+	QueueMs      int64
+	ScheduleMs   int64
+	UpstreamMs   int64
+	AttemptCount int
 	StatusCode   int
 	ErrorMessage string
 	// SkipBalance is true for a valid day pass or a request quota that was
@@ -62,6 +66,10 @@ func (s *BillingService) Record(bc BillContext) {
 		ImageCount:         bc.Usage.ImageCount,
 		CostMicro:          cost,
 		DurationMs:         bc.DurationMs,
+		QueueMs:            bc.QueueMs,
+		ScheduleMs:         bc.ScheduleMs,
+		UpstreamMs:         bc.UpstreamMs,
+		AttemptCount:       bc.AttemptCount,
 		StatusCode:         bc.StatusCode,
 		ErrorMessage:       bc.ErrorMessage,
 		// Usage windows and monitoring filters are UTC. Persisting a local-zone
