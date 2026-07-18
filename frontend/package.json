@@ -2,6 +2,7 @@
   "name": "dengdeng-frontend",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@11.14.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
