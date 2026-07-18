@@ -96,18 +96,20 @@ onMounted(load)
 
     <section v-else class="model-card-grid">
       <article v-for="item in filtered" :key="item.id" class="model-card" :class="{ 'is-unavailable': !item.available }">
-        <div class="model-card-top">
-          <div class="min-w-0"><span class="model-platform-label">{{ PLATFORM_LABELS[item.platform] || item.platform }}</span><h2 :title="item.name">{{ item.name }}</h2></div>
-          <span :class="item.available ? 'tag-green' : 'tag-amber'">{{ item.available ? '可调用' : '暂无可用上游' }}</span>
+        <div class="model-card-scroll">
+          <div class="model-card-top">
+            <div class="model-card-title"><span class="model-platform-label">{{ PLATFORM_LABELS[item.platform] || item.platform }}</span><h2>{{ item.name }}</h2></div>
+            <span :class="item.available ? 'tag-green' : 'tag-amber'">{{ item.available ? '可调用' : '暂无可用上游' }}</span>
+          </div>
+          <p class="model-description">{{ item.description || '尚未添加模型说明。' }}</p>
+          <div class="model-capabilities"><span v-for="capability in capabilities(item)" :key="capability">{{ capability }}</span><span v-if="!capabilities(item).length">通用对话</span></div>
+          <dl class="model-limits"><div><dt>上下文</dt><dd>{{ formatLimit(item.context_window, item, 'context') }}</dd></div><div><dt>最大输出</dt><dd>{{ formatLimit(item.max_output_tokens, item, 'output') }}</dd></div><div><dt>接口</dt><dd>{{ item.kind === 'image' ? 'Images' : 'Chat' }}</dd></div></dl>
+          <div class="model-price-box">
+            <template v-if="item.kind === 'image' && item.pricing?.image_price_per_image"><span>参考单价</span><strong>{{ pricing(item.pricing.image_price_per_image) }}<em>/ 张</em></strong></template>
+            <template v-else><span>每百万 Token · 输入 / 输出</span><strong>{{ pricing(item.pricing?.input_price) }} <em>/</em> {{ pricing(item.pricing?.output_price) }}</strong></template>
+          </div>
+          <div class="model-groups"><span class="model-groups-label">可选分组</span><div><span v-for="group in item.groups" :key="group.id" :class="group.ready ? 'is-ready' : ''">{{ group.name }} ×{{ item.kind === 'image' && group.image_rate_independent ? group.image_rate_multiplier : group.rate_multiplier }}</span><em v-if="!item.groups.length">暂无可用分组</em></div></div>
         </div>
-        <p class="model-description">{{ item.description || '尚未添加模型说明。' }}</p>
-        <div class="model-capabilities"><span v-for="capability in capabilities(item)" :key="capability">{{ capability }}</span><span v-if="!capabilities(item).length">通用对话</span></div>
-        <dl class="model-limits"><div><dt>上下文</dt><dd>{{ formatLimit(item.context_window, item, 'context') }}</dd></div><div><dt>最大输出</dt><dd>{{ formatLimit(item.max_output_tokens, item, 'output') }}</dd></div><div><dt>接口</dt><dd>{{ item.kind === 'image' ? 'Images' : 'Chat' }}</dd></div></dl>
-        <div class="model-price-box">
-          <template v-if="item.kind === 'image' && item.pricing?.image_price_per_image"><span>参考单价</span><strong>{{ pricing(item.pricing.image_price_per_image) }}<em>/ 张</em></strong></template>
-          <template v-else><span>每百万 Token · 输入 / 输出</span><strong>{{ pricing(item.pricing?.input_price) }} <em>/</em> {{ pricing(item.pricing?.output_price) }}</strong></template>
-        </div>
-        <div class="model-groups"><span class="model-groups-label">可选分组</span><div><span v-for="group in item.groups" :key="group.id" :class="group.ready ? 'is-ready' : ''">{{ group.name }} ×{{ item.kind === 'image' && group.image_rate_independent ? group.image_rate_multiplier : group.rate_multiplier }}</span><em v-if="!item.groups.length">暂无可用分组</em></div></div>
         <RouterLink to="/keys" class="model-card-action">用这个模型 <span>→</span></RouterLink>
       </article>
     </section>
