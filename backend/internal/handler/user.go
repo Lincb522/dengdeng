@@ -67,13 +67,17 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 func (h *UserHandler) ListKeys(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var keys []model.APIKey
-	h.db.Preload("Group").Where("user_id = ?", user.ID).Order("id DESC").Find(&keys)
+	h.db.Preload("Group").Preload("Groups").Where("user_id = ?", user.ID).Order("id DESC").Find(&keys)
+	for i := range keys {
+		hydrateAPIKeyGroups(&keys[i])
+	}
 	util.OK(c, keys)
 }
 
 type createKeyReq struct {
 	Name            string     `json:"name" binding:"required,max=64"`
-	GroupID         int64      `json:"group_id" binding:"required"`
+	GroupID         int64      `json:"group_id"`
+	GroupIDs        []int64    `json:"group_ids"`
 	ReasoningEffort string     `json:"reasoning_effort"`
 	QuotaMicro      int64      `json:"quota_micro"`
 	DailyQuotaMicro int64      `json:"daily_quota_micro"`
@@ -88,7 +92,12 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var req createKeyReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		util.Fail(c, http.StatusBadRequest, "name and group_id are required")
+		util.Fail(c, http.StatusBadRequest, "name and group_ids are required")
+		return
+	}
+	groupIDs := normalizeKeyGroupIDs(req.GroupID, req.GroupIDs)
+	if len(groupIDs) == 0 {
+		util.Fail(c, http.StatusBadRequest, "at least one group is required")
 		return
 	}
 	if req.QuotaMicro < 0 || req.DailyQuotaMicro < 0 {
@@ -109,19 +118,15 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	var group model.Group
-	if err := h.db.First(&group, req.GroupID).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "group not found")
-		return
-	}
-	if !group.IsPublic && user.Role != model.RoleAdmin {
-		util.Fail(c, http.StatusForbidden, "group is not open")
+	groups, status, message := h.resolveKeyGroups(user, groupIDs)
+	if status != 0 {
+		util.Fail(c, status, message)
 		return
 	}
 	plain, hash, preview := util.NewAPIKey()
 	key := model.APIKey{
 		UserID:          user.ID,
-		GroupID:         group.ID,
+		GroupID:         groups[0].ID,
 		KeyHash:         hash,
 		KeyPreview:      preview,
 		Name:            req.Name,
@@ -130,11 +135,18 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 		QuotaMicro:      req.QuotaMicro, DailyQuotaMicro: req.DailyQuotaMicro,
 		RPM: policy.rpm, Concurrency: req.Concurrency, AllowedIPs: policy.allowedIPs, BlockedIPs: policy.blockedIPs, ExpiresAt: policy.expiresAt,
 	}
-	if err := h.db.Create(&key).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&key).Error; err != nil {
+			return err
+		}
+		return tx.Create(keyGroupBindings(key.ID, groupIDs)).Error
+	}); err != nil {
 		util.Fail(c, http.StatusInternalServerError, "create key failed")
 		return
 	}
-	key.Group = &group
+	key.Group = &groups[0]
+	key.Groups = groups
+	key.GroupIDs = groupIDs
 	// plaintext is returned exactly once, at creation time
 	util.OK(c, gin.H{"key": key, "plain": plain})
 }
@@ -150,6 +162,7 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		Name            *string          `json:"name"`
 		Status          *string          `json:"status"`
 		GroupID         *int64           `json:"group_id"`
+		GroupIDs        *[]int64         `json:"group_ids"`
 		ReasoningEffort *string          `json:"reasoning_effort"`
 		QuotaMicro      *int64           `json:"quota_micro"`
 		DailyQuotaMicro *int64           `json:"daily_quota_micro"`
@@ -164,6 +177,8 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
+	var selectedGroupIDs []int64
+	groupsChanged := false
 	if req.Name != nil && *req.Name != "" {
 		updates["name"] = *req.Name
 	}
@@ -178,17 +193,24 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		}
 		updates["reasoning_effort"] = reasoningEffort
 	}
-	if req.GroupID != nil {
-		var group model.Group
-		if *req.GroupID <= 0 || h.db.First(&group, *req.GroupID).Error != nil {
-			util.Fail(c, http.StatusBadRequest, "group not found")
+	if req.GroupIDs != nil {
+		selectedGroupIDs = normalizeKeyGroupIDs(0, *req.GroupIDs)
+		groupsChanged = true
+	} else if req.GroupID != nil {
+		selectedGroupIDs = normalizeKeyGroupIDs(*req.GroupID, nil)
+		groupsChanged = true
+	}
+	if groupsChanged {
+		if len(selectedGroupIDs) == 0 {
+			util.Fail(c, http.StatusBadRequest, "at least one group is required")
 			return
 		}
-		if !group.IsPublic && user.Role != model.RoleAdmin {
-			util.Fail(c, http.StatusForbidden, "group is not open")
+		_, status, message := h.resolveKeyGroups(user, selectedGroupIDs)
+		if status != 0 {
+			util.Fail(c, status, message)
 			return
 		}
-		updates["group_id"] = group.ID
+		updates["group_id"] = selectedGroupIDs[0]
 	}
 	if req.QuotaMicro != nil {
 		if *req.QuotaMicro < 0 {
@@ -241,11 +263,110 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		}
 		updates["rpm"], updates["allowed_ips"], updates["blocked_ips"], updates["expires_at"] = policy.rpm, policy.allowedIPs, policy.blockedIPs, policy.expiresAt
 	}
-	if len(updates) > 0 {
-		h.db.Model(&key).Updates(updates)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if len(updates) > 0 {
+			if err := tx.Model(&key).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		if groupsChanged {
+			if err := tx.Where("api_key_id = ?", key.ID).Delete(&model.APIKeyGroup{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(keyGroupBindings(key.ID, selectedGroupIDs)).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		util.Fail(c, http.StatusInternalServerError, "update key failed")
+		return
 	}
-	h.db.Preload("Group").First(&key, key.ID)
+	h.db.Preload("Group").Preload("Groups").First(&key, key.ID)
+	hydrateAPIKeyGroups(&key)
 	util.OK(c, key)
+}
+
+const maxKeyGroups = 32
+
+func normalizeKeyGroupIDs(legacyID int64, values []int64) []int64 {
+	if len(values) == 0 && legacyID > 0 {
+		values = []int64{legacyID}
+	}
+	result := make([]int64, 0, len(values))
+	seen := make(map[int64]struct{}, len(values))
+	for _, id := range values {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+func (h *UserHandler) resolveKeyGroups(user *model.User, ids []int64) ([]model.Group, int, string) {
+	if len(ids) == 0 || len(ids) > maxKeyGroups {
+		return nil, http.StatusBadRequest, "select between 1 and 32 groups"
+	}
+	var found []model.Group
+	if err := h.db.Where("id IN ?", ids).Find(&found).Error; err != nil {
+		return nil, http.StatusInternalServerError, "load groups failed"
+	}
+	byID := make(map[int64]model.Group, len(found))
+	for _, group := range found {
+		byID[group.ID] = group
+	}
+	ordered := make([]model.Group, 0, len(ids))
+	for _, id := range ids {
+		group, ok := byID[id]
+		if !ok {
+			return nil, http.StatusNotFound, "group not found"
+		}
+		if group.Status != model.StatusActive {
+			return nil, http.StatusBadRequest, "group is disabled"
+		}
+		if !group.IsPublic && user.Role != model.RoleAdmin {
+			return nil, http.StatusForbidden, "group is not open"
+		}
+		ordered = append(ordered, group)
+	}
+	return ordered, 0, ""
+}
+
+func keyGroupBindings(keyID int64, groupIDs []int64) []model.APIKeyGroup {
+	bindings := make([]model.APIKeyGroup, 0, len(groupIDs))
+	for _, groupID := range groupIDs {
+		bindings = append(bindings, model.APIKeyGroup{APIKeyID: keyID, GroupID: groupID})
+	}
+	return bindings
+}
+
+func hydrateAPIKeyGroups(key *model.APIKey) {
+	if key == nil {
+		return
+	}
+	ordered := make([]model.Group, 0, len(key.Groups)+1)
+	seen := make(map[int64]struct{}, len(key.Groups)+1)
+	if key.Group != nil && key.Group.ID > 0 {
+		ordered = append(ordered, *key.Group)
+		seen[key.Group.ID] = struct{}{}
+	}
+	for _, group := range key.Groups {
+		if _, exists := seen[group.ID]; exists {
+			continue
+		}
+		ordered = append(ordered, group)
+		seen[group.ID] = struct{}{}
+	}
+	key.Groups = ordered
+	key.GroupIDs = make([]int64, 0, len(ordered))
+	for _, group := range ordered {
+		key.GroupIDs = append(key.GroupIDs, group.ID)
+	}
 }
 
 type keyPolicy struct {
@@ -290,9 +411,19 @@ func normalizeKeyPolicy(rpm int64, allowed, blocked string, expiresAt *time.Time
 
 func (h *UserHandler) DeleteKey(c *gin.Context) {
 	user := middleware.CurrentUser(c)
-	res := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).Delete(&model.APIKey{})
-	if res.RowsAffected == 0 {
+	var key model.APIKey
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&key).Error; err != nil {
 		util.Fail(c, http.StatusNotFound, "key not found")
+		return
+	}
+	res := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("api_key_id = ?", key.ID).Delete(&model.APIKeyGroup{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&key).Error
+	})
+	if res != nil {
+		util.Fail(c, http.StatusInternalServerError, "delete key failed")
 		return
 	}
 	util.OK(c, gin.H{"deleted": true})
@@ -316,7 +447,8 @@ func (h *UserHandler) RotateKey(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "rotate key failed")
 		return
 	}
-	h.db.Preload("Group").First(&key, key.ID)
+	h.db.Preload("Group").Preload("Groups").First(&key, key.ID)
+	hydrateAPIKeyGroups(&key)
 	util.OK(c, gin.H{"key": key, "plain": plain})
 }
 

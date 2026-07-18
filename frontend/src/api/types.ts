@@ -242,6 +242,7 @@ export interface ApiKey {
   id: number
   user_id: number
   group_id: number
+	group_ids: number[]
   key_preview: string
   name: string
   status: string
@@ -257,6 +258,7 @@ export interface ApiKey {
   last_used_at: string | null
   created_at: string
   group?: Group
+	groups?: Group[]
 }
 
 export interface UpstreamAccount {

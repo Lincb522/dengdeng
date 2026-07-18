@@ -75,7 +75,7 @@ go build -o dengdeng ./cmd/server
 1. 在「分组管理」创建平台分组，例如 `openai-default` 或 `claude-team`。
 2. 在「上游账号」把 API Key 或 OAuth 凭据加入对应分组；需要时为账号指定出站代理。
 3. 在「模型配置」确认对外模型名、上游模型名和定价。
-4. 用户在「API 密钥」创建 `dd-` 密钥后，即可将 Base URL 和密钥填入 SDK 或 CLI。
+4. 用户在「API 密钥」创建 `dd-` 密钥时可同时选择多个分组；请求会按模型平台自动路由，同平台分组不可用时自动切换。之后即可将 Base URL 和密钥填入 SDK 或 CLI。
 
 浏览器 OAuth 直连目前用于 Claude 和 OpenAI。生产环境需要先在上游登记回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
 

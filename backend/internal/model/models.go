@@ -108,13 +108,16 @@ type Group struct {
 }
 
 type APIKey struct {
-	ID         int64  `gorm:"primaryKey" json:"id"`
-	UserID     int64  `gorm:"index;not null" json:"user_id"`
-	GroupID    int64  `gorm:"index;not null" json:"group_id"`
-	KeyHash    string `gorm:"uniqueIndex;size:64;not null" json:"-"`
-	KeyPreview string `gorm:"size:32;not null" json:"key_preview"`
-	Name       string `gorm:"size:64;not null" json:"name"`
-	Status     string `gorm:"size:16;not null;default:active" json:"status"`
+	ID     int64 `gorm:"primaryKey" json:"id"`
+	UserID int64 `gorm:"index;not null" json:"user_id"`
+	// GroupID remains the primary/default group for backwards compatibility.
+	// Groups is the authoritative set of pools this credential may use.
+	GroupID    int64   `gorm:"index;not null" json:"group_id"`
+	GroupIDs   []int64 `gorm:"-" json:"group_ids"`
+	KeyHash    string  `gorm:"uniqueIndex;size:64;not null" json:"-"`
+	KeyPreview string  `gorm:"size:32;not null" json:"key_preview"`
+	Name       string  `gorm:"size:64;not null" json:"name"`
+	Status     string  `gorm:"size:16;not null;default:active" json:"status"`
 	// ReasoningEffort is the OpenAI-compatible default for this key. "auto"
 	// leaves the client's request untouched; a client-supplied value always wins.
 	ReasoningEffort string `gorm:"size:16;not null;default:auto" json:"reasoning_effort"`
@@ -138,8 +141,19 @@ type APIKey struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 
-	User  *User  `gorm:"foreignKey:UserID" json:"user,omitempty"`
-	Group *Group `gorm:"foreignKey:GroupID" json:"group,omitempty"`
+	User   *User   `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	Group  *Group  `gorm:"foreignKey:GroupID" json:"group,omitempty"`
+	Groups []Group `gorm:"many2many:api_key_groups;constraint:OnDelete:CASCADE;" json:"groups,omitempty"`
+}
+
+// APIKeyGroup is the durable many-to-many binding between one client key and
+// the upstream groups it may route through. The legacy APIKey.GroupID column
+// mirrors the first selection so older clients and rollback builds keep
+// working during rolling upgrades.
+type APIKeyGroup struct {
+	APIKeyID  int64     `gorm:"primaryKey;autoIncrement:false" json:"api_key_id"`
+	GroupID   int64     `gorm:"primaryKey;autoIncrement:false;index" json:"group_id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // UserGroupRate overrides a group's base billing multiplier for one user.

@@ -1,13 +1,66 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 
+	"dengdeng/internal/config"
 	"dengdeng/internal/model"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestOpenBackfillsLegacyAPIKeyGroup(t *testing.T) {
+	cfg := config.Default()
+	cfg.Database.Path = filepath.Join(t.TempDir(), "legacy-key.db")
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{Email: "legacy-key@example.test", PasswordHash: "x", Role: model.RoleUser, Status: model.StatusActive, RateMultiplier: 1}
+	group := model.Group{Name: "legacy", Platform: model.PlatformOpenAI, Status: model.StatusActive, IsPublic: true, RateMultiplier: 1}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := model.APIKey{UserID: user.ID, GroupID: group.ID, KeyHash: "legacy-hash", KeyPreview: "dd-legacy", Name: "legacy", Status: model.StatusActive}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var before int64
+	if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ?", key.ID).Count(&before).Error; err != nil || before != 0 {
+		t.Fatalf("unexpected pre-migration bindings=%d err=%v", before, err)
+	}
+	closeTestDB(t, db)
+
+	db, err = Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestDB(t, db)
+	var bindings []model.APIKeyGroup
+	if err := db.Where("api_key_id = ?", key.ID).Find(&bindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].GroupID != group.ID {
+		t.Fatalf("legacy binding not restored: %#v", bindings)
+	}
+}
+
+func closeTestDB(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSeedDefaultModelConfigsBackfillsMissingLimits(t *testing.T) {
 	db := openModelConfigTestDB(t)
