@@ -93,6 +93,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		// Payment providers authenticate their own signed callbacks; they must
 		// not carry a console JWT. The handler enforces a 1 MB body cap again.
 		api.POST("/payment/webhook/:provider", paymentH.Webhook)
+		// The public model plaza is intentionally available without a console
+		// account and has a read-oriented limit separate from login attempts.
+		api.GET("/models", middleware.RateLimit(120, time.Minute), userH.PublicModelCatalogue)
 		// Throttle unauthenticated auth endpoints to blunt credential stuffing.
 		authGroup := api.Group("", middleware.RateLimit(20, time.Minute))
 		authGroup.GET("/settings", authH.PublicSettings)
