@@ -476,10 +476,19 @@ type catalogueGroup struct {
 }
 
 type catalogueModel struct {
-	model.ModelConfig
-	Available bool              `json:"available"`
-	Groups    []catalogueGroup  `json:"groups"`
-	Pricing   *model.ModelPrice `json:"pricing,omitempty"`
+	ID                int64             `json:"id"`
+	Name              string            `json:"name"`
+	Platform          string            `json:"platform"`
+	Kind              string            `json:"kind"`
+	ContextWindow     int64             `json:"context_window"`
+	MaxOutputTokens   int64             `json:"max_output_tokens"`
+	SupportsVision    bool              `json:"supports_vision"`
+	SupportsTools     bool              `json:"supports_tools"`
+	SupportsReasoning bool              `json:"supports_reasoning"`
+	Description       string            `json:"description"`
+	Available         bool              `json:"available"`
+	Groups            []catalogueGroup  `json:"groups"`
+	Pricing           *model.ModelPrice `json:"pricing,omitempty"`
 }
 
 // ModelCatalogue is the user-facing model plaza source. It is derived from
@@ -487,9 +496,20 @@ type catalogueModel struct {
 // keeping account credentials and private routing data out of the response.
 func (h *UserHandler) ModelCatalogue(c *gin.Context) {
 	user := middleware.CurrentUser(c)
+	h.modelCatalogue(c, user.Role == model.RoleAdmin)
+}
+
+// PublicModelCatalogue powers the standalone model plaza. It exposes only
+// active public groups and non-secret catalogue metadata, so browsing it does
+// not require a console account.
+func (h *UserHandler) PublicModelCatalogue(c *gin.Context) {
+	h.modelCatalogue(c, false)
+}
+
+func (h *UserHandler) modelCatalogue(c *gin.Context, includePrivate bool) {
 	var groups []model.Group
 	groupQuery := h.db.Where("status = ?", model.StatusActive)
-	if user.Role != model.RoleAdmin {
+	if !includePrivate {
 		groupQuery = groupQuery.Where("is_public = ?", true)
 	}
 	if err := groupQuery.Order("platform, id").Find(&groups).Error; err != nil {
@@ -545,10 +565,11 @@ func (h *UserHandler) ModelCatalogue(c *gin.Context) {
 			}
 		}
 		items = append(items, catalogueModel{
-			ModelConfig: cfg,
-			Available:   available,
-			Groups:      itemGroups,
-			Pricing:     matchCataloguePrice(cfg.Name, prices),
+			ID: cfg.ID, Name: cfg.Name, Platform: cfg.Platform, Kind: cfg.Kind,
+			ContextWindow: cfg.ContextWindow, MaxOutputTokens: cfg.MaxOutputTokens,
+			SupportsVision: cfg.SupportsVision, SupportsTools: cfg.SupportsTools,
+			SupportsReasoning: cfg.SupportsReasoning, Description: cfg.Description,
+			Available: available, Groups: itemGroups, Pricing: matchCataloguePrice(cfg.Name, prices),
 		})
 	}
 	util.OK(c, items)

@@ -5,23 +5,24 @@ import { useAuth } from '../stores/auth'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/', name: 'home', component: () => import('../views/HomeView.vue') },
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
+    { path: '/models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
     { path: '/legal/:documentId', name: 'legal', component: () => import('../views/LegalView.vue') },
     { path: '/studio', name: 'studio', component: () => import('../views/ImageStudioView.vue') },
     {
-      path: '/',
+      path: '/console',
       component: () => import('../layouts/ConsoleLayout.vue'),
       children: [
         { path: '', redirect: '/dashboard' },
-        { path: 'dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
-        { path: 'models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
-        { path: 'keys', name: 'keys', component: () => import('../views/KeysView.vue') },
-        { path: 'usage', name: 'usage', component: () => import('../views/UsageView.vue') },
-        { path: 'wallet', name: 'wallet', component: () => import('../views/WalletView.vue') },
-        { path: 'referrals', name: 'referrals', component: () => import('../views/ReferralView.vue') },
-        { path: 'profile', name: 'profile', component: () => import('../views/ProfileView.vue') },
+        { path: '/dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
+        { path: '/keys', name: 'keys', component: () => import('../views/KeysView.vue') },
+        { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue') },
+        { path: '/wallet', name: 'wallet', component: () => import('../views/WalletView.vue') },
+        { path: '/referrals', name: 'referrals', component: () => import('../views/ReferralView.vue') },
+        { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue') },
         {
-          path: 'admin',
+          path: '/admin',
           meta: { admin: true },
           children: [
             { path: '', redirect: '/admin/overview' },
@@ -35,22 +36,22 @@ const router = createRouter({
             { path: 'users', name: 'admin-users', component: () => import('../views/admin/UsersView.vue') },
             { path: 'models', name: 'admin-models', component: () => import('../views/admin/ModelsView.vue') },
             { path: 'prices', name: 'admin-prices', component: () => import('../views/admin/PricesView.vue') },
-          { path: 'redeem', name: 'admin-redeem', component: () => import('../views/admin/RedeemView.vue') },
+            { path: 'redeem', name: 'admin-redeem', component: () => import('../views/admin/RedeemView.vue') },
             { path: 'referrals', name: 'admin-referrals', component: () => import('../views/admin/ReferralsView.vue') },
             { path: 'payment', name: 'admin-payment', component: () => import('../views/admin/PaymentView.vue') },
-			  { path: 'proxies', name: 'admin-proxies', component: () => import('../views/admin/ProxiesView.vue') },
-			  { path: 'settings', name: 'admin-settings', component: () => import('../views/admin/SettingsView.vue') },
-          { path: 'usage', name: 'admin-usage', component: () => import('../views/admin/UsageView.vue') },
+            { path: 'proxies', name: 'admin-proxies', component: () => import('../views/admin/ProxiesView.vue') },
+            { path: 'settings', name: 'admin-settings', component: () => import('../views/admin/SettingsView.vue') },
+            { path: 'usage', name: 'admin-usage', component: () => import('../views/admin/UsageView.vue') },
           ],
         },
       ],
     },
-    { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
 
 router.beforeEach(async (to) => {
-  if (to.name === 'login' || to.name === 'legal' || to.name === 'studio') return true
+  if (to.name === 'home' || to.name === 'login' || to.name === 'models' || to.name === 'legal' || to.name === 'studio') return true
   if (!getToken()) return { name: 'login' }
 
   const auth = useAuth()

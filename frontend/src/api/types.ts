@@ -405,7 +405,17 @@ export interface ModelCatalogueGroup {
 	ready: boolean
 }
 
-export interface ModelCatalogueItem extends ModelConfig {
+export interface ModelCatalogueItem {
+	id: number
+	name: string
+	platform: string
+	kind: 'chat' | 'image'
+	context_window: number
+	max_output_tokens: number
+	supports_vision: boolean
+	supports_tools: boolean
+	supports_reasoning: boolean
+	description: string
 	available: boolean
 	groups: ModelCatalogueGroup[]
 	pricing?: ModelPrice
