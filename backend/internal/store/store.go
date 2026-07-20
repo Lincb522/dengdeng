@@ -59,13 +59,14 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	// NULLs in historical rows. Backfill to zero so old usage entries keep the
 	// same JSON shape as new entries and never hit a nullable scan edge case.
 	if err := db.Model(&model.UsageLog{}).
-		Where("cache_write5m_tokens IS NULL OR cache_write1h_tokens IS NULL OR image_count IS NULL").
+		Where("cache_write5m_tokens IS NULL OR cache_write1h_tokens IS NULL OR image_count IS NULL OR first_token_ms IS NULL").
 		Updates(map[string]any{
 			"cache_write5m_tokens": gorm.Expr("COALESCE(cache_write5m_tokens, 0)"),
 			"cache_write1h_tokens": gorm.Expr("COALESCE(cache_write1h_tokens, 0)"),
 			"image_count":          gorm.Expr("COALESCE(image_count, 0)"),
+			"first_token_ms":       gorm.Expr("COALESCE(first_token_ms, 0)"),
 		}).Error; err != nil {
-		return nil, fmt.Errorf("backfill cache TTL usage: %w", err)
+		return nil, fmt.Errorf("backfill usage metrics: %w", err)
 	}
 	// SQLite adds the non-null default only for newly written rows on older
 	// databases. Make existing API keys explicit too, so every serialized key

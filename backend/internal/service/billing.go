@@ -34,6 +34,7 @@ type BillContext struct {
 	Effort       string
 	Usage        Usage
 	Rates        RatePlan
+	FirstTokenMs int64
 	DurationMs   int64
 	QueueMs      int64
 	ScheduleMs   int64
@@ -65,6 +66,7 @@ func (s *BillingService) Record(bc BillContext) {
 		CacheWrite1hTokens: bc.Usage.CacheWrite1hTokens,
 		ImageCount:         bc.Usage.ImageCount,
 		CostMicro:          cost,
+		FirstTokenMs:       bc.FirstTokenMs,
 		DurationMs:         bc.DurationMs,
 		QueueMs:            bc.QueueMs,
 		ScheduleMs:         bc.ScheduleMs,

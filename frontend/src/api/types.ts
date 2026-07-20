@@ -439,6 +439,7 @@ export interface UsageLog {
 	cache_write_1h_tokens: number
 	image_count: number
   cost_micro: number
+	first_token_ms: number
   duration_ms: number
 	queue_ms: number
 	schedule_ms: number

@@ -409,6 +409,38 @@ type relayTrace struct {
 	AttemptCount int
 }
 
+// firstTokenWriter records the first response body write without treating an
+// early WriteHeader as a token. It sits at the final client boundary, so the
+// measurement works for passthrough SSE, protocol adapters and JSON replies.
+type firstTokenWriter struct {
+	gin.ResponseWriter
+	started      time.Time
+	once         sync.Once
+	firstTokenMs int64
+}
+
+func (w *firstTokenWriter) mark(length int) {
+	if length <= 0 {
+		return
+	}
+	w.once.Do(func() {
+		w.firstTokenMs = time.Since(w.started).Milliseconds()
+		if w.firstTokenMs < 1 {
+			w.firstTokenMs = 1
+		}
+	})
+}
+
+func (w *firstTokenWriter) Write(data []byte) (int, error) {
+	w.mark(len(data))
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *firstTokenWriter) WriteString(data string) (int, error) {
+	w.mark(len(data))
+	return w.ResponseWriter.WriteString(data)
+}
+
 // effortRates applies the operator-configured per-effort billing multiplier
 // on top of the request's rate plan. Image pricing is left untouched: image
 // generation has no reasoning phase.
@@ -674,7 +706,11 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		// Success: stream through and bill afterwards.
 		g.scheduler.ReportSuccessForModelWithLatency(acc.ID, req.Model, attemptUpstreamMs)
 		g.setRelayTimingHeaders(c, trace)
+		originalWriter := c.Writer
+		timingWriter := &firstTokenWriter{ResponseWriter: originalWriter, started: start}
+		c.Writer = timingWriter
 		usage, streamed := g.pipeAdapted(c, resp, req.Platform, req.Image, req.ResponseAdapter, req.Model)
+		c.Writer = originalWriter
 		resp.Body.Close()
 		g.scheduler.Release(acc.ID)
 
@@ -690,6 +726,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				Effort:       req.Effort,
 				Usage:        usage,
 				Rates:        g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
+				FirstTokenMs: timingWriter.firstTokenMs,
 				DurationMs:   time.Since(start).Milliseconds(),
 				QueueMs:      trace.QueueMs,
 				ScheduleMs:   trace.ScheduleMs,

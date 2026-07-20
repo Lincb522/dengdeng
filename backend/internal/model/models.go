@@ -518,7 +518,11 @@ type UsageLog struct {
 	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens"`
 	ImageCount         int64 `json:"image_count"`
 	CostMicro          int64 `json:"cost_micro"`
-	DurationMs         int64 `json:"duration_ms"`
+	// FirstTokenMs measures time from relay admission to the first response
+	// body bytes written to the client. DurationMs covers the whole request,
+	// including queueing and the complete streamed response.
+	FirstTokenMs int64 `gorm:"not null;default:0" json:"first_token_ms"`
+	DurationMs   int64 `json:"duration_ms"`
 	// ScheduleMs and UpstreamMs split internal routing time from time spent
 	// waiting on selected providers. AttemptCount makes failover visible without
 	// disclosing which upstream credentials were tried.

@@ -123,7 +123,7 @@ onMounted(async () => {
         <label><span>用户 ID</span><input v-model="filters.user_id" class="input" inputmode="numeric" placeholder="例如 42" /></label>
 			<label><span>请求编号</span><input v-model="filters.request_id" class="input font-mono" placeholder="ddr_…" /></label>
         <label><span>上游账号 ID</span><input v-model="filters.account_id" class="input" inputmode="numeric" placeholder="例如 8" /></label>
-        <label><span>排序</span><select v-model="filters.sort" class="input"><option value="created_at">调用时间</option><option value="cost_micro">费用</option><option value="duration_ms">耗时</option><option value="status_code">状态码</option></select></label>
+        <label><span>排序</span><select v-model="filters.sort" class="input"><option value="created_at">调用时间</option><option value="cost_micro">费用</option><option value="first_token_ms">首字耗时</option><option value="duration_ms">总耗时</option><option value="status_code">状态码</option></select></label>
         <label><span>顺序</span><select v-model="filters.order" class="input"><option value="desc">从高到低 / 最新</option><option value="asc">从低到高 / 最早</option></select></label>
       </div>
     </section>
