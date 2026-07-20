@@ -347,17 +347,18 @@ onBeforeUnmount(() => {
           <div class="ops-section-title ops-table-title"><div><h3>最近失败</h3><p>显示最近 12 条非成功调用，可前往用量明细查看完整账本。</p></div><RouterLink to="/admin/usage?status=error" class="ops-link">查看明细</RouterLink></div>
           <div class="overflow-x-auto">
             <table class="table-base ops-error-table">
-              <thead><tr><th>时间</th><th>用户 / 密钥</th><th>模型</th><th>上游账号</th><th>错误</th><th class="text-right">耗时</th></tr></thead>
+              <thead><tr><th>时间</th><th>用户 / 密钥</th><th>模型</th><th>上游账号</th><th>错误</th><th class="text-right">首字耗时</th><th class="text-right">总耗时</th></tr></thead>
               <tbody>
                 <tr v-for="item in snapshot?.recent_errors" :key="item.id">
                   <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(item.created_at).toLocaleString() }}</td>
                   <td><div class="text-xs text-slate-300">{{ item.user_email || '—' }}</div><div class="text-[11px] text-slate-500">{{ item.key_name || '未命名密钥' }}</div></td>
                   <td class="font-mono text-xs text-slate-200">{{ item.model || '—' }}</td>
                   <td class="text-xs text-slate-400">{{ item.account_name || '—' }}</td>
-					<td class="max-w-sm truncate text-xs text-signal-red" :title="item.error_message"><span class="mr-1 font-mono">{{ item.status_code }}</span>{{ summarizeProviderError(item.error_message || '上游返回失败') }}</td>
+                  <td class="max-w-sm truncate text-xs text-signal-red" :title="item.error_message"><span class="mr-1 font-mono">{{ item.status_code }}</span>{{ summarizeProviderError(item.error_message || '上游返回失败') }}</td>
+                  <td class="num text-right text-xs text-slate-500">{{ formatLatency(item.first_token_ms) }}</td>
                   <td class="num text-right text-xs text-slate-500">{{ formatLatency(item.duration_ms) }}</td>
                 </tr>
-                <tr v-if="!snapshot?.recent_errors.length"><td colspan="6" class="py-10 text-center text-sm text-slate-500">当前时间段没有失败记录</td></tr>
+                <tr v-if="!snapshot?.recent_errors.length"><td colspan="7" class="py-10 text-center text-sm text-slate-500">当前时间段没有失败记录</td></tr>
               </tbody>
             </table>
           </div>

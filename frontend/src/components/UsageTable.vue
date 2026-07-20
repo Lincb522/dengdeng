@@ -17,6 +17,12 @@ async function copyRequestID(id: string) {
 		toast.show(error instanceof Error ? error.message : '复制失败', 'error')
 	}
 }
+
+function formatLatency(milliseconds: number) {
+	if (!milliseconds) return '—'
+	if (milliseconds < 1000) return `${milliseconds}ms`
+	return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 2 : 1)}s`
+}
 </script>
 
 <template>
@@ -34,7 +40,8 @@ async function copyRequestID(id: string) {
 				<th class="text-right">缓存创建</th>
 				<th class="text-right">图片</th>
           <th class="text-right">费用</th>
-          <th class="text-right">耗时</th>
+          <th class="text-right">首字耗时</th>
+          <th class="text-right">总耗时</th>
           <th>状态</th>
 			<th>请求编号</th>
         </tr>
@@ -64,8 +71,9 @@ async function copyRequestID(id: string) {
 				</td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
           <td class="num text-right text-xs text-amber">{{ formatMoney(l.cost_micro) }}</td>
+          <td class="num whitespace-nowrap text-right text-xs text-slate-500">{{ formatLatency(l.first_token_ms) }}</td>
           <td class="num whitespace-nowrap text-right text-xs text-slate-500">
-				<div>{{ (l.duration_ms / 1000).toFixed(1) }}s</div>
+				<div>{{ formatLatency(l.duration_ms) }}</div>
 				<div v-if="showUser && (l.queue_ms || l.schedule_ms || l.upstream_ms || l.attempt_count)" class="mt-0.5 text-[10px] text-slate-600" :title="`排队 ${l.queue_ms || 0}ms，调度 ${l.schedule_ms || 0}ms，上游 ${l.upstream_ms || 0}ms，尝试 ${l.attempt_count || 0} 次`">
 					<span v-if="l.queue_ms">排队 {{ l.queue_ms }}ms · </span>路由 {{ l.schedule_ms || 0 }}ms · 上游 {{ l.upstream_ms || 0 }}ms<span v-if="l.attempt_count > 1"> · {{ l.attempt_count }} 次</span>
 				</div>
@@ -79,7 +87,7 @@ async function copyRequestID(id: string) {
 			</td>
         </tr>
         <tr v-if="!items.length">
-				<td :colspan="showUser ? 13 : 12" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
+				<td :colspan="showUser ? 14 : 13" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
         </tr>
       </tbody>
     </table>
