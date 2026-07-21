@@ -97,7 +97,7 @@ async function remove(p: ModelPrice) {
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base">
+      <table v-responsive-table class="table-base">
         <thead>
           <tr>
             <th>匹配规则</th>

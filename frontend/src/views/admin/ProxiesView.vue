@@ -83,7 +83,7 @@ onMounted(load)
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base proxy-table">
+      <table v-responsive-table class="table-base proxy-table">
         <thead>
           <tr><th>名称</th><th>地址</th><th>认证</th><th>绑定账号</th><th>状态</th><th>最近修改</th><th class="text-right">操作</th></tr>
         </thead>

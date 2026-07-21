@@ -282,7 +282,7 @@ function onSetupEffortUpdated(value: string) {
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base key-table">
+      <table v-responsive-table class="table-base key-table">
         <thead>
           <tr>
             <th>名称</th>

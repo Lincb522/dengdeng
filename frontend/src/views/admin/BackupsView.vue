@@ -151,7 +151,7 @@ onMounted(load)
     </div>
 
     <section class="card overflow-x-auto">
-      <table class="table-base min-w-[720px]">
+      <table v-responsive-table class="table-base min-w-[720px]">
         <thead><tr><th>文件</th><th>来源</th><th>创建时间</th><th>大小</th><th>状态</th><th class="text-right">操作</th></tr></thead>
         <tbody>
           <tr v-for="record in backups" :key="record.id">

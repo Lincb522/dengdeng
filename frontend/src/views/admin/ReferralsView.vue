@@ -92,7 +92,7 @@ onMounted(load)
     </section>
 
     <section class="card overflow-x-auto">
-      <table class="table-base min-w-[940px]">
+      <table v-responsive-table class="table-base min-w-[940px]">
         <thead><tr><th>推广码</th><th>推广用户</th><th>推广人数</th><th class="text-right">累计佣金</th><th>比例</th><th>状态</th><th>创建时间</th><th class="text-right">操作</th></tr></thead>
         <tbody>
           <tr v-for="item in items" :key="item.id">

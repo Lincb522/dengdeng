@@ -84,7 +84,7 @@ async function remove(cd: RedeemCode) {
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base">
+      <table v-responsive-table class="table-base">
         <thead>
           <tr>
             <th>兑换码</th>

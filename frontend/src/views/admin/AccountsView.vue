@@ -715,7 +715,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     </div>
 
     <div v-else class="card overflow-x-auto">
-      <table class="table-base">
+      <table v-responsive-table class="table-base">
         <thead>
           <tr>
             <th>名称</th>

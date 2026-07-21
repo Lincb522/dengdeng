@@ -92,7 +92,7 @@ async function save() {
     </div>
 
     <div class="card overflow-x-auto">
-      <table class="table-base">
+      <table v-responsive-table class="table-base">
         <thead>
           <tr>
             <th>邮箱</th>

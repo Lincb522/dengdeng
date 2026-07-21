@@ -275,7 +275,7 @@ onBeforeUnmount(() => {
         <article class="card overflow-hidden">
           <div class="ops-section-title ops-table-title"><div><h3>模型用量明细</h3><p>按账面费用排序，含输入、输出、缓存读写、请求数和失败率。</p></div></div>
           <div class="overflow-x-auto">
-            <table class="table-base ops-model-table">
+            <table v-responsive-table class="table-base ops-model-table">
               <thead><tr><th>模型</th><th class="text-right">请求</th><th class="text-right">输入</th><th class="text-right">输出</th><th class="text-right">缓存读</th><th class="text-right">5m 写入</th><th class="text-right">1h 写入</th><th class="text-right">失败率</th><th class="text-right">P 均耗时</th><th class="text-right">费用</th></tr></thead>
               <tbody>
                 <tr v-for="item in snapshot?.model_usage" :key="item.name">
@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
         <article class="card overflow-hidden">
           <div class="ops-section-title ops-table-title"><div><h3>当前倍率配置</h3><p>这些是此刻的分组设置；历史费用以调用完成时写入账本的金额为准，不会被后续改价回溯。</p></div><RouterLink to="/admin/groups" class="ops-link">管理倍率</RouterLink></div>
           <div class="overflow-x-auto">
-            <table class="table-base ops-rate-table">
+            <table v-responsive-table class="table-base ops-rate-table">
               <thead><tr><th>分组</th><th>平台</th><th class="text-right">文本</th><th class="text-right">缓存读</th><th class="text-right">5m 缓存写</th><th class="text-right">1h 缓存写</th><th class="text-right">生图</th></tr></thead>
               <tbody>
                 <tr v-for="profile in snapshot?.rate_profiles" :key="profile.id">
@@ -322,7 +322,7 @@ onBeforeUnmount(() => {
         <article class="card overflow-hidden">
           <div class="ops-section-title ops-table-title"><div><h3>账号状态</h3><p>状态来自最近的主动探测；OAuth 不生成内容，只检查令牌期限和传输链路。</p></div></div>
           <div class="overflow-x-auto">
-            <table class="table-base ops-account-table">
+            <table v-responsive-table class="table-base ops-account-table">
               <thead><tr><th>账号</th><th>分组</th><th>状态</th><th>最近探测</th><th>探测结果</th><th class="text-right">错误次数</th><th>操作</th></tr></thead>
               <tbody>
                 <tr v-for="account in snapshot?.account_health" :key="account.id">
@@ -346,7 +346,7 @@ onBeforeUnmount(() => {
         <article class="card overflow-hidden">
           <div class="ops-section-title ops-table-title"><div><h3>最近失败</h3><p>显示最近 12 条非成功调用，可前往用量明细查看完整账本。</p></div><RouterLink to="/admin/usage?status=error" class="ops-link">查看明细</RouterLink></div>
           <div class="overflow-x-auto">
-            <table class="table-base ops-error-table">
+            <table v-responsive-table class="table-base ops-error-table">
               <thead><tr><th>时间</th><th>用户 / 密钥</th><th>模型</th><th>上游账号</th><th>错误</th><th class="text-right">首字耗时</th><th class="text-right">总耗时</th></tr></thead>
               <tbody>
                 <tr v-for="item in snapshot?.recent_errors" :key="item.id">

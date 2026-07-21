@@ -128,7 +128,7 @@ onMounted(load)
         <div class="border-b border-slate-800 px-5 py-4">
           <h2 class="text-sm font-semibold text-slate-200">佣金明细 Commission Ledger</h2>
         </div>
-        <table class="table-base">
+        <table v-responsive-table class="table-base">
           <thead><tr><th>时间</th><th>用户</th><th>推广码</th><th class="text-right">用户消费</th><th class="text-right">比例</th><th class="text-right">佣金</th></tr></thead>
           <tbody>
             <tr v-for="item in commissions" :key="item.id">
