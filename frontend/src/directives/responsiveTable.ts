@@ -3,6 +3,7 @@ import type { Directive } from 'vue'
 const SUMMARY_PRIORITY = new Map([
 	['状态', 120],
 	['可用度', 115],
+	['用户', 112],
 	['模型', 110],
 	['额度', 108],
 	['费用', 105],
@@ -53,12 +54,16 @@ function syncMobileLabels(table: HTMLTableElement) {
 			}
 
 			if (cells.length < 4 || cells[0].colSpan > 1) continue
-			const summaryCells = cells
+			const candidates = cells
 				.slice(1)
 				.filter((cell) => cell.dataset.label && cell.dataset.label !== '操作')
-				.map((cell, index) => ({ cell, index, priority: SUMMARY_PRIORITY.get(cell.dataset.label || '') || 0 }))
-				.sort((left, right) => right.priority - left.priority || left.index - right.index)
-				.slice(0, 2)
+			const usageSummaryLabels = labels.includes('请求编号') ? new Set(['用户', '模型', '分组', '状态']) : null
+			const summaryCells = usageSummaryLabels
+				? candidates.filter((cell) => usageSummaryLabels.has(cell.dataset.label || '')).map((cell) => ({ cell }))
+				: candidates
+					.map((cell, index) => ({ cell, index, priority: SUMMARY_PRIORITY.get(cell.dataset.label || '') || 0 }))
+					.sort((left, right) => right.priority - left.priority || left.index - right.index)
+					.slice(0, 2)
 			for (const { cell } of summaryCells) cell.dataset.mobileSummary = 'true'
 			ensureExpandButton(row, cells[0])
 		}
