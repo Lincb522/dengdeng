@@ -506,6 +506,8 @@ body {
 @layer components {
   .card {
     @apply rounded-xl border border-ink-700 bg-ink-900;
+		min-width: 0;
+		max-width: 100%;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-all
@@ -526,6 +528,8 @@ body {
   .input {
     @apply w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-slate-100
       placeholder:text-slate-500 focus:border-amber/70 focus:outline-none focus:ring-2 focus:ring-amber/15 transition;
+		min-width: 0;
+		max-width: 100%;
   }
   .label {
     @apply mb-1.5 block text-xs font-semibold tracking-wide text-slate-400;
@@ -1413,4 +1417,205 @@ body {
   .update-details { grid-template-columns: 1fr; }
   .update-details > div { border-top: 1px solid var(--line); border-left: 0; }
   .update-details > div:first-child { border-top: 0; }
+}
+
+/* Mobile form system -----------------------------------------------------
+   Forms become a native-feeling single-column flow on phones. Tables keep
+   their own local horizontal scroller; controls and dialogs never widen the
+   page itself. */
+@media (pointer: coarse) {
+	.btn,
+	.mobile-rail-trigger,
+	.rail-close { min-height: 2.75rem; }
+}
+
+@media (max-width: 720px) {
+	html,
+	body,
+	#app { max-width: 100%; }
+
+	.console-shell {
+		width: 100%;
+		max-width: 100%;
+		gap: 0;
+		padding: 0;
+	}
+	.workspace {
+		width: 100%;
+		min-width: 0;
+	}
+	.workspace-bar {
+		min-height: 3.75rem;
+		padding: max(.45rem, env(safe-area-inset-top)) .7rem .45rem;
+	}
+	.workspace-main {
+		width: 100%;
+		min-width: 0;
+		overflow-x: hidden;
+		padding: .8rem;
+		border-right: 0;
+		border-left: 0;
+		border-radius: 0;
+	}
+	.workspace-main > * {
+		min-width: 0;
+		max-width: 100%;
+	}
+
+	.console-page-head {
+		align-items: stretch;
+		flex-direction: column;
+		gap: .8rem;
+		margin-bottom: 1rem;
+		padding-bottom: .85rem;
+	}
+	.console-page-head > * {
+		min-width: 0;
+		max-width: 100%;
+	}
+	.console-page-head > :last-child:not(:first-child) {
+		display: flex;
+		width: 100%;
+		align-items: stretch;
+		flex-wrap: wrap;
+	}
+	.console-page-head > :last-child:not(:first-child) .input {
+		width: 100% !important;
+		flex: 1 1 100%;
+	}
+	.console-page-head > :last-child:not(:first-child) .btn {
+		min-width: 0;
+		flex: 1 1 8rem;
+	}
+
+	.card {
+		min-width: 0;
+		max-width: 100%;
+	}
+	.card.p-6 { padding: 1rem; }
+	.card.px-6,
+	.card > .px-6 { padding-right: 1rem; padding-left: 1rem; }
+
+	input:not([type='checkbox']):not([type='radio']),
+	select,
+	textarea {
+		min-width: 0;
+		max-width: 100%;
+		font-size: 16px;
+	}
+	.input {
+		min-width: 0;
+		max-width: 100%;
+		min-height: 2.75rem;
+		font-size: 16px;
+		line-height: 1.35;
+	}
+	label,
+	fieldset { min-width: 0; }
+
+	.workspace-main .grid-cols-2,
+	.workspace-main .grid-cols-3,
+	.workspace-main .grid-cols-4,
+	.workspace-main [class*='grid-cols-2'],
+	.workspace-main [class*='grid-cols-3'],
+	.workspace-main [class*='grid-cols-4'],
+	.workspace-main [class*='grid-cols-['],
+	.fixed.inset-0.z-50 .grid-cols-2,
+	.fixed.inset-0.z-50 .grid-cols-3,
+	.fixed.inset-0.z-50 .grid-cols-4,
+	.fixed.inset-0.z-50 [class*='grid-cols-2'],
+	.fixed.inset-0.z-50 [class*='grid-cols-3'],
+	.fixed.inset-0.z-50 [class*='grid-cols-4'],
+	.fixed.inset-0.z-50 [class*='grid-cols-['] {
+		grid-template-columns: minmax(0, 1fr) !important;
+	}
+	.workspace-main .col-span-2,
+	.fixed.inset-0.z-50 .col-span-2 { grid-column: auto !important; }
+
+	.usage-filter-grid,
+	.usage-filter-grid--advanced {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.usage-filter-actions {
+		grid-column: auto;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: .5rem;
+	}
+	.usage-filter-actions .btn { width: 100%; }
+
+	.workspace-main .card > .flex.items-center.justify-between,
+	.workspace-main .card > .flex.items-start.justify-between,
+	.workspace-main .card > .flex.items-end.justify-between {
+		align-items: stretch;
+		flex-direction: column;
+	}
+	.workspace-main .card > .flex.items-center.justify-between > .flex,
+	.workspace-main .card > .flex.items-start.justify-between > .flex,
+	.workspace-main .card > .flex.items-end.justify-between > .flex {
+		width: 100%;
+		flex-wrap: wrap;
+	}
+	.workspace-main .card > .flex.items-center.justify-between select,
+	.workspace-main .card > .flex.items-start.justify-between select,
+	.workspace-main .card > .flex.items-end.justify-between select {
+		width: 100% !important;
+		flex: 1 1 10rem;
+	}
+
+	.fixed.inset-0.z-50 {
+		align-items: flex-end;
+		overflow: hidden;
+		overscroll-behavior: contain;
+		padding: max(.25rem, env(safe-area-inset-top)) 0 0;
+	}
+	.fixed.inset-0.z-50 > .card,
+	.fixed.inset-0.z-50 > section.card {
+		width: 100%;
+		max-width: none;
+		max-height: calc(100dvh - max(.25rem, env(safe-area-inset-top)));
+		overflow-x: hidden;
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		border-right: 0;
+		border-bottom: 0;
+		border-left: 0;
+		border-radius: 14px 14px 0 0;
+		padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom));
+	}
+	.fixed.inset-0.z-50 .space-y-4 > *,
+	.fixed.inset-0.z-50 label { min-width: 0; }
+	.fixed.inset-0.z-50 .flex.items-center.justify-between,
+	.fixed.inset-0.z-50 .flex.items-start.justify-between { flex-wrap: wrap; }
+	.fixed.inset-0.z-50 .flex.justify-end {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: .55rem;
+	}
+	.fixed.inset-0.z-50 .flex.justify-end .btn,
+	.fixed.inset-0.z-50 .flex.justify-end button { width: 100%; }
+
+	.key-setup-modal {
+		max-height: calc(100dvh - max(.25rem, env(safe-area-inset-top)));
+		padding: 1rem;
+	}
+	.key-setup-secret {
+		grid-template-columns: minmax(0, 1fr) auto;
+		gap: .45rem .55rem;
+	}
+	.key-setup-secret > span:first-child { grid-column: 1 / -1; }
+	.key-setup-secret code,
+	.key-setup-key-input,
+	.key-setup-effort { min-width: 0; width: 100%; }
+	.key-setup-ccswitch-actions { width: 100%; }
+	.key-setup-ccswitch-actions .btn { flex: 1 1 9rem; }
+}
+
+@media (max-width: 380px) {
+	.workspace-main { padding: .65rem; }
+	.card.p-6 { padding: .9rem; }
+	.fixed.inset-0.z-50 > .card,
+	.fixed.inset-0.z-50 > section.card { padding-right: .85rem; padding-left: .85rem; }
+	.console-page-head > :last-child:not(:first-child) .btn { flex-basis: 100%; }
+	.key-setup-head { gap: .65rem; }
 }
