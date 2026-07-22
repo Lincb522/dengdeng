@@ -905,6 +905,13 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 	if req.Platform == model.PlatformOpenAI && (acc.AuthType == model.AuthOAuth || service.IsOpenAIAgentIdentity(acc)) {
 		return g.forwardOpenAIOAuth(c, acc, req)
 	}
+	// Grok subscription credentials use the CLI Responses transport. Its HTTP
+	// Chat Completions endpoint requires a protocol upgrade, so a normal JSON
+	// POST receives 426. Bridge public Chat Completions requests through
+	// /v1/responses and translate the result back for the caller.
+	if req.Platform == model.PlatformGrok && acc.AuthType == model.AuthOAuth && req.Path == "/v1/chat/completions" {
+		return g.forwardGrokOAuthChat(c, acc, req)
+	}
 
 	base := strings.TrimSuffix(acc.BaseURL, "/")
 	if req.Platform == model.PlatformGrok {
@@ -1019,6 +1026,8 @@ func (g *Gateway) applyCredential(c *gin.Context, upReq *http.Request, acc *mode
 			if acc.AccountID != "" {
 				upReq.Header.Set("chatgpt-account-id", acc.AccountID)
 			}
+		case model.PlatformGrok:
+			applyGrokOAuthIdentityHeaders(upReq.Header)
 		}
 		return nil
 	}
