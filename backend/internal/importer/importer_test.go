@@ -179,3 +179,30 @@ func TestParseSub2APIAgentIdentity(t *testing.T) {
 		t.Fatalf("bootstrap OAuth expiry must not expire Agent Identity: %v", accounts[0].ExpiresAt)
 	}
 }
+
+func TestParseNativeCodexAgentIdentityAuthJSON(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(der)
+	raw := []byte(`{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"runtime-native","agent_private_key":"` + encodedKey + `","account_id":"acct-native","chatgpt_user_id":"user-native","email":"native@example.com","plan_type":"plus"}}`)
+	accounts, err := Parse("auto", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(accounts))
+	}
+	got := accounts[0]
+	if got.AuthType != model.AuthAgentIdentity || got.Name != "native@example.com" {
+		t.Fatalf("unexpected imported identity: %#v", got)
+	}
+	if got.Extra["agent_runtime_id"] != "runtime-native" || got.Extra["chatgpt_user_id"] != "user-native" || got.AccountID != "acct-native" {
+		t.Fatalf("native Agent Identity fields were not retained: %#v", got)
+	}
+}

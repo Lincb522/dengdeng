@@ -1,74 +1,135 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { OpsTrend } from '../api/types'
-import { formatTokens } from '../api/types'
+import { formatMoney, formatTokens } from '../api/types'
 
 const props = defineProps<{ items: OpsTrend[] }>()
 
-const W = 820
-const H = 230
-const PAD = { top: 18, right: 12, bottom: 36, left: 8 }
+const W = 920
+const H = 292
+const PAD = { top: 18, right: 26, bottom: 42, left: 64 }
+const TICK_COUNT = 5
+const activeIndex = ref<number | null>(null)
 
-const points = computed(() => {
-  const rows = props.items || []
-  if (!rows.length) return []
-  const maxRequests = Math.max(...rows.map((row) => row.requests), 1)
-  const maxErrors = Math.max(...rows.map((row) => row.error_requests), 1)
-  const width = W - PAD.left - PAD.right
-  const height = H - PAD.top - PAD.bottom
-  return rows.map((row, index) => {
-    const x = PAD.left + (rows.length === 1 ? width / 2 : (index / (rows.length - 1)) * width)
-    return {
-      ...row,
-      x,
-      requestY: PAD.top + height - (row.requests / maxRequests) * height,
-      errorY: PAD.top + height - (row.error_requests / maxErrors) * height,
-    }
-  })
-})
+function axisValue(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}K`
+  return Math.round(value).toLocaleString()
+}
 
-const requestLine = computed(() => points.value.map((point) => `${point.x},${point.requestY}`).join(' '))
-const requestArea = computed(() => {
-  const rows = points.value
-  if (!rows.length) return ''
-  const base = H - PAD.bottom
-  return `${PAD.left},${base} ${rows.map((point) => `${point.x},${point.requestY}`).join(' ')} ${rows[rows.length - 1].x},${base}`
+function niceAxisMax(value: number) {
+  const safe = Math.max(value, 1)
+  const magnitude = 10 ** Math.floor(Math.log10(safe))
+  const normalized = safe / magnitude
+  const step = [1, 2, 2.5, 3, 4, 5, 8, 10].find((candidate) => normalized <= candidate) || 10
+  return step * magnitude
+}
+
+function formatLatency(milliseconds: number) {
+  if (!milliseconds) return '—'
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`
+  return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 2 : 1)}s`
+}
+
+const rows = computed(() => props.items || [])
+const plotWidth = W - PAD.left - PAD.right
+const plotHeight = H - PAD.top - PAD.bottom
+const maxRequests = computed(() => niceAxisMax(Math.max(...rows.value.map((row) => row.requests), TICK_COUNT)))
+const columnWidth = computed(() => plotWidth / Math.max(rows.value.length, 1))
+const points = computed(() => rows.value.map((row, index) => {
+  const column = columnWidth.value
+  const barWidth = Math.min(30, Math.max(8, column * 0.56))
+  const totalHeight = row.requests > 0 ? Math.max(3, (row.requests / maxRequests.value) * plotHeight) : 0
+  const errorHeight = row.requests > 0 ? totalHeight * (row.error_requests / row.requests) : 0
+  const x = PAD.left + index * column + column / 2
+  return {
+    ...row,
+    x,
+    barX: x - barWidth / 2,
+    barWidth,
+    totalY: PAD.top + plotHeight - totalHeight,
+    totalHeight,
+    errorY: PAD.top + plotHeight - totalHeight,
+    errorHeight,
+  }
+}))
+const gridTicks = computed(() => Array.from({ length: TICK_COUNT + 1 }, (_, index) => {
+  const ratio = index / TICK_COUNT
+  return { y: PAD.top + plotHeight * ratio, value: maxRequests.value * (1 - ratio) }
+}))
+const labelStep = computed(() => Math.max(1, Math.ceil(points.value.length / 7)))
+const totalRequests = computed(() => rows.value.reduce((sum, row) => sum + row.requests, 0))
+const totalErrors = computed(() => rows.value.reduce((sum, row) => sum + row.error_requests, 0))
+const totalTokens = computed(() => rows.value.reduce((sum, row) => sum + row.tokens, 0))
+const weightedLatency = computed(() => {
+  if (!totalRequests.value) return 0
+  return rows.value.reduce((sum, row) => sum + row.average_latency_ms * row.requests, 0) / totalRequests.value
 })
-const visibleLabels = computed(() => {
-  const rows = points.value
-  const count = Math.min(6, rows.length)
-  if (!count) return []
-  return Array.from({ length: count }, (_, i) => rows[Math.round((i * (rows.length - 1)) / Math.max(1, count - 1))])
+const peakIndex = computed(() => {
+  if (!rows.value.length) return -1
+  return rows.value.reduce((peak, row, index) => row.requests > rows.value[peak].requests ? index : peak, 0)
 })
+const selectedIndex = computed(() => activeIndex.value ?? peakIndex.value)
+const selected = computed(() => selectedIndex.value >= 0 ? rows.value[selectedIndex.value] : null)
+const successRate = computed(() => totalRequests.value ? ((totalRequests.value - totalErrors.value) / totalRequests.value) * 100 : 100)
 </script>
 
 <template>
-  <div class="ops-chart card p-5">
-    <div class="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+  <section class="data-chart ops-chart card" aria-labelledby="ops-chart-title">
+    <header class="data-chart-head">
       <div>
-        <h3 class="text-sm font-semibold text-slate-200">请求走势</h3>
-        <p class="mt-1 text-xs text-slate-500">主线为请求数，红点为失败请求。悬停可查看每个时间段。</p>
+        <h3 id="ops-chart-title">请求走势</h3>
+        <p>每根柱代表一个时间段，红色部分为失败请求。</p>
       </div>
-      <div class="flex items-center gap-3 text-[11px] text-slate-500">
-        <span class="inline-flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-amber"></i>请求</span>
-        <span class="inline-flex items-center gap-1.5"><i class="h-2 w-2 rounded-full bg-signal-red"></i>失败</span>
+      <div class="data-chart-legend" aria-label="图例">
+        <span><i class="is-success"></i>成功</span>
+        <span><i class="is-error"></i>失败</span>
       </div>
+    </header>
+
+    <dl class="data-chart-summary">
+      <div><dt>请求总量</dt><dd>{{ totalRequests.toLocaleString() }}</dd></div>
+      <div><dt>成功率</dt><dd>{{ successRate.toFixed(2) }}%</dd></div>
+      <div><dt>失败请求</dt><dd>{{ totalErrors.toLocaleString() }}</dd></div>
+      <div><dt>平均耗时</dt><dd>{{ formatLatency(weightedLatency) }}</dd></div>
+    </dl>
+
+    <div v-if="!points.length" class="data-chart-empty">这个时间段还没有调用记录</div>
+    <div v-else class="data-chart-scroll" @mouseleave="activeIndex = null">
+      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="请求成功和失败数量柱状图">
+        <g v-for="tick in gridTicks" :key="tick.y">
+          <line class="data-chart-grid" :x1="PAD.left" :x2="W - PAD.right" :y1="tick.y" :y2="tick.y" />
+          <text class="data-chart-axis" :x="PAD.left - 12" :y="tick.y + 4" text-anchor="end">{{ axisValue(tick.value) }}</text>
+        </g>
+
+        <g v-for="(point, index) in points" :key="point.start">
+          <rect v-if="selectedIndex === index" class="data-chart-focus-band" :x="point.x - columnWidth / 2 + 1" :y="PAD.top" :width="columnWidth - 2" :height="plotHeight" rx="5" />
+          <rect class="data-chart-success-bar" :x="point.barX" :y="point.totalY" :width="point.barWidth" :height="point.totalHeight" rx="4" />
+          <rect v-if="point.errorHeight" class="data-chart-error-bar" :x="point.barX" :y="point.errorY" :width="point.barWidth" :height="Math.max(2, point.errorHeight)" rx="4" />
+          <text v-if="index % labelStep === 0 || index === points.length - 1" class="data-chart-axis" :x="point.x" :y="H - 14" text-anchor="middle">{{ point.label }}</text>
+        </g>
+
+        <rect
+          v-for="(point, index) in points"
+          :key="`hit-${point.start}`"
+          class="data-chart-hit"
+          :x="point.x - columnWidth / 2"
+          :y="PAD.top"
+          :width="columnWidth"
+          :height="plotHeight"
+          tabindex="0"
+          :aria-label="`${point.label}，${point.requests} 次请求，${point.error_requests} 次失败，${formatTokens(point.tokens)} Token`"
+          @mouseenter="activeIndex = index"
+          @focus="activeIndex = index"
+        />
+      </svg>
     </div>
-    <div v-if="!points.length" class="flex h-[230px] items-center justify-center text-sm text-slate-500">这个时间段还没有调用记录</div>
-    <svg v-else :viewBox="`0 0 ${W} ${H}`" class="w-full overflow-visible" role="img" aria-label="请求和错误趋势图">
-      <line v-for="n in 4" :key="n" class="chart-grid-line" :x1="PAD.left" :x2="W - PAD.right" :y1="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" :y2="PAD.top + ((H - PAD.top - PAD.bottom) / 4) * n" stroke-width="1" />
-      <polygon class="chart-area" :points="requestArea" opacity=".65" />
-      <polyline class="chart-primary-line" :points="requestLine" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" />
-      <g v-for="(point, index) in points" :key="point.start">
-        <circle class="chart-primary-point" :cx="point.x" :cy="point.requestY" r="3.5" stroke-width="2">
-          <title>{{ point.label }} · {{ point.requests }} 请求 · {{ point.error_requests }} 失败 · {{ formatTokens(point.tokens) }} Token</title>
-        </circle>
-        <circle v-if="point.error_requests" class="chart-error-point" :cx="point.x" :cy="point.errorY" r="3">
-          <title>{{ point.label }} · {{ point.error_requests }} 个失败请求</title>
-        </circle>
-        <line v-if="index === points.length - 1" class="chart-primary-line" :x1="point.x" :x2="point.x" :y1="PAD.top" :y2="H - PAD.bottom" stroke-dasharray="3 4" opacity=".28" />
-      </g>
-      <text v-for="point in visibleLabels" :key="`label-${point.start}`" class="chart-axis-label" :x="point.x" :y="H - 10" text-anchor="middle" font-size="10" font-family="ui-monospace, monospace">{{ point.label }}</text>
-    </svg>
-  </div>
+
+    <dl v-if="selected" class="data-chart-detail" aria-live="polite">
+      <div><dt>时间段</dt><dd>{{ selected.label }}</dd></div>
+      <div><dt>请求 / 失败</dt><dd>{{ selected.requests.toLocaleString() }} / {{ selected.error_requests.toLocaleString() }}</dd></div>
+      <div><dt>Token</dt><dd>{{ formatTokens(selected.tokens) }}</dd></div>
+      <div><dt>平均耗时 / 费用</dt><dd>{{ formatLatency(selected.average_latency_ms) }} · {{ formatMoney(selected.cost_micro) }}</dd></div>
+    </dl>
+  </section>
 </template>

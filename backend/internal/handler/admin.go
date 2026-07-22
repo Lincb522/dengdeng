@@ -1024,6 +1024,8 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 
 type importReq struct {
 	GroupID     int64  `json:"group_id"`
+	ProxyID     int64  `json:"proxy_id"`
+	Name        string `json:"name"`
 	Format      string `json:"format"` // sub2api | cpa | auto
 	Data        string `json:"data"`   // raw export JSON
 	BaseURL     string `json:"base_url"`
@@ -1044,6 +1046,10 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
 		return
 	}
+	if err := h.validateProxyAssignment(req.ProxyID); err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	var group model.Group
 	if err := h.db.First(&group, req.GroupID).Error; err != nil {
 		util.Fail(c, http.StatusNotFound, "group not found")
@@ -1062,6 +1068,9 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	for _, p := range parsed {
+		if len(parsed) == 1 && strings.TrimSpace(req.Name) != "" {
+			p.Name = strings.TrimSpace(req.Name)
+		}
 		if p.Concurrency != nil && (*p.Concurrency < 0 || *p.Concurrency > 10000) {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "invalid concurrency"})
 			continue
@@ -1104,7 +1113,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		extra, _ := model.EncodeExtra(p.Extra)
 		maxDisplayOrder++
 		acc := model.UpstreamAccount{
-			GroupID: group.ID, Name: p.Name, Platform: group.Platform,
+			GroupID: group.ID, ProxyID: req.ProxyID, Name: p.Name, Platform: group.Platform,
 			AuthType:     p.AuthType,
 			BaseURL:      firstNonEmpty(p.BaseURL, req.BaseURL),
 			APIKey:       crypto.EncryptedString(p.APIKey),
@@ -1146,10 +1155,6 @@ type agentIdentityRegisterReq struct {
 	BaseURL     string `json:"base_url"`
 	AccessToken string `json:"access_token"`
 	WebSession  string `json:"web_session"`
-	AccountID   string `json:"account_id"`
-	UserID      string `json:"chatgpt_user_id"`
-	Email       string `json:"email"`
-	PlanType    string `json:"plan_type"`
 	Priority    *int   `json:"priority"`
 	Concurrency *int   `json:"concurrency"`
 }
@@ -1211,10 +1216,6 @@ func (h *AdminHandler) RegisterAgentIdentity(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	metadata.AccountID = firstNonEmpty(req.AccountID, metadata.AccountID)
-	metadata.ChatGPTUserID = firstNonEmpty(req.UserID, metadata.ChatGPTUserID)
-	metadata.Email = firstNonEmpty(req.Email, metadata.Email)
-	metadata.PlanType = firstNonEmpty(req.PlanType, metadata.PlanType)
 	record, err := service.RegisterOpenAIAgentIdentity(c.Request.Context(), client, accessToken, metadata)
 	if err != nil {
 		util.Fail(c, http.StatusBadGateway, "Agent Identity 注册失败："+sanitizeAgentIdentityError(err.Error()))

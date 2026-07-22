@@ -477,13 +477,63 @@ body {
 :root[data-theme='dark'] .studio-empty-canvas > div,
 :root[data-theme='dark'] .studio-gallery > span { color: rgba(255,250,241,.82); }
 
-.chart-grid-line { stroke: var(--line); }
-.chart-area { fill: var(--accent-soft); }
-.chart-primary-line { stroke: var(--accent); }
-.chart-primary-point { fill: var(--surface); stroke: var(--accent); }
-.chart-error-point { fill: rgb(var(--dd-signal-red)); }
-.chart-bar { fill: rgb(var(--dd-amber)); }
-.chart-axis-label { fill: var(--ink-soft); }
+.data-chart {
+	min-width: 0;
+	padding: 1.2rem;
+	overflow: hidden;
+}
+.data-chart-head {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 1rem;
+}
+.data-chart-head h3 { color: var(--ink); font-size: .86rem; font-weight: 830; }
+.data-chart-head p { margin-top: .25rem; color: var(--ink-soft); font-size: .68rem; }
+.data-chart-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .65rem; color: var(--ink-soft); font-size: .65rem; white-space: nowrap; }
+.data-chart-legend span { display: inline-flex; align-items: center; gap: .34rem; }
+.data-chart-legend i { width: .46rem; height: .46rem; flex: 0 0 auto; border-radius: .13rem; }
+.data-chart-legend .is-token,
+.data-chart-legend .is-success { background: rgb(var(--dd-amber)); }
+.data-chart-legend .is-request { border-radius: 999px; background: rgb(var(--dd-signal-cyan)); }
+.data-chart-legend .is-error { background: rgb(var(--dd-signal-red)); }
+.data-chart-summary {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	margin-top: 1rem;
+	border-block: 1px solid var(--line);
+}
+.data-chart-summary > div { min-width: 0; padding: .7rem .85rem; }
+.data-chart-summary > div + div { border-left: 1px solid var(--line); }
+.data-chart-summary dt { color: var(--ink-soft); font-size: .61rem; font-weight: 730; white-space: nowrap; }
+.data-chart-summary dd { overflow-x: auto; overflow-y: hidden; margin-top: .25rem; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; font-weight: 790; scrollbar-width: thin; white-space: nowrap; }
+.data-chart-scroll { width: 100%; overflow-x: auto; overflow-y: hidden; margin-top: .7rem; scrollbar-width: thin; }
+.data-chart-canvas { display: block; width: 100%; min-width: 48rem; height: auto; }
+.data-chart-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.data-chart-axis { fill: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
+.data-chart-focus-band { fill: var(--surface-muted); }
+.data-chart-token-bar,
+.data-chart-success-bar { fill: rgb(var(--dd-amber) / .82); }
+.data-chart-error-bar { fill: rgb(var(--dd-signal-red)); }
+.data-chart-request-line { fill: none; stroke: rgb(var(--dd-signal-cyan)); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.4; vector-effect: non-scaling-stroke; }
+.data-chart-request-point { fill: var(--surface); stroke: rgb(var(--dd-signal-cyan)); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
+.data-chart-request-point.is-active { fill: rgb(var(--dd-signal-cyan)); }
+.data-chart-hit { fill: transparent; cursor: crosshair; outline: none; }
+.data-chart-hit:focus { fill: rgb(var(--dd-amber) / .045); }
+.data-chart-detail {
+	display: grid;
+	grid-template-columns: 1.05fr 1fr 1fr 1.2fr;
+	gap: 1px;
+	margin-top: .3rem;
+	border: 1px solid var(--line);
+	border-radius: .65rem;
+	overflow: hidden;
+	background: var(--line);
+}
+.data-chart-detail > div { min-width: 0; padding: .62rem .75rem; background: var(--surface-muted); }
+.data-chart-detail dt { color: var(--ink-soft); font-size: .59rem; font-weight: 720; white-space: nowrap; }
+.data-chart-detail dd { overflow-x: auto; overflow-y: hidden; margin-top: .2rem; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; font-weight: 750; scrollbar-width: thin; white-space: nowrap; }
+.data-chart-empty { display: grid; min-height: 18rem; place-items: center; color: var(--ink-soft); font-size: .76rem; }
 
 ::selection {
   background: rgba(201, 138, 32, 0.24);
@@ -538,14 +588,27 @@ body {
     @apply label;
   }
   .table-base {
-    @apply w-full text-left text-sm;
+		@apply text-left text-sm;
+		width: max-content;
+		min-width: 100%;
   }
   .table-base thead th {
     @apply border-b border-ink-700 bg-ink-850 px-4 py-3 text-xs font-semibold tracking-wide text-slate-400;
+		white-space: nowrap;
   }
   .table-base tbody td {
     @apply border-b border-ink-800 px-4 py-3 align-middle;
+		white-space: nowrap;
   }
+	.table-base td.truncate,
+	.table-base td .truncate {
+		width: max-content;
+		max-width: none !important;
+		overflow: visible;
+		text-overflow: clip;
+		white-space: nowrap;
+	}
+	.table-base td[class*='max-w-'] { max-width: none !important; }
   .table-base tbody tr {
     @apply transition-colors hover:bg-amber/5;
   }
@@ -555,7 +618,7 @@ body {
 		flex-shrink: 0;
 		white-space: nowrap;
   }
-	.group-tag { max-width: none; flex: 0 0 auto; overflow: visible; text-overflow: clip; white-space: nowrap; }
+	.group-tag { width: max-content; max-width: none; flex: 0 0 auto; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .tag-green {
     @apply tag border border-signal-green/20 bg-signal-green/10 text-signal-green;
   }
@@ -695,14 +758,6 @@ body {
   .dashboard-shortcuts > a small { display: block; margin-top: .18rem; color: var(--ink-soft); font-size: .62rem; font-weight: 550; }
   .dashboard-shortcuts > a b { color: var(--ink-soft); transition: color .18s ease, transform .18s ease; }
   .dashboard-shortcuts > a:hover b { color: var(--accent); transform: translateX(3px); }
-  .usage-chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.2rem; }
-  .usage-chart-head h3 { color: var(--ink); font-size: .83rem; font-weight: 820; }
-  .usage-chart-head p { margin-top: .22rem; color: var(--ink-soft); font-size: .65rem; }
-  .usage-chart-legend { display: flex; gap: .7rem; color: var(--ink-soft); font-size: .62rem; }
-  .usage-chart-legend span { display: inline-flex; align-items: center; gap: .3rem; }
-  .usage-chart-legend i { width: .42rem; height: .42rem; border-radius: 50%; background: var(--accent); }
-  .usage-chart-legend span + span i { background: rgb(var(--dd-signal-cyan)); }
-  .usage-request-line { stroke: rgb(var(--dd-signal-cyan)); }
   .dashboard-skeleton { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .85rem; }
   .dashboard-skeleton span { min-height: 15rem; border-radius: .85rem; background: linear-gradient(100deg, var(--surface-muted) 20%, var(--surface) 45%, var(--surface-muted) 70%); background-size: 220% 100%; animation: dashboard-skeleton 1.4s linear infinite; }
   .dashboard-skeleton-wide { min-height: 9.2rem !important; grid-column: 1 / -1; }
@@ -719,6 +774,11 @@ body {
   .accounts-view-toggle button { min-width: 3rem; border-radius: .42rem; color: var(--ink-soft); font-size: .74rem; font-weight: 750; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
   .accounts-view-toggle button:hover { color: var(--ink); }
   .accounts-view-toggle button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--shadow); }
+	.agent-identity-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; padding: .28rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface-muted); }
+	.agent-identity-methods button { min-height: 2.35rem; border-radius: .5rem; color: var(--ink-soft); font-size: .75rem; font-weight: 760; white-space: nowrap; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
+	.agent-identity-methods button:hover { color: var(--ink); }
+	.agent-identity-methods button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.agent-identity-methods button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--shadow); }
   .account-order-hint { margin: -0.55rem 0 1rem; color: var(--ink-soft); font-size: .76rem; line-height: 1.5; }
   .account-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: .9rem; }
   .account-card { display: flex; min-width: 0; flex-direction: column; padding: 1rem; border: 1px solid var(--line); border-radius: .9rem; background: var(--surface); box-shadow: 0 4px 8px var(--shadow); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
@@ -729,10 +789,13 @@ body {
   .account-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
   .account-card-head h2 { color: var(--ink); font-size: .95rem; font-weight: 800; letter-spacing: -.012em; }
   .account-card-head p { margin-top: .22rem; color: var(--ink-soft); font-size: .72rem; }
+	.account-card-head > div { overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+	.account-card-head .truncate { width: max-content; max-width: none; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .account-card-tags { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .85rem; }
+	.account-card-tags .truncate { width: max-content; max-width: none !important; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .account-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .72rem .9rem; margin-top: 1rem; padding-top: .95rem; border-top: 1px solid var(--line); }
   .account-card-meta dt { color: var(--ink-soft); font-size: .66rem; font-weight: 700; }
-  .account-card-meta dd { overflow: hidden; margin-top: .18rem; color: var(--ink); font-size: .76rem; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+  .account-card-meta dd { overflow-x: auto; overflow-y: hidden; margin-top: .18rem; color: var(--ink); font-size: .76rem; font-weight: 750; text-overflow: clip; white-space: nowrap; scrollbar-width: thin; }
 	.account-card-group-meta { grid-column: 1 / -1; min-width: 0; }
 	.account-card-group-meta dd { overflow-x: auto; overflow-y: hidden; text-overflow: clip; }
   .account-card-quota { margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--line); }
@@ -743,7 +806,7 @@ body {
   .account-card-quota > div > span + span { flex: 0 0 auto; }
   .account-card-quota .account-quota-message { margin-top: .55rem; line-height: 1.45; }
   .account-quota-observed { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-top: .65rem; }
-  .account-quota-observed span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account-quota-observed span { min-width: 0; overflow-x: auto; overflow-y: hidden; text-overflow: clip; white-space: nowrap; scrollbar-width: thin; }
   .account-card-quota button { margin-top: .65rem; color: #8a5b10; font-size: .72rem; font-weight: 800; transition: color .16s ease; }
   .account-card-quota button:hover:not(:disabled) { color: var(--ink); }
   .account-card-quota button:disabled { cursor: wait; opacity: .5; }
@@ -1232,7 +1295,6 @@ body {
   .dashboard-ledger-stats > div { min-height: 5.3rem; border-top: 1px solid rgba(255,255,255,.08); border-left: 0; }
   .dashboard-ledger-stats > div:first-child { border-top: 0; }
   .dashboard-token-legend { grid-template-columns: 1fr; }
-  .usage-chart-head { align-items: flex-start; flex-direction: column; }
   .dashboard-skeleton { grid-template-columns: 1fr; }
   .dashboard-skeleton-wide { grid-column: auto; }
   .login-shell { padding: 0; }
@@ -1627,9 +1689,9 @@ body {
 }
 
 /* Mobile data records ---------------------------------------------------
-   Dense desktop tables become labeled records on phones. Header cells stay
-   available to assistive technology while every value is visible without a
-   horizontal page or table scroller. */
+   Dense desktop tables become labeled records on phones. Values remain on one
+   line and, when necessary, scroll inside their own field instead of widening
+   the page or turning one record into a very tall stack of wrapped text. */
 @media (max-width: 767px) {
 	.workspace-main .table-base {
 		display: block !important;
@@ -1677,8 +1739,12 @@ body {
 		border: 0 !important;
 		background: var(--surface);
 		text-align: left !important;
-		white-space: normal !important;
-		overflow-wrap: anywhere;
+		overflow-x: auto;
+		overflow-y: hidden;
+		overflow-wrap: normal;
+		text-overflow: clip;
+		white-space: nowrap !important;
+		scrollbar-width: thin;
 	}
 	.workspace-main .table-base tbody td::before {
 		content: attr(data-label);
@@ -1763,12 +1829,13 @@ body {
 	.workspace-main .table-base tbody td[colspan]::before { display: none; }
 	.workspace-main .table-base td .truncate,
 	.workspace-main .table-base td[class*='truncate'] {
-		overflow: visible !important;
+		overflow-x: auto !important;
+		overflow-y: hidden !important;
 		text-overflow: clip !important;
-		white-space: normal !important;
+		white-space: nowrap !important;
 	}
 	.workspace-main .table-base td .whitespace-nowrap,
-	.workspace-main .table-base td[class*='whitespace-nowrap'] { white-space: normal !important; }
+	.workspace-main .table-base td[class*='whitespace-nowrap'] { white-space: nowrap !important; }
 	.workspace-main .table-base td [class*='min-w-'] {
 		min-width: 0 !important;
 		max-width: 100% !important;
@@ -1776,6 +1843,14 @@ body {
 	.workspace-main .table-base code,
 	.workspace-main .table-base button { max-width: 100%; }
 	.workspace-main .table-base + * { min-width: 0; }
+	.data-chart { padding: .9rem; }
+	.data-chart-head { flex-direction: column; }
+	.data-chart-legend { justify-content: flex-start; }
+	.data-chart-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.data-chart-summary > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
+	.data-chart-summary > div:nth-child(4) { border-top: 1px solid var(--line); }
+	.data-chart-canvas { min-width: 46rem; }
+	.data-chart-detail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (min-width: 768px) {

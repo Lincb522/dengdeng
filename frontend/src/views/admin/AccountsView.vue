@@ -48,6 +48,9 @@ const form = ref({
 	concurrency: 0,
   status: 'active',
 })
+type AgentIdentityInputMode = 'auth_json' | 'session'
+const agentIdentityInputMode = ref<AgentIdentityInputMode>('auth_json')
+const agentIdentityJSON = ref('')
 
 type AccountPage = { items: UpstreamAccount[]; total: number; page: number; size: number }
 
@@ -123,6 +126,12 @@ const oauthAvailable = computed(
 )
 const agentIdentityAvailable = computed(() => platformOfSelectedGroup.value === 'openai')
 const oauthProviderLabel = computed(() => PLATFORM_LABELS[platformOfSelectedGroup.value] || '上游账号')
+const baseURLPlaceholder = computed(() => ({
+	openai: 'https://api.openai.com',
+	anthropic: 'https://api.anthropic.com',
+	gemini: 'https://generativelanguage.googleapis.com',
+	grok: 'https://api.x.ai',
+}[platformOfSelectedGroup.value] || '留空使用官方地址'))
 const oauthStarting = ref(false)
 
 function openCreate() {
@@ -133,6 +142,8 @@ function openCreate() {
     api_key: '', access_token: '', refresh_token: '', web_session: '', account_id: '', chatgpt_user_id: '', email: '', plan_type: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
   }
+	agentIdentityInputMode.value = 'auth_json'
+	agentIdentityJSON.value = ''
   showForm.value = true
 }
 
@@ -147,14 +158,55 @@ function openEdit(a: UpstreamAccount) {
 }
 
 const canSave = computed(() => {
-  if (!form.value.name) return false
   if (editing.value) return true
+	if (form.value.auth_type === 'agent_identity' && agentIdentityInputMode.value === 'auth_json') {
+		return !!agentIdentityJSON.value.trim()
+	}
+  if (!form.value.name) return false
   if (form.value.auth_type === 'api_key') return !!form.value.api_key
   if (form.value.auth_type === 'agent_identity') return !!(form.value.access_token || form.value.web_session)
   return !!(form.value.access_token || form.value.refresh_token)
 })
 
 async function save() {
+	if (!editing.value && form.value.auth_type === 'agent_identity' && agentIdentityInputMode.value === 'auth_json') {
+		let parsed: Record<string, unknown>
+		try {
+			const value = JSON.parse(agentIdentityJSON.value) as unknown
+			if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid object')
+			parsed = value as Record<string, unknown>
+		} catch {
+			toast.show('Agent Identity auth.json 不是有效的 JSON', 'error')
+			return
+		}
+		const identity = parsed.agent_identity ?? parsed.agentIdentity ?? parsed
+		const authMode = String(parsed.auth_mode ?? parsed.authMode ?? '').toLowerCase()
+		if (!identity || typeof identity !== 'object' || (authMode && authMode !== 'agentidentity')) {
+			toast.show('请选择 auth_mode=agentIdentity 的 Codex auth.json', 'error')
+			return
+		}
+		const result = await withToast(
+			() => api.post<ImportResult>('/api/admin/accounts/import', {
+				group_id: Number(form.value.group_id),
+				format: 'auto',
+				data: agentIdentityJSON.value,
+				name: form.value.name,
+				base_url: form.value.base_url,
+				proxy_id: Number(form.value.proxy_id),
+				priority: Number(form.value.priority),
+				concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
+				skip_expired: false,
+			}),
+			'Agent Identity 已导入',
+		)
+		if (result?.imported) {
+			showForm.value = false
+			await loadAccounts()
+			return
+		}
+		if (result) toast.show(result.skipped_detail?.[0]?.reason || 'Agent Identity 导入失败', 'error')
+		return
+	}
   const body: Record<string, unknown> = {
     name: form.value.name,
     base_url: form.value.base_url,
@@ -174,10 +226,6 @@ async function save() {
 	} else {
 		if (form.value.access_token) body.access_token = form.value.access_token
 		if (form.value.web_session) body.web_session = form.value.web_session
-		if (form.value.account_id) body.account_id = form.value.account_id
-		if (form.value.chatgpt_user_id) body.chatgpt_user_id = form.value.chatgpt_user_id
-		if (form.value.email) body.email = form.value.email
-		if (form.value.plan_type) body.plan_type = form.value.plan_type
   }
   let ok: unknown = null
   if (editing.value) {
@@ -844,12 +892,12 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               </div>
             </div>
             <div>
-              <label class="label">账号名称</label>
+              <label class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' && agentIdentityInputMode === 'auth_json' ? '（留空使用文件信息）' : '' }}</label>
               <input v-model="form.name" class="input" placeholder="例如:key-01 或邮箱" />
             </div>
             <div>
-              <label class="label">Base URL(留空用官方地址)</label>
-              <input v-model="form.base_url" class="input font-mono" placeholder="https://api.anthropic.com" />
+              <label class="label">Base URL（留空使用官方地址）</label>
+              <input v-model="form.base_url" class="input font-mono" :placeholder="baseURLPlaceholder" />
             </div>
 			<div>
 			  <label class="label">单独代理</label>
@@ -905,24 +953,35 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 			<template v-else>
 				<div v-if="editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3 text-sm text-slate-300">该账号使用动态 AgentAssertion。编辑时不会展示或覆盖私钥。</div>
 				<template v-else>
-					<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
-						<p class="text-sm font-medium text-slate-200">注册 Agent Identity</p>
-						<p class="mt-1 text-xs leading-5 text-slate-500">填写有效 Access Token 或 Web Session。注册完成后只保存加密私钥和 Runtime ID，不保存这里的 Token。</p>
+					<div class="agent-identity-methods" role="group" aria-label="Agent Identity 添加方式">
+						<button type="button" :class="{ 'is-active': agentIdentityInputMode === 'auth_json' }" @click="agentIdentityInputMode = 'auth_json'">导入 auth.json</button>
+						<button type="button" :class="{ 'is-active': agentIdentityInputMode === 'session' }" @click="agentIdentityInputMode = 'session'">从登录会话生成</button>
 					</div>
-					<div>
-						<label class="label">Access Token（二选一）</label>
-						<textarea v-model="form.access_token" rows="2" class="input font-mono text-xs" placeholder="eyJ..."></textarea>
-					</div>
-					<div>
-						<label class="label">Web Session（二选一）</label>
-						<textarea v-model="form.web_session" rows="2" class="input font-mono text-xs" placeholder="Session Token 或完整 Cookie"></textarea>
-					</div>
-					<div class="grid grid-cols-2 gap-4">
-						<div><label class="label">Account ID（通常自动识别）</label><input v-model="form.account_id" class="input font-mono text-xs" /></div>
-						<div><label class="label">ChatGPT User ID</label><input v-model="form.chatgpt_user_id" class="input font-mono text-xs" /></div>
-						<div><label class="label">邮箱</label><input v-model="form.email" class="input text-xs" /></div>
-						<div><label class="label">套餐</label><input v-model="form.plan_type" class="input text-xs" placeholder="free / plus / pro" /></div>
-					</div>
+					<template v-if="agentIdentityInputMode === 'auth_json'">
+						<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
+							<p class="text-sm font-medium text-slate-200">Codex Agent Identity auth.json</p>
+							<p class="mt-1 text-xs leading-5 text-slate-500">导入 runtime、Ed25519 私钥和账户身份；不需要 OAuth access token 或 refresh token。</p>
+						</div>
+						<div>
+							<label class="label">Agent Identity auth.json</label>
+							<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
+							<p class="mt-1 text-xs text-slate-500">缺少 task_id 时，系统会在首次请求前自动注册新的任务身份。</p>
+						</div>
+					</template>
+					<template v-else>
+						<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
+							<p class="text-sm font-medium text-slate-200">从已登录会话生成</p>
+							<p class="mt-1 text-xs leading-5 text-slate-500">系统从 Token 自动读取 Account ID、User ID、邮箱和套餐，再注册 Ed25519 身份；引导凭据不会保存。</p>
+						</div>
+						<div>
+							<label class="label">Access Token（二选一）</label>
+							<textarea v-model="form.access_token" rows="2" class="input font-mono text-xs" placeholder="eyJ..."></textarea>
+						</div>
+						<div>
+							<label class="label">Web Session（二选一）</label>
+							<textarea v-model="form.web_session" rows="2" class="input font-mono text-xs" placeholder="Session Token 或完整 Cookie"></textarea>
+						</div>
+					</template>
 				</template>
 			</template>
 
