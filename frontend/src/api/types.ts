@@ -8,6 +8,7 @@ export interface User {
   remaining_requests: number
   rate_multiplier: number
 	concurrency: number
+	totp_enabled: boolean
   note?: string
 	terms_revision?: string
 	terms_accepted_at?: string | null
@@ -42,6 +43,8 @@ export interface SystemSettings {
 	allow_register: boolean
 	registration_email_suffixes: string[]
 	init_balance_micro: number
+	trusted_proxies: string[]
+	forwarded_client_ip_headers: string[]
 	login_agreement: Omit<LoginAgreement, 'revision'>
 	site_public_url?: string
 	smtp_configured?: boolean
@@ -232,6 +235,8 @@ export interface Group {
 	cache_write_1h_multiplier: number
 	image_rate_independent: boolean
 	image_rate_multiplier: number
+	max_reasoning_effort: string
+	reasoning_effort_mappings: Record<string, string> | null
   is_public: boolean
   status: string
   account_total?: number
@@ -268,7 +273,7 @@ export interface UpstreamAccount {
   name: string
   platform: string
   base_url: string
-  auth_type: 'api_key' | 'oauth'
+  auth_type: 'api_key' | 'oauth' | 'agent_identity'
   expires_at: string | null
   email: string
   account_id: string
@@ -583,6 +588,14 @@ export interface OpsSystemMetrics {
   db_wait_count: number
 }
 
+export interface SchedulerDiagnostic {
+	group_id: number
+	model?: string
+	pool: number
+	reasons: Record<string, number>
+	updated_at: string
+}
+
 export interface OpsSnapshot {
   generated_at: string
   range: string
@@ -602,6 +615,7 @@ export interface OpsSnapshot {
   account_health: OpsAccountHealth[]
   recent_errors: UsageLog[]
   system: OpsSystemMetrics
+	scheduler_diagnostics: SchedulerDiagnostic[]
   sample_truncated: boolean
 }
 

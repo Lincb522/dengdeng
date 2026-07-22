@@ -1,6 +1,9 @@
 package importer
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"testing"
 	"time"
@@ -148,5 +151,31 @@ func TestParseOpenAISeparatesTokenAndSubscriptionExpiry(t *testing.T) {
 	}
 	if got, _ := accounts[0].Extra["subscription_expires_at"].(string); got != "2026-08-15T02:50:12Z" {
 		t.Fatalf("subscription expiry = %q", got)
+	}
+}
+
+func TestParseSub2APIAgentIdentity(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(der)
+	raw := []byte(`{"accounts":[{"name":"agent@example.com","platform":"openai","type":"oauth","credentials":{"auth_mode":"agentIdentity","agent_runtime_id":"runtime-1","agent_private_key":"` + encodedKey + `","task_id":"task-1","chatgpt_account_id":"acct-1","chatgpt_user_id":"user-1","expires_at":"2020-01-01T00:00:00Z"}}]}`)
+	accounts, err := Parse("sub2api", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || accounts[0].AuthType != model.AuthAgentIdentity {
+		t.Fatalf("unexpected accounts: %#v", accounts)
+	}
+	if accounts[0].Extra["agent_runtime_id"] != "runtime-1" || accounts[0].Extra["agent_private_key"] != encodedKey || accounts[0].AccountID != "acct-1" {
+		t.Fatalf("agent identity fields were not retained: %#v", accounts[0])
+	}
+	if accounts[0].ExpiresAt != nil {
+		t.Fatalf("bootstrap OAuth expiry must not expire Agent Identity: %v", accounts[0].ExpiresAt)
 	}
 }

@@ -22,16 +22,65 @@ import (
 )
 
 type AdminHandler struct {
-	db      *gorm.DB
-	pricing *service.PricingService
-	rates   *service.UserGroupRateResolver
-	oauth   *oauth.Manager
-	monitor *service.AccountMonitor
-	quota   *service.AccountQuotaService
-	runtime *service.RuntimeMetrics
+	db           *gorm.DB
+	pricing      *service.PricingService
+	rates        *service.UserGroupRateResolver
+	oauth        *oauth.Manager
+	monitor      *service.AccountMonitor
+	quota        *service.AccountQuotaService
+	runtime      *service.RuntimeMetrics
+	scheduler    *service.Scheduler
+	imageStorage *service.ImageStorageService
 	// codexQuotaHTTPClient carries the deployment-wide outbound route. Account
 	// specific proxies still take precedence for individual quota lookups.
 	codexQuotaHTTPClient *http.Client
+}
+
+func (h *AdminHandler) SetImageStorageService(storage *service.ImageStorageService) {
+	h.imageStorage = storage
+}
+
+func (h *AdminHandler) GetImageStorage(c *gin.Context) {
+	if h.imageStorage == nil {
+		util.Fail(c, http.StatusServiceUnavailable, "image storage service unavailable")
+		return
+	}
+	view, err := h.imageStorage.View(c.Request.Context())
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load image storage settings failed")
+		return
+	}
+	util.OK(c, view)
+}
+
+func (h *AdminHandler) UpdateImageStorage(c *gin.Context) {
+	if h.imageStorage == nil {
+		util.Fail(c, http.StatusServiceUnavailable, "image storage service unavailable")
+		return
+	}
+	var req service.ImageStorageUpdate
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid image storage settings")
+		return
+	}
+	view, err := h.imageStorage.Update(c.Request.Context(), req)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.OK(c, view)
+}
+
+func (h *AdminHandler) TestImageStorage(c *gin.Context) {
+	if h.imageStorage == nil {
+		util.Fail(c, http.StatusServiceUnavailable, "image storage service unavailable")
+		return
+	}
+	if err := h.imageStorage.Test(c.Request.Context()); err != nil {
+		util.Fail(c, http.StatusBadGateway, "object storage connection failed")
+		return
+	}
+	util.OK(c, gin.H{"connected": true})
 }
 
 func NewAdminHandler(db *gorm.DB, pricing *service.PricingService, oauthManager *oauth.Manager, rates *service.UserGroupRateResolver) *AdminHandler {
@@ -48,6 +97,10 @@ func (h *AdminHandler) SetAccountQuotaService(quota *service.AccountQuotaService
 
 func (h *AdminHandler) SetRuntimeMetrics(runtime *service.RuntimeMetrics) {
 	h.runtime = runtime
+}
+
+func (h *AdminHandler) SetScheduler(scheduler *service.Scheduler) {
+	h.scheduler = scheduler
 }
 
 func (h *AdminHandler) SetCodexQuotaHTTPClient(client *http.Client) {
@@ -297,33 +350,37 @@ func (h *AdminHandler) ListGroups(c *gin.Context) {
 }
 
 type groupReq struct {
-	Name                   string  `json:"name" binding:"required,max=64"`
-	Platform               string  `json:"platform" binding:"required"`
-	Description            string  `json:"description"`
-	RateMultiplier         float64 `json:"rate_multiplier"`
-	CacheReadMultiplier    float64 `json:"cache_read_multiplier"`
-	CacheWrite5mMultiplier float64 `json:"cache_write_5m_multiplier"`
-	CacheWrite1hMultiplier float64 `json:"cache_write_1h_multiplier"`
-	ImageRateIndependent   *bool   `json:"image_rate_independent"`
-	ImageRateMultiplier    float64 `json:"image_rate_multiplier"`
-	IsPublic               *bool   `json:"is_public"`
-	Status                 string  `json:"status"`
+	Name                    string            `json:"name" binding:"required,max=64"`
+	Platform                string            `json:"platform" binding:"required"`
+	Description             string            `json:"description"`
+	RateMultiplier          float64           `json:"rate_multiplier"`
+	CacheReadMultiplier     float64           `json:"cache_read_multiplier"`
+	CacheWrite5mMultiplier  float64           `json:"cache_write_5m_multiplier"`
+	CacheWrite1hMultiplier  float64           `json:"cache_write_1h_multiplier"`
+	ImageRateIndependent    *bool             `json:"image_rate_independent"`
+	ImageRateMultiplier     float64           `json:"image_rate_multiplier"`
+	MaxReasoningEffort      string            `json:"max_reasoning_effort"`
+	ReasoningEffortMappings map[string]string `json:"reasoning_effort_mappings"`
+	IsPublic                *bool             `json:"is_public"`
+	Status                  string            `json:"status"`
 }
 
 // groupUpdateReq intentionally uses pointers throughout. A group may be made
 // private with `is_public: false`; a value-type boolean would make that change
 // indistinguishable from an omitted field in partial updates.
 type groupUpdateReq struct {
-	Name                   *string  `json:"name"`
-	Description            *string  `json:"description"`
-	RateMultiplier         *float64 `json:"rate_multiplier"`
-	CacheReadMultiplier    *float64 `json:"cache_read_multiplier"`
-	CacheWrite5mMultiplier *float64 `json:"cache_write_5m_multiplier"`
-	CacheWrite1hMultiplier *float64 `json:"cache_write_1h_multiplier"`
-	ImageRateIndependent   *bool    `json:"image_rate_independent"`
-	ImageRateMultiplier    *float64 `json:"image_rate_multiplier"`
-	IsPublic               *bool    `json:"is_public"`
-	Status                 *string  `json:"status"`
+	Name                    *string            `json:"name"`
+	Description             *string            `json:"description"`
+	RateMultiplier          *float64           `json:"rate_multiplier"`
+	CacheReadMultiplier     *float64           `json:"cache_read_multiplier"`
+	CacheWrite5mMultiplier  *float64           `json:"cache_write_5m_multiplier"`
+	CacheWrite1hMultiplier  *float64           `json:"cache_write_1h_multiplier"`
+	ImageRateIndependent    *bool              `json:"image_rate_independent"`
+	ImageRateMultiplier     *float64           `json:"image_rate_multiplier"`
+	MaxReasoningEffort      *string            `json:"max_reasoning_effort"`
+	ReasoningEffortMappings *map[string]string `json:"reasoning_effort_mappings"`
+	IsPublic                *bool              `json:"is_public"`
+	Status                  *string            `json:"status"`
 }
 
 func validPlatform(p string) bool {
@@ -333,6 +390,35 @@ func validPlatform(p string) bool {
 		}
 	}
 	return false
+}
+
+var validReasoningEfforts = map[string]bool{
+	"none": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true,
+}
+
+func normalizeReasoningPolicy(maxEffort string, mappings map[string]string) (string, map[string]string, error) {
+	maxEffort = strings.ToLower(strings.TrimSpace(maxEffort))
+	if maxEffort == "" {
+		maxEffort = "auto"
+	}
+	if maxEffort != "auto" && !validReasoningEfforts[maxEffort] {
+		return "", nil, fmt.Errorf("invalid maximum reasoning effort")
+	}
+	if len(mappings) > len(validReasoningEfforts) {
+		return "", nil, fmt.Errorf("too many reasoning effort mappings")
+	}
+	normalized := make(map[string]string, len(mappings))
+	for source, target := range mappings {
+		source = strings.ToLower(strings.TrimSpace(source))
+		target = strings.ToLower(strings.TrimSpace(target))
+		if !validReasoningEfforts[source] || (target != "" && !validReasoningEfforts[target]) {
+			return "", nil, fmt.Errorf("invalid reasoning effort mapping")
+		}
+		if target != "" && target != source {
+			normalized[source] = target
+		}
+	}
+	return maxEffort, normalized, nil
 }
 
 func (h *AdminHandler) CreateGroup(c *gin.Context) {
@@ -345,8 +431,15 @@ func (h *AdminHandler) CreateGroup(c *gin.Context) {
 		Name: req.Name, Platform: req.Platform, Description: req.Description,
 		RateMultiplier:      1,
 		CacheReadMultiplier: 1, CacheWrite5mMultiplier: 1, CacheWrite1hMultiplier: 1,
-		ImageRateMultiplier: 1, IsPublic: true, Status: model.StatusActive,
+		ImageRateMultiplier: 1, MaxReasoningEffort: "auto", IsPublic: true, Status: model.StatusActive,
 	}
+	maxEffort, mappings, err := normalizeReasoningPolicy(req.MaxReasoningEffort, req.ReasoningEffortMappings)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	g.MaxReasoningEffort = maxEffort
+	g.ReasoningEffortMappings = mappings
 	if req.RateMultiplier > 0 {
 		g.RateMultiplier = req.RateMultiplier
 	}
@@ -439,6 +532,23 @@ func (h *AdminHandler) UpdateGroup(c *gin.Context) {
 		}
 		updates["image_rate_multiplier"] = *req.ImageRateMultiplier
 	}
+	if req.MaxReasoningEffort != nil || req.ReasoningEffortMappings != nil {
+		maxEffort := g.MaxReasoningEffort
+		mappings := g.ReasoningEffortMappings
+		if req.MaxReasoningEffort != nil {
+			maxEffort = *req.MaxReasoningEffort
+		}
+		if req.ReasoningEffortMappings != nil {
+			mappings = *req.ReasoningEffortMappings
+		}
+		normalizedMax, normalizedMappings, err := normalizeReasoningPolicy(maxEffort, mappings)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["max_reasoning_effort"] = normalizedMax
+		updates["reasoning_effort_mappings"] = normalizedMappings
+	}
 	if req.IsPublic != nil {
 		updates["is_public"] = *req.IsPublic
 	}
@@ -515,7 +625,7 @@ func parseAccountListQuery(c *gin.Context) (accountListQuery, error) {
 	if query.Platform != "" && !validPlatform(query.Platform) {
 		return accountListQuery{}, fmt.Errorf("invalid platform")
 	}
-	if query.AuthType != "" && query.AuthType != model.AuthAPIKey && query.AuthType != model.AuthOAuth {
+	if query.AuthType != "" && query.AuthType != model.AuthAPIKey && query.AuthType != model.AuthOAuth && query.AuthType != model.AuthAgentIdentity {
 		return accountListQuery{}, fmt.Errorf("invalid auth_type")
 	}
 	if query.Sort != "custom" && query.Sort != "name" && query.Sort != "platform" && query.Sort != "group" && query.Sort != "priority" && query.Sort != "availability" && query.Sort != "last_used" {
@@ -793,6 +903,10 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "access_token or refresh_token is required for oauth accounts")
 		return
 	}
+	if authType == model.AuthAgentIdentity {
+		util.Fail(c, http.StatusBadRequest, "use the Agent Identity registration or JSON import endpoint")
+		return
+	}
 	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
 		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
 		return
@@ -856,7 +970,7 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 	if req.Name != "" {
 		updates["name"] = req.Name
 	}
-	if req.AuthType == model.AuthAPIKey || req.AuthType == model.AuthOAuth {
+	if req.AuthType == model.AuthAPIKey || req.AuthType == model.AuthOAuth || req.AuthType == model.AuthAgentIdentity {
 		updates["auth_type"] = req.AuthType
 	}
 	// Wrap secrets so GORM's Valuer encrypts before writing.
@@ -956,7 +1070,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "platform " + p.Platform + " != group " + group.Platform})
 			continue
 		}
-		if req.SkipExpired && p.ExpiresAt != nil && p.ExpiresAt.Before(now) {
+		if req.SkipExpired && p.AuthType != model.AuthAgentIdentity && p.ExpiresAt != nil && p.ExpiresAt.Before(now) {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "token expired"})
 			continue
 		}
@@ -967,6 +1081,25 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		if p.AuthType == model.AuthOAuth && p.AccessToken == "" && p.RefreshToken == "" {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "missing access/refresh token"})
 			continue
+		}
+		if p.AuthType == model.AuthAgentIdentity {
+			record := service.AgentIdentityRecord{
+				AgentRuntimeID:          stringMapValue(p.Extra, "agent_runtime_id"),
+				AgentPrivateKey:         stringMapValue(p.Extra, "agent_private_key"),
+				TaskID:                  stringMapValue(p.Extra, "task_id"),
+				AccountID:               firstNonEmpty(p.AccountID, stringMapValue(p.Extra, "account_id"), stringMapValue(p.Extra, "chatgpt_account_id")),
+				ChatGPTUserID:           stringMapValue(p.Extra, "chatgpt_user_id"),
+				Email:                   firstNonEmpty(p.Email, stringMapValue(p.Extra, "email")),
+				PlanType:                stringMapValue(p.Extra, "plan_type"),
+				ChatGPTAccountIsFedRAMP: boolMapValue(p.Extra, "chatgpt_account_is_fedramp"),
+			}
+			if err := service.ValidateAgentIdentityRecord(record); err != nil {
+				skipped = append(skipped, gin.H{"name": p.Name, "reason": err.Error()})
+				continue
+			}
+			p.Extra = service.AgentIdentityExtra(record)
+			p.AccountID = record.AccountID
+			p.Email = record.Email
 		}
 		extra, _ := model.EncodeExtra(p.Extra)
 		maxDisplayOrder++
@@ -1004,6 +1137,133 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		"imported_names": imported,
 		"skipped_detail": skipped,
 	})
+}
+
+type agentIdentityRegisterReq struct {
+	GroupID     int64  `json:"group_id"`
+	ProxyID     int64  `json:"proxy_id"`
+	Name        string `json:"name"`
+	BaseURL     string `json:"base_url"`
+	AccessToken string `json:"access_token"`
+	WebSession  string `json:"web_session"`
+	AccountID   string `json:"account_id"`
+	UserID      string `json:"chatgpt_user_id"`
+	Email       string `json:"email"`
+	PlanType    string `json:"plan_type"`
+	Priority    *int   `json:"priority"`
+	Concurrency *int   `json:"concurrency"`
+}
+
+// RegisterAgentIdentity turns an already authenticated ChatGPT session into a
+// durable, token-free Codex runtime. The bootstrap access token is used for a
+// single upstream registration call and is never persisted.
+func (h *AdminHandler) RegisterAgentIdentity(c *gin.Context) {
+	var req agentIdentityRegisterReq
+	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID <= 0 || strings.TrimSpace(req.Name) == "" {
+		util.Fail(c, http.StatusBadRequest, "group_id and name are required")
+		return
+	}
+	if strings.TrimSpace(req.AccessToken) == "" && strings.TrimSpace(req.WebSession) == "" {
+		util.Fail(c, http.StatusBadRequest, "access_token or web_session is required")
+		return
+	}
+	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
+		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
+		return
+	}
+	var group model.Group
+	if err := h.db.First(&group, req.GroupID).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "group not found")
+		return
+	}
+	if group.Platform != model.PlatformOpenAI {
+		util.Fail(c, http.StatusBadRequest, "Agent Identity is only available for OpenAI groups")
+		return
+	}
+	if err := h.validateProxyAssignment(req.ProxyID); err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	temporary := model.UpstreamAccount{ProxyID: req.ProxyID}
+	if req.ProxyID > 0 {
+		var proxy model.Proxy
+		if err := h.db.First(&proxy, req.ProxyID).Error; err != nil {
+			util.Fail(c, http.StatusBadRequest, "assigned proxy is unavailable")
+			return
+		}
+		temporary.Proxy = &proxy
+	}
+	client, err := h.codexQuotaClient(&temporary)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	accessToken := strings.TrimSpace(req.AccessToken)
+	if accessToken == "" {
+		accessToken, err = service.ResolveOpenAIWebSession(c.Request.Context(), client, req.WebSession)
+		if err != nil {
+			util.Fail(c, http.StatusBadGateway, "OpenAI Web Session 无效或已过期")
+			return
+		}
+	}
+	metadata, err := service.OpenAIIdentityFromAccessToken(accessToken)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	metadata.AccountID = firstNonEmpty(req.AccountID, metadata.AccountID)
+	metadata.ChatGPTUserID = firstNonEmpty(req.UserID, metadata.ChatGPTUserID)
+	metadata.Email = firstNonEmpty(req.Email, metadata.Email)
+	metadata.PlanType = firstNonEmpty(req.PlanType, metadata.PlanType)
+	record, err := service.RegisterOpenAIAgentIdentity(c.Request.Context(), client, accessToken, metadata)
+	if err != nil {
+		util.Fail(c, http.StatusBadGateway, "Agent Identity 注册失败："+sanitizeAgentIdentityError(err.Error()))
+		return
+	}
+	extra, err := model.EncodeExtra(service.AgentIdentityExtra(record))
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "Agent Identity 凭据保存失败")
+		return
+	}
+	var maxDisplayOrder int
+	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
+	account := model.UpstreamAccount{
+		GroupID: group.ID, ProxyID: req.ProxyID, Name: strings.TrimSpace(req.Name), Platform: model.PlatformOpenAI,
+		BaseURL: strings.TrimSpace(req.BaseURL), AuthType: model.AuthAgentIdentity,
+		Email: record.Email, AccountID: record.AccountID, Extra: extra,
+		Priority: 10, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
+	}
+	if req.Priority != nil {
+		account.Priority = *req.Priority
+	}
+	if req.Concurrency != nil {
+		account.Concurrency = *req.Concurrency
+	}
+	if err := h.db.Create(&account).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "create Agent Identity account failed")
+		return
+	}
+	account.Group = &group
+	account.Proxy = temporary.Proxy
+	util.OK(c, account)
+}
+
+func stringMapValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func boolMapValue(values map[string]any, key string) bool {
+	value, _ := values[key].(bool)
+	return value
+}
+
+func sanitizeAgentIdentityError(message string) string {
+	message = strings.TrimSpace(message)
+	if len(message) > 300 {
+		message = message[:300]
+	}
+	return message
 }
 
 func firstNonEmpty(vals ...string) string {

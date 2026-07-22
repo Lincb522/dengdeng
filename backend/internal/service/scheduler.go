@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +70,34 @@ type schedulerModelFailure struct {
 	lastTouched time.Time
 }
 
+// SchedulerDiagnostics is the safe, credential-free explanation for the most
+// recent account-pool exhaustion. Clients still receive the stable generic
+// 503, while operators can see exactly why every account was excluded.
+type SchedulerDiagnostics struct {
+	GroupID   int64          `json:"group_id"`
+	Model     string         `json:"model,omitempty"`
+	Pool      int            `json:"pool"`
+	Reasons   map[string]int `json:"reasons"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func (d SchedulerDiagnostics) Summary() string {
+	if len(d.Reasons) == 0 {
+		return fmt.Sprintf("pool=%d", d.Pool)
+	}
+	keys := make([]string, 0, len(d.Reasons))
+	for key := range d.Reasons {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys)+1)
+	parts = append(parts, fmt.Sprintf("pool=%d", d.Pool))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%d", key, d.Reasons[key]))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // Scheduler keeps a short, process-local account snapshot. DengDeng currently
 // runs as one gateway process, so this removes a SELECT and last_used_at UPDATE
 // from the hot path without importing Sub2API's distributed Redis machinery.
@@ -82,6 +112,7 @@ type Scheduler struct {
 	lastPersisted         map[int64]time.Time
 	sessions              map[string]schedulerSessionBinding
 	modelFailures         map[schedulerAccountModelKey]schedulerModelFailure
+	diagnostics           map[int64]SchedulerDiagnostics
 	snapshotTTL           time.Duration
 	lastPersistedInterval time.Duration
 	sessionTTL            time.Duration
@@ -98,6 +129,7 @@ func NewScheduler(db *gorm.DB) *Scheduler {
 		db: db, groups: make(map[int64]*schedulerGroupSnapshot, defaultSchedulerSnapshotCapacity),
 		lastPersisted: make(map[int64]time.Time), sessions: make(map[string]schedulerSessionBinding),
 		modelFailures: make(map[schedulerAccountModelKey]schedulerModelFailure),
+		diagnostics:   make(map[int64]SchedulerDiagnostics),
 		snapshotTTL:   defaultSchedulerSnapshotTTL, lastPersistedInterval: defaultLastUsedPersistInterval,
 		sessionTTL: defaultSessionAffinityTTL, sessionCapacity: defaultSessionAffinityCapacity,
 		modelFailureCapacity: defaultModelFailureCapacity, now: time.Now,
@@ -221,12 +253,14 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 		}
 	}
 	if selected == nil {
+		s.diagnostics[groupID] = s.buildDiagnosticsLocked(groupID, modelName, snapshot, excluded, now)
 		s.mu.Unlock()
 		if busy {
 			return nil, ErrAccountConcurrencyBusy
 		}
 		return nil, ErrNoAccount
 	}
+	delete(s.diagnostics, groupID)
 	selected.lastSelected = now
 	selected.inFlight++
 	account := selected.account
@@ -251,33 +285,96 @@ func (s *Scheduler) entryAvailableLocked(entry *schedulerAccountEntry, modelName
 }
 
 func (s *Scheduler) entryRoutableLocked(entry *schedulerAccountEntry, modelName string, excluded map[int64]struct{}, now time.Time) bool {
-	if entry == nil || entry.account.Status != model.StatusActive {
-		return false
+	return s.entryExclusionReasonLocked(entry, modelName, excluded, now) == ""
+}
+
+func (s *Scheduler) entryExclusionReasonLocked(entry *schedulerAccountEntry, modelName string, excluded map[int64]struct{}, now time.Time) string {
+	if entry == nil {
+		return "account_missing"
+	}
+	if entry.account.Status != model.StatusActive {
+		return "disabled"
 	}
 	if _, skip := excluded[entry.account.ID]; skip {
-		return false
+		return "attempted"
 	}
 	if entry.account.CooldownUntil != nil && entry.account.CooldownUntil.After(now) {
-		return false
+		return "cooldown"
 	}
 	if quotaDefinitelyExhausted(&entry.account, now) {
-		return false
+		return "quota_exhausted"
 	}
 	key, ok := schedulerModelKey(entry.account.ID, modelName)
 	if !ok {
-		return true
+		return ""
 	}
 	failure, exists := s.modelFailures[key]
 	if !exists {
-		return true
+		return ""
 	}
 	if failure.blockUntil.IsZero() || !failure.blockUntil.After(now) {
 		if now.Sub(failure.lastTouched) > modelFailureWindow {
 			delete(s.modelFailures, key)
 		}
-		return true
+		return ""
 	}
-	return false
+	return "model_cooldown"
+}
+
+func (s *Scheduler) buildDiagnosticsLocked(groupID int64, modelName string, snapshot *schedulerGroupSnapshot, excluded map[int64]struct{}, now time.Time) SchedulerDiagnostics {
+	diagnostic := SchedulerDiagnostics{GroupID: groupID, Model: modelName, Reasons: map[string]int{}, UpdatedAt: now}
+	if snapshot == nil {
+		return diagnostic
+	}
+	diagnostic.Pool = len(snapshot.accounts)
+	for _, entry := range snapshot.accounts {
+		reason := s.entryExclusionReasonLocked(entry, modelName, excluded, now)
+		if reason == "" && !s.entryHasConcurrencySlot(entry) {
+			reason = "concurrency_full"
+		}
+		if reason == "" {
+			reason = "selection_exhausted"
+		}
+		diagnostic.Reasons[reason]++
+	}
+	return diagnostic
+}
+
+func (s *Scheduler) Diagnostic(groupID int64) (SchedulerDiagnostics, bool) {
+	if s == nil {
+		return SchedulerDiagnostics{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	diagnostic, ok := s.diagnostics[groupID]
+	if !ok {
+		return SchedulerDiagnostics{}, false
+	}
+	diagnostic.Reasons = cloneReasonCounts(diagnostic.Reasons)
+	return diagnostic, true
+}
+
+func (s *Scheduler) Diagnostics() []SchedulerDiagnostics {
+	if s == nil {
+		return []SchedulerDiagnostics{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]SchedulerDiagnostics, 0, len(s.diagnostics))
+	for _, diagnostic := range s.diagnostics {
+		diagnostic.Reasons = cloneReasonCounts(diagnostic.Reasons)
+		result = append(result, diagnostic)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].UpdatedAt.After(result[j].UpdatedAt) })
+	return result
+}
+
+func cloneReasonCounts(source map[string]int) map[string]int {
+	result := make(map[string]int, len(source))
+	for key, value := range source {
+		result[key] = value
+	}
+	return result
 }
 
 func (s *Scheduler) entryHasConcurrencySlot(entry *schedulerAccountEntry) bool {
@@ -407,7 +504,7 @@ func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnaps
 
 	var accounts []model.UpstreamAccount
 	err := s.db.Preload("Proxy").Preload("Quota").Preload("CodexQuota").
-		Where("group_id = ? AND status = ?", groupID, model.StatusActive).
+		Where("group_id = ?", groupID).
 		Find(&accounts).Error
 	if err != nil {
 		return nil, err

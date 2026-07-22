@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"dengdeng/internal/config"
+	"dengdeng/internal/crypto"
 	"dengdeng/internal/middleware"
 	"dengdeng/internal/model"
 	"dengdeng/internal/util"
@@ -54,12 +55,106 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	// for this one so the current user stays signed in.
 	newVer := user.TokenVersion + 1
 	h.db.Model(user).Updates(map[string]any{"password_hash": hash, "token_version": newVer})
-	token, err := util.SignJWT(h.cfg.JWT.Secret, user.ID, user.Role, newVer, time.Duration(h.cfg.JWT.ExpireHour)*time.Hour)
+	claims := middleware.CurrentClaims(c)
+	mfa := user.TOTPEnabled && claims != nil && claims.MFA
+	token, err := h.signBoundToken(c, user, newVer, mfa)
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "sign token failed")
 		return
 	}
 	util.OK(c, gin.H{"changed": true, "token": token})
+}
+
+type totpPasswordReq struct {
+	Password string `json:"password" binding:"required"`
+}
+
+type totpEnableReq struct {
+	Password string `json:"password" binding:"required"`
+	Secret   string `json:"secret" binding:"required"`
+	Code     string `json:"code" binding:"required"`
+}
+
+type totpDisableReq struct {
+	Password string `json:"password" binding:"required"`
+	Code     string `json:"code" binding:"required"`
+}
+
+func (h *UserHandler) SetupTOTP(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var req totpPasswordReq
+	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
+		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	secret, err := util.NewTOTPSecret()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "generate authenticator secret failed")
+		return
+	}
+	issuer := "DengDeng AI"
+	if h.cfg != nil && strings.TrimSpace(h.cfg.Site.Name) != "" {
+		issuer = strings.TrimSpace(h.cfg.Site.Name)
+	}
+	util.OK(c, gin.H{"secret": secret, "otpauth_url": util.TOTPUri(issuer, user.Email, secret)})
+}
+
+func (h *UserHandler) EnableTOTP(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var req totpEnableReq
+	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
+		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	if !util.ValidateTOTP(req.Secret, req.Code, time.Now()) {
+		util.Fail(c, http.StatusBadRequest, "authenticator code is invalid")
+		return
+	}
+	newVer := user.TokenVersion + 1
+	if err := h.db.Model(user).Updates(map[string]any{
+		"totp_enabled": true, "totp_secret": crypto.EncryptedString(strings.ToUpper(strings.TrimSpace(req.Secret))), "token_version": newVer,
+	}).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "enable authenticator failed")
+		return
+	}
+	token, err := h.signBoundToken(c, user, newVer, true)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "sign token failed")
+		return
+	}
+	util.OK(c, gin.H{"enabled": true, "token": token})
+}
+
+func (h *UserHandler) DisableTOTP(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var req totpDisableReq
+	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
+		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	if !user.TOTPEnabled || !util.ValidateTOTP(string(user.TOTPSecret), req.Code, time.Now()) {
+		util.Fail(c, http.StatusBadRequest, "authenticator code is invalid")
+		return
+	}
+	newVer := user.TokenVersion + 1
+	if err := h.db.Model(user).Updates(map[string]any{"totp_enabled": false, "totp_secret": "", "token_version": newVer}).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "disable authenticator failed")
+		return
+	}
+	token, err := h.signBoundToken(c, user, newVer, false)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "sign token failed")
+		return
+	}
+	util.OK(c, gin.H{"enabled": false, "token": token})
+}
+
+func (h *UserHandler) signBoundToken(c *gin.Context, user *model.User, version int, mfa bool) (string, error) {
+	return util.SignJWTBound(
+		h.cfg.JWT.Secret, user.ID, user.Role, version,
+		time.Duration(h.cfg.JWT.ExpireHour)*time.Hour,
+		util.SessionFingerprint(h.cfg.JWT.Secret, c.Request.UserAgent()), mfa,
+	)
 }
 
 // ---- API keys ----

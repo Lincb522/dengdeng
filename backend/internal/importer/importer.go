@@ -166,12 +166,15 @@ func decodeEntries(raw []byte) ([]map[string]any, error) {
 func parseEntry(entry map[string]any, platformHint string) Account {
 	credentials := object(value(entry, "credentials", "credential"))
 	tokens := object(value(entry, "tokens", "token"))
-	values := []map[string]any{entry, credentials, tokens}
+	agentIdentity := object(value(entry, "agent_identity", "agentIdentity"))
+	values := []map[string]any{entry, credentials, tokens, agentIdentity}
 	get := func(keys ...string) string { return stringFrom(values, keys...) }
 	getAny := func(keys ...string) any { return valueFrom(values, keys...) }
 
 	platform := normalizePlatform(firstNonEmpty(platformHint, get("platform", "provider", "provider_type")))
 	declared := firstNonEmpty(get("type", "auth_type", "authType", "auth_mode", "authMode"))
+	authMode := get("auth_mode", "authMode")
+	isAgentIdentity := agentIdentity != nil || strings.EqualFold(authMode, "agentIdentity") || strings.EqualFold(declared, "agentIdentity")
 	if platform == "" {
 		switch strings.ToLower(declared) {
 		case "claude", "anthropic":
@@ -199,6 +202,16 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 	}
 
 	extra := map[string]any{}
+	if isAgentIdentity {
+		extra["auth_mode"] = "agentIdentity"
+		putIf(extra, "agent_runtime_id", get("agent_runtime_id", "agentRuntimeId"))
+		putIf(extra, "agent_private_key", get("agent_private_key", "agentPrivateKey"))
+		putIf(extra, "task_id", get("task_id", "taskId"))
+		putIf(extra, "chatgpt_user_id", get("chatgpt_user_id", "chatgptUserId", "user_id", "userId"))
+		if fedramp, ok := boolFrom(values, "chatgpt_account_is_fedramp", "chatgptAccountIsFedramp"); ok {
+			extra["chatgpt_account_is_fedramp"] = fedramp
+		}
+	}
 	putIf(extra, "id_token", idToken)
 	putIf(extra, "session_token", get("session_token", "sessionToken"))
 	putIf(extra, "client_id", get("client_id", "clientId"))
@@ -214,15 +227,27 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 	}
 	putIf(extra, "organization_id", get("organization_id", "organizationId"))
 	putIf(extra, "token_type", get("token_type", "tokenType"))
+	expiresAt := firstTime(getAny("expires_at", "expiresAt", "expired", "expiration", "expiry"))
+	// Agent Identity is a durable signing credential. Some exports retain the
+	// expiry of the bootstrap OAuth token, but that timestamp must not expire or
+	// auto-pause the imported identity itself.
+	if isAgentIdentity {
+		expiresAt = nil
+	}
 
 	return Account{
-		Name:         get("name", "label", "display_name", "displayName"),
-		Platform:     platform,
-		AuthType:     resolveAuthType(declared, apiKey, accessToken),
+		Name:     get("name", "label", "display_name", "displayName"),
+		Platform: platform,
+		AuthType: func() string {
+			if isAgentIdentity {
+				return model.AuthAgentIdentity
+			}
+			return resolveAuthType(declared, apiKey, accessToken)
+		}(),
 		APIKey:       apiKey,
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresAt:    firstTime(getAny("expires_at", "expiresAt", "expired", "expiration", "expiry")),
+		ExpiresAt:    expiresAt,
 		Email:        email,
 		AccountID:    accountID,
 		BaseURL:      get("base_url", "baseUrl", "api_base", "apiBase"),
@@ -239,11 +264,33 @@ func resolveAuthType(declared, apiKey, accessToken string) string {
 		return model.AuthAPIKey
 	case model.AuthOAuth, "setup_token", "chatgpt", "claudeai", "claude_ai_oauth":
 		return model.AuthOAuth
+	case model.AuthAgentIdentity, "agentidentity", "agent-identity":
+		return model.AuthAgentIdentity
 	}
 	if accessToken != "" {
 		return model.AuthOAuth
 	}
 	return model.AuthAPIKey
+}
+
+func boolFrom(maps []map[string]any, keys ...string) (bool, bool) {
+	for _, m := range maps {
+		if m == nil {
+			continue
+		}
+		for _, key := range keys {
+			switch value := m[key].(type) {
+			case bool:
+				return value, true
+			case string:
+				parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+				if err == nil {
+					return parsed, true
+				}
+			}
+		}
+	}
+	return false, false
 }
 
 func normalizePlatform(p string) string {

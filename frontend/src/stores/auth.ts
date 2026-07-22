@@ -38,8 +38,8 @@ export const useAuth = defineStore('auth', () => {
     }
   }
 
-  async function login(email: string, password: string, termsRevision = '') {
-    const resp = await api.post<LoginResp>('/api/auth/login', { email, password, terms_revision: termsRevision })
+  async function login(email: string, password: string, termsRevision = '', totpCode = '') {
+		const resp = await api.post<LoginResp>('/api/auth/login', { email, password, terms_revision: termsRevision, totp_code: totpCode })
     setToken(resp.token)
     user.value = resp.user
   }

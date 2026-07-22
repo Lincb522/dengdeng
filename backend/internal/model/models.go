@@ -27,8 +27,9 @@ const (
 	PlatformGrok = "grok"
 
 	// Upstream credential styles.
-	AuthAPIKey = "api_key" // static provider key sent as-is
-	AuthOAuth  = "oauth"   // access_token (+ refresh_token) bearer, auto-renewed
+	AuthAPIKey        = "api_key"        // static provider key sent as-is
+	AuthOAuth         = "oauth"          // access_token (+ refresh_token) bearer, auto-renewed
+	AuthAgentIdentity = "agent_identity" // OpenAI AgentAssertion signed per request
 
 	RedeemKindAmount   = "amount"
 	RedeemKindDays     = "days"
@@ -72,7 +73,9 @@ type User struct {
 	Note        string `gorm:"size:512" json:"note"`
 	// TokenVersion is bumped to invalidate all previously issued JWTs
 	// (password change, ban, role change).
-	TokenVersion int `gorm:"not null;default:0" json:"-"`
+	TokenVersion int                    `gorm:"not null;default:0" json:"-"`
+	TOTPEnabled  bool                   `gorm:"not null;default:false" json:"totp_enabled"`
+	TOTPSecret   crypto.EncryptedString `gorm:"size:512" json:"-"`
 	// TermsRevision and TermsAcceptedAt record the policy revision accepted
 	// during login or registration. A revised agreement deliberately asks for
 	// fresh acceptance without invalidating API keys or historical usage.
@@ -99,12 +102,17 @@ type Group struct {
 	CacheWrite1hMultiplier float64 `gorm:"not null;default:1" json:"cache_write_1h_multiplier"`
 	// ImageRateIndependent lets image-token billing use its own multiplier
 	// instead of inheriting RateMultiplier, matching Sub2API's group model.
-	ImageRateIndependent bool      `gorm:"not null;default:false" json:"image_rate_independent"`
-	ImageRateMultiplier  float64   `gorm:"not null;default:1" json:"image_rate_multiplier"`
-	IsPublic             bool      `gorm:"not null;default:true" json:"is_public"`
-	Status               string    `gorm:"size:16;not null;default:active" json:"status"`
-	CreatedAt            time.Time `json:"created_at"`
-	UpdatedAt            time.Time `json:"updated_at"`
+	ImageRateIndependent bool    `gorm:"not null;default:false" json:"image_rate_independent"`
+	ImageRateMultiplier  float64 `gorm:"not null;default:1" json:"image_rate_multiplier"`
+	// MaxReasoningEffort is an optional group-level ceiling for OpenAI-wire
+	// requests. ReasoningEffortMappings lets an operator remap individual
+	// client choices before that ceiling is applied (for example max -> high).
+	MaxReasoningEffort      string            `gorm:"size:16;not null;default:auto" json:"max_reasoning_effort"`
+	ReasoningEffortMappings map[string]string `gorm:"serializer:json;type:text" json:"reasoning_effort_mappings"`
+	IsPublic                bool              `gorm:"not null;default:true" json:"is_public"`
+	Status                  string            `gorm:"size:16;not null;default:active" json:"status"`
+	CreatedAt               time.Time         `json:"created_at"`
+	UpdatedAt               time.Time         `json:"updated_at"`
 }
 
 type APIKey struct {
@@ -209,9 +217,9 @@ type ReferralCommission struct {
 	CreatedAt      time.Time `gorm:"index" json:"created_at"`
 }
 
-// UpstreamAccount is a credential for an upstream provider. It supports two
-// auth styles: a static API key, or an OAuth access/refresh token pair that is
-// renewed automatically. All secret fields are encrypted at rest.
+// UpstreamAccount is a credential for an upstream provider. It supports a
+// static API key, a refreshable OAuth token pair, or an OpenAI Agent Identity
+// that signs every request. All secret fields are encrypted at rest.
 type UpstreamAccount struct {
 	ID      int64 `gorm:"primaryKey" json:"id"`
 	GroupID int64 `gorm:"index;not null" json:"group_id"`
@@ -222,7 +230,7 @@ type UpstreamAccount struct {
 	Name     string `gorm:"size:64;not null" json:"name"`
 	Platform string `gorm:"size:16;not null" json:"platform"`
 	BaseURL  string `gorm:"size:512" json:"base_url"`
-	// AuthType is api_key (default) or oauth.
+	// AuthType is api_key (default), oauth, or agent_identity.
 	AuthType string `gorm:"size:16;not null;default:api_key" json:"auth_type"`
 	// APIKey holds the provider key for AuthType == api_key (encrypted).
 	APIKey crypto.EncryptedString `gorm:"size:2048" json:"-"`
@@ -691,4 +699,38 @@ type BackupRecord struct {
 	CreatedBy   string     `gorm:"size:255" json:"created_by"`
 	CreatedAt   time.Time  `json:"created_at"`
 	CompletedAt *time.Time `json:"completed_at"`
+}
+
+// ImageStorageConfig holds the operator's S3-compatible object storage used
+// by asynchronous image tasks. The secret key is encrypted at rest and never
+// returned by the administration API.
+type ImageStorageConfig struct {
+	ID                 int64                  `gorm:"primaryKey" json:"id"`
+	Enabled            bool                   `gorm:"not null;default:false" json:"enabled"`
+	Endpoint           string                 `gorm:"size:1024" json:"endpoint"`
+	Region             string                 `gorm:"size:64;not null;default:auto" json:"region"`
+	Bucket             string                 `gorm:"size:255" json:"bucket"`
+	AccessKeyID        crypto.EncryptedString `gorm:"size:2048" json:"-"`
+	SecretAccessKey    crypto.EncryptedString `gorm:"size:4096" json:"-"`
+	Prefix             string                 `gorm:"size:512;not null;default:images/" json:"prefix"`
+	ForcePathStyle     bool                   `gorm:"not null;default:false" json:"force_path_style"`
+	PublicBaseURL      string                 `gorm:"size:1024" json:"public_base_url"`
+	PresignExpiryHours int                    `gorm:"not null;default:24" json:"presign_expiry_hours"`
+	MaxDownloadBytes   int64                  `gorm:"not null;default:33554432" json:"max_download_bytes"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+}
+
+type ImageTask struct {
+	ID          string     `gorm:"primaryKey;size:64" json:"id"`
+	UserID      int64      `gorm:"index;not null" json:"-"`
+	APIKeyID    int64      `gorm:"index;not null" json:"-"`
+	Status      string     `gorm:"index;size:24;not null" json:"status"`
+	HTTPStatus  int        `gorm:"not null;default:0" json:"http_status,omitempty"`
+	Result      string     `gorm:"type:text" json:"result,omitempty"`
+	Error       string     `gorm:"type:text" json:"error,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	ExpiresAt   time.Time  `gorm:"index;not null" json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }

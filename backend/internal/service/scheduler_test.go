@@ -286,6 +286,22 @@ func TestSchedulerReturnsNoAccountForEmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestSchedulerRecordsWhyAGroupHasNoAvailableAccount(t *testing.T) {
+	db := newSchedulerTestDB(t)
+	account := model.UpstreamAccount{GroupID: 7, Name: "disabled", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Status: model.StatusDisabled}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	scheduler := NewScheduler(db)
+	if _, err := scheduler.PickForSession(7, "gpt-test", "", nil); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("pick error = %v", err)
+	}
+	diagnostic, ok := scheduler.Diagnostic(7)
+	if !ok || diagnostic.Reasons["disabled"] != 1 || diagnostic.Model != "gpt-test" {
+		t.Fatalf("diagnostic = %#v", diagnostic)
+	}
+}
+
 func TestSchedulerSessionAffinityKeepsConversationOnAccount(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	accounts := []model.UpstreamAccount{

@@ -11,11 +11,18 @@ type SettingsPayload = SystemSettings & {
   smtp_from?: string
 }
 
+type ImageStorageSettings = {
+	enabled: boolean; endpoint: string; region: string; bucket: string; access_key_id: string; secret_access_key: string
+	access_key_configured: boolean; secret_configured: boolean; prefix: string; force_path_style: boolean
+	public_base_url: string; presign_expiry_hours: number; max_download_bytes: number; active: boolean
+}
+
 const sections = [
   { id: 'general', label: '站点信息', hint: '名称、说明与运行状态' },
   { id: 'access', label: '注册与账户', hint: '注册开关与初始额度' },
   { id: 'agreement', label: '协议与免责', hint: '登录页确认与文档内容' },
   { id: 'gateway', label: '网关与调度', hint: '重试、冷却与故障隔离' },
+	{ id: 'image', label: '图像存储', hint: '异步任务与对象存储' },
   { id: 'operations', label: '运行与审计', hint: '健康探测与操作记录' },
 ] as const
 
@@ -25,11 +32,15 @@ const saving = ref(false)
 const auditLoading = ref(false)
 const runtime = ref<Pick<SettingsPayload, 'site_public_url' | 'smtp_configured' | 'smtp_from_name' | 'smtp_from'>>({})
 const registrationSuffixesText = ref('')
+const trustedProxiesText = ref('')
+const forwardedHeadersText = ref('')
 const form = ref<SystemSettings>({
   site_name: 'DengDeng AI · 蹬蹬ai',
   site_subtitle: '统一管理模型接入与用量',
   allow_register: true,
 	registration_email_suffixes: [],
+	trusted_proxies: [],
+	forwarded_client_ip_headers: ['X-Forwarded-For', 'X-Real-IP'],
   init_balance_micro: 0,
   login_agreement: { enabled: true, mode: 'modal', updated_at: '', documents: [] },
 })
@@ -49,6 +60,11 @@ const runtimePolicy = ref<GatewayRuntimePolicy>({
   reasoning_effort_multipliers: defaultReasoningMultipliers(),
 })
 const auditItems = ref<AuditLog[]>([])
+const imageStorage = ref<ImageStorageSettings>({
+	enabled: false, endpoint: '', region: 'auto', bucket: '', access_key_id: '', secret_access_key: '',
+	access_key_configured: false, secret_configured: false, prefix: 'images/', force_path_style: false,
+	public_base_url: '', presign_expiry_hours: 24, max_download_bytes: 32 * 1024 * 1024, active: false,
+})
 
 const initialBalanceUSD = computed({
   get: () => form.value.init_balance_micro / 1_000_000,
@@ -61,15 +77,18 @@ const initialBalanceUSD = computed({
 async function load() {
   loading.value = true
   try {
-    const [data, policy] = await Promise.all([
+    const [data, policy, storage] = await Promise.all([
       api.get<SettingsPayload>('/api/admin/settings'),
       api.get<GatewayRuntimePolicy>('/api/admin/runtime-settings'),
+			api.get<ImageStorageSettings>('/api/admin/image-storage'),
     ])
     form.value = {
       site_name: data.site_name,
       site_subtitle: data.site_subtitle,
       allow_register: data.allow_register,
 			registration_email_suffixes: data.registration_email_suffixes || [],
+			trusted_proxies: data.trusted_proxies || [],
+			forwarded_client_ip_headers: data.forwarded_client_ip_headers || ['X-Forwarded-For', 'X-Real-IP'],
       init_balance_micro: data.init_balance_micro,
       login_agreement: {
         enabled: data.login_agreement.enabled,
@@ -85,7 +104,10 @@ async function load() {
       smtp_from: data.smtp_from,
     }
 		registrationSuffixesText.value = (data.registration_email_suffixes || []).join('\n')
+		trustedProxiesText.value = (data.trusted_proxies || []).join('\n')
+		forwardedHeadersText.value = (data.forwarded_client_ip_headers || []).join('\n')
     runtimePolicy.value = { ...policy, reasoning_effort_multipliers: { ...defaultReasoningMultipliers(), ...(policy.reasoning_effort_multipliers || {}) } }
+		imageStorage.value = { ...imageStorage.value, ...storage, access_key_id: '', secret_access_key: '' }
     await loadAudit()
   } finally {
     loading.value = false
@@ -130,7 +152,10 @@ function updateDocumentID(doc: LegalDocument) {
 async function save() {
   saving.value = true
   try {
-    if (activeSection.value === 'gateway' || activeSection.value === 'operations') {
+    if (activeSection.value === 'image') {
+		const saved = await withToast(() => api.put<ImageStorageSettings>('/api/admin/image-storage', imageStorage.value), '图像存储已保存')
+		if (saved) imageStorage.value = { ...imageStorage.value, ...saved, access_key_id: '', secret_access_key: '' }
+		} else if (activeSection.value === 'gateway' || activeSection.value === 'operations') {
       const saved = await withToast(() => api.put<GatewayRuntimePolicy>('/api/admin/runtime-settings', runtimePolicy.value), '网关运行策略已保存')
       if (saved) {
         runtimePolicy.value = saved
@@ -138,6 +163,8 @@ async function save() {
       }
     } else {
 			form.value.registration_email_suffixes = registrationSuffixesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
+			form.value.trusted_proxies = trustedProxiesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
+			form.value.forwarded_client_ip_headers = forwardedHeadersText.value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean)
       const saved = await withToast(() => api.put<SystemSettings>('/api/admin/settings', form.value), '系统设置已保存')
       if (saved) {
         form.value = saved
@@ -147,6 +174,10 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+async function testImageStorage() {
+	await withToast(() => api.post('/api/admin/image-storage/test', {}), '对象存储连接正常')
 }
 
 onMounted(load)
@@ -213,6 +244,23 @@ onMounted(load)
               <div><dt>发件人</dt><dd>{{ runtime.smtp_from_name || runtime.smtp_from || '使用 SMTP 默认发件人' }}</dd></div>
             </dl>
           </section>
+
+					<section class="settings-section settings-section--quiet">
+						<header>
+							<h2>真实客户端 IP</h2>
+							<p>只会信任下列反向代理传入的 IP 请求头；留空受信代理表示不信任任何代理。</p>
+						</header>
+						<div class="settings-form-grid">
+							<label class="settings-field">
+								<span>受信代理 IP / CIDR</span>
+								<textarea v-model="trustedProxiesText" rows="4" class="input settings-document-editor__text" placeholder="127.0.0.1&#10;10.0.0.0/8"></textarea>
+							</label>
+							<label class="settings-field">
+								<span>客户端 IP 请求头</span>
+								<textarea v-model="forwardedHeadersText" rows="4" class="input settings-document-editor__text" placeholder="X-Forwarded-For&#10;X-Real-IP"></textarea>
+							</label>
+						</div>
+					</section>
         </template>
 
         <template v-else-if="activeSection === 'access'">
@@ -299,6 +347,29 @@ onMounted(load)
             </div>
           </section>
         </template>
+
+				<template v-else-if="activeSection === 'image'">
+					<section class="settings-section">
+						<header class="settings-section__with-control">
+							<div><h2>S3 兼容对象存储</h2><p>启用后开放 <code>/v1/images/generations/async</code>，结果上传后只保存链接。</p></div>
+							<label class="settings-toggle-row settings-toggle-row--small"><span>{{ imageStorage.active ? '运行中' : imageStorage.enabled ? '配置未完整' : '已关闭' }}</span><input v-model="imageStorage.enabled" type="checkbox" role="switch" /></label>
+						</header>
+						<div class="settings-form-grid">
+							<label class="settings-field"><span>Endpoint</span><input v-model="imageStorage.endpoint" class="input" placeholder="https://...r2.cloudflarestorage.com" /></label>
+							<label class="settings-field"><span>Region</span><input v-model="imageStorage.region" class="input" placeholder="auto" /></label>
+							<label class="settings-field"><span>Bucket</span><input v-model="imageStorage.bucket" class="input" /></label>
+							<label class="settings-field"><span>对象前缀</span><input v-model="imageStorage.prefix" class="input" placeholder="images/" /></label>
+							<label class="settings-field"><span>Access Key ID</span><input v-model="imageStorage.access_key_id" class="input" :placeholder="imageStorage.access_key_configured ? '已配置，留空不修改' : ''" autocomplete="off" /></label>
+							<label class="settings-field"><span>Secret Access Key</span><input v-model="imageStorage.secret_access_key" type="password" class="input" :placeholder="imageStorage.secret_configured ? '已配置，留空不修改' : ''" autocomplete="new-password" /></label>
+							<label class="settings-field"><span>公开访问地址（可选）</span><input v-model="imageStorage.public_base_url" class="input" placeholder="https://img.example.com" /></label>
+							<label class="settings-field"><span>预签名有效期（小时）</span><input v-model.number="imageStorage.presign_expiry_hours" type="number" min="1" max="168" class="input" /></label>
+						</div>
+						<div class="mt-4 flex flex-wrap items-center gap-4">
+							<label class="flex items-center gap-2 text-sm text-slate-300"><input v-model="imageStorage.force_path_style" type="checkbox" /> 路径风格（MinIO）</label>
+							<button type="button" class="btn-ghost" @click="testImageStorage">测试连接</button>
+						</div>
+					</section>
+				</template>
 
         <template v-else-if="activeSection === 'gateway'">
           <section class="settings-section">

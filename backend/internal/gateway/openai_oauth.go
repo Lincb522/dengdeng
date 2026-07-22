@@ -10,16 +10,21 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+var openAIAgentIdentityTaskLocks sync.Map
 
 const (
 	defaultOpenAIOAuthResponses = "https://chatgpt.com/backend-api/codex/responses"
@@ -94,12 +99,15 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 }
 
 func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string) (*http.Response, error) {
+	if service.IsOpenAIAgentIdentity(acc) {
+		return g.doOpenAIAgentIdentity(c, acc, body, sessionSeed)
+	}
 	token, err := g.oauth.AccessToken(c.Request.Context(), acc)
 	if err != nil {
 		return nil, fmt.Errorf("oauth token: %w", err)
 	}
 	sessionID := oauthSessionHeader(sessionSeed)
-	upstream, err := g.doOpenAIOAuthRequest(c, acc, token, body, sessionID)
+	upstream, err := g.doOpenAIOAuthRequest(c, acc, "Bearer "+token, body, sessionID)
 	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized {
 		return upstream, err
 	}
@@ -112,15 +120,86 @@ func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body
 	if err != nil {
 		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI OAuth session was rejected and could not be refreshed. Sign in again or import a fresh OAuth session."}}`), nil
 	}
-	return g.doOpenAIOAuthRequest(c, acc, token, body, sessionID)
+	return g.doOpenAIOAuthRequest(c, acc, "Bearer "+token, body, sessionID)
 }
 
-func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccount, token string, body []byte, sessionID string) (*http.Response, error) {
+func (g *Gateway) doOpenAIAgentIdentity(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string) (*http.Response, error) {
+	authorization, taskID, err := g.openAIAgentIdentityAuthorization(c, acc, "")
+	if err != nil {
+		return nil, err
+	}
+	sessionID := oauthSessionHeader(sessionSeed)
+	upstream, err := g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized {
+		return upstream, err
+	}
+	errorBody, readErr := io.ReadAll(io.LimitReader(upstream.Body, 64<<10))
+	upstream.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if !service.IsOpenAIAgentTaskInvalid(upstream.StatusCode, errorBody) {
+		upstream.Body = io.NopCloser(bytes.NewReader(errorBody))
+		upstream.ContentLength = int64(len(errorBody))
+		return upstream, nil
+	}
+	authorization, _, err = g.openAIAgentIdentityAuthorization(c, acc, taskID)
+	if err != nil {
+		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI Agent Identity task expired and could not be renewed."}}`), nil
+	}
+	return g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+}
+
+func (g *Gateway) openAIAgentIdentityAuthorization(c *gin.Context, acc *model.UpstreamAccount, expectedTaskID string) (string, string, error) {
+	if acc == nil {
+		return "", "", errors.New("agent identity account is nil")
+	}
+	lockValue, _ := openAIAgentIdentityTaskLocks.LoadOrStore(acc.ID, &sync.Mutex{})
+	lock := lockValue.(*sync.Mutex)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if g.db != nil && acc.ID > 0 {
+		var fresh model.UpstreamAccount
+		if err := g.db.Preload("Proxy").First(&fresh, acc.ID).Error; err == nil {
+			*acc = fresh
+		}
+	}
+	record, err := service.AgentIdentityRecordFromAccount(acc)
+	if err != nil {
+		return "", "", err
+	}
+	if record.TaskID == "" || (expectedTaskID != "" && record.TaskID == expectedTaskID) {
+		client, clientErr := g.clientFor(acc)
+		if clientErr != nil {
+			return "", "", clientErr
+		}
+		taskID, registerErr := service.RegisterOpenAIAgentTask(c.Request.Context(), client, record)
+		if registerErr != nil {
+			return "", "", registerErr
+		}
+		record.TaskID = taskID
+		extra, encodeErr := model.EncodeExtra(service.AgentIdentityExtra(record))
+		if encodeErr != nil {
+			return "", "", encodeErr
+		}
+		if g.db != nil && acc.ID > 0 {
+			if updateErr := g.db.Model(&model.UpstreamAccount{}).Where("id = ?", acc.ID).Update("extra", extra).Error; updateErr != nil {
+				return "", "", updateErr
+			}
+		}
+		acc.Extra = extra
+	}
+	authorization, err := service.OpenAIAgentIdentityAuthorization(record, time.Now())
+	return authorization, record.TaskID, err
+}
+
+func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccount, authorization string, body []byte, sessionID string) (*http.Response, error) {
 	upReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, openAIOAuthResponsesURL(acc.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	upReq.Header.Set("Authorization", "Bearer "+token)
+	upReq.Header.Set("Authorization", authorization)
 	upReq.Header.Set("Content-Type", "application/json")
 	upReq.Header.Set("Accept", "text/event-stream")
 	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
@@ -189,7 +268,7 @@ func requireOAuthSSE(upstream *http.Response, err error) (*http.Response, error)
 		return upstream, nil
 	}
 	if strings.Contains(contentType, "text/event-stream") {
-		return upstream, nil
+		return preflightOAuthSSE(upstream)
 	}
 	// Some HTTPS proxies preserve the streaming body but strip Content-Type.
 	// Do not turn a healthy Codex stream into a 502 solely because of that
@@ -205,11 +284,103 @@ func requireOAuthSSE(upstream *http.Response, err error) (*http.Response, error)
 			// downstream protocol adapters; otherwise they treat the stream as a
 			// JSON response when a proxy stripped Content-Type.
 			upstream.Header.Set("Content-Type", "text/event-stream")
-			return upstream, nil
+			return preflightOAuthSSE(upstream)
 		}
 	}
 	upstream.Body.Close()
 	return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream returned a non-stream response. Verify the upstream account and that this server has authorized network access to ChatGPT."}}`), nil
+}
+
+// preflightOAuthSSE buffers only the non-output prelude. This gives the relay
+// loop a chance to fail over when a nominal HTTP 200 stream actually contains
+// an error, [DONE] without a terminal event, or EOF before any output. Once a
+// real output event is seen, replaying on another account would risk duplicate
+// tool calls, so the buffered prefix is restored and normal streaming begins.
+func preflightOAuthSSE(upstream *http.Response) (*http.Response, error) {
+	if upstream == nil || upstream.Body == nil {
+		return upstream, nil
+	}
+	body := upstream.Body
+	reader := bufio.NewReader(body)
+	var prefix bytes.Buffer
+	for prefix.Len() <= 4<<20 {
+		line, readErr := reader.ReadString('\n')
+		prefix.WriteString(line)
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "data:") {
+			payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
+			if payload == "[DONE]" {
+				body.Close()
+				return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream ended before a terminal response","type":"upstream_error","code":"missing_terminal_event"}}`), nil
+			}
+			if payload != "" {
+				var event map[string]any
+				if json.Unmarshal([]byte(payload), &event) == nil {
+					typ := stringValue(event["type"])
+					switch typ {
+					case "error", "response.failed":
+						body.Close()
+						return oauthSSEErrorResponse(event), nil
+					case "response.completed", "response.incomplete":
+						return restoreOAuthSSEPrefix(upstream, body, reader, prefix.Bytes()), nil
+					default:
+						if oauthSSEHasOutput(typ, event) {
+							return restoreOAuthSSEPrefix(upstream, body, reader, prefix.Bytes()), nil
+						}
+					}
+				}
+			}
+		}
+		if readErr != nil {
+			body.Close()
+			return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream stream ended without output or response.completed","type":"upstream_error","code":"empty_stream"}}`), nil
+		}
+	}
+	body.Close()
+	return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream sent an oversized stream prelude","type":"upstream_error","code":"invalid_stream"}}`), nil
+}
+
+func restoreOAuthSSEPrefix(upstream *http.Response, body io.Closer, reader *bufio.Reader, prefix []byte) *http.Response {
+	upstream.Body = &oauthReplayBody{Reader: io.MultiReader(bytes.NewReader(prefix), reader), Closer: body}
+	upstream.ContentLength = -1
+	upstream.Header.Del("Content-Length")
+	return upstream
+}
+
+type oauthReplayBody struct {
+	io.Reader
+	io.Closer
+}
+
+func oauthSSEHasOutput(typ string, event map[string]any) bool {
+	switch typ {
+	case "response.output_text.delta", "response.reasoning_text.delta", "response.reasoning_summary_text.delta", "response.function_call_arguments.delta":
+		return stringValue(event["delta"]) != ""
+	case "response.output_item.done":
+		return event["item"] != nil
+	case "response.image_generation_call.completed":
+		return event["result"] != nil
+	}
+	return false
+}
+
+func oauthSSEErrorResponse(event map[string]any) *http.Response {
+	status := http.StatusBadGateway
+	errorObject, _ := event["error"].(map[string]any)
+	message := firstNonEmpty(stringValue(errorObject["message"]), stringValue(event["message"]), "OpenAI OAuth upstream returned an error event")
+	code := firstNonEmpty(stringValue(errorObject["code"]), stringValue(event["code"]), "upstream_error")
+	typ := firstNonEmpty(stringValue(errorObject["type"]), stringValue(event["type"]), "upstream_error")
+	marker := strings.ToLower(code + " " + typ + " " + message)
+	switch {
+	case strings.Contains(marker, "rate_limit"), strings.Contains(marker, "too many"):
+		status = http.StatusTooManyRequests
+	case strings.Contains(marker, "unauthorized"), strings.Contains(marker, "invalid_auth"), strings.Contains(marker, "invalid task"):
+		status = http.StatusUnauthorized
+	case strings.Contains(marker, "forbidden"), strings.Contains(marker, "permission"):
+		status = http.StatusForbidden
+	}
+	encoded, _ := json.Marshal(map[string]any{"error": map[string]any{"message": message, "type": typ, "code": code}})
+	return oauthJSONResponse(status, string(encoded))
 }
 
 type oauthBufferedBody struct {

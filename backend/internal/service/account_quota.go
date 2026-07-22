@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -92,7 +93,7 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 	snapshot.ObservedUsage = s.observedUsage(account.ID, now)
 	snapshot.Message = ""
 
-	if account.AuthType != model.AuthOAuth {
+	if account.AuthType != model.AuthOAuth && !IsOpenAIAgentIdentity(account) {
 		if snapshot.Source != "rate_limit_headers" || len(snapshot.Windows) == 0 {
 			snapshot.Source = "local_observed"
 			snapshot.State = "local_only"
@@ -101,6 +102,18 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 		}
 		fetched := now
 		snapshot.FetchedAt = &fetched
+		return snapshot, s.save(&snapshot)
+	}
+
+	if IsOpenAIAgentIdentity(account) {
+		ctx, cancel := context.WithTimeout(parent, accountQuotaTimeout)
+		defer cancel()
+		if err := s.refreshOpenAIAgentIdentity(ctx, account, &snapshot); err != nil {
+			return s.saveFailure(&snapshot, err)
+		}
+		if snapshot.State == "" {
+			snapshot.State = "ready"
+		}
 		return snapshot, s.save(&snapshot)
 	}
 
@@ -126,7 +139,7 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 
 	switch account.Platform {
 	case model.PlatformOpenAI:
-		err = s.refreshOpenAI(ctx, account, accessToken, &snapshot)
+		err = s.refreshOpenAI(ctx, account, "Bearer "+accessToken, accessToken, &snapshot)
 	case model.PlatformAnthropic:
 		err = s.refreshClaude(ctx, account, accessToken, &snapshot)
 	case model.PlatformGrok:
@@ -215,7 +228,7 @@ type codexUsagePayload struct {
 	} `json:"rate_limit"`
 }
 
-func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.UpstreamAccount, token string, snapshot *model.AccountQuotaSnapshot) error {
+func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.UpstreamAccount, authorization, metadataToken string, snapshot *model.AccountQuotaSnapshot) error {
 	accountID := chatGPTAccountID(account)
 	if accountID == "" {
 		return fmt.Errorf("missing ChatGPT account id")
@@ -228,7 +241,7 @@ func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Authorization", authorization)
 	req.Header.Set("chatgpt-account-id", accountID)
 	req.Header.Set("OpenAI-Beta", "codex-1")
 	req.Header.Set("Originator", "Codex Desktop")
@@ -258,10 +271,66 @@ func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.
 	// from ChatGPT's lightweight subscription endpoint, with accounts/check as
 	// a fallback for organization and education plans. Failure is best-effort:
 	// the valid usage windows above must remain available.
-	enrichOpenAISubscription(ctx, client, account, token, snapshot)
+	if strings.TrimSpace(metadataToken) != "" {
+		enrichOpenAISubscription(ctx, client, account, metadataToken, snapshot)
+	}
 	snapshot.State = "ready"
 	fetched := time.Now().UTC()
 	snapshot.FetchedAt = &fetched
+	return nil
+}
+
+// refreshOpenAIAgentIdentity uses the same signed assertion as normal Codex
+// traffic. A stale task is renewed once and persisted atomically under the
+// per-account refresh lock; no OAuth token is required or stored.
+func (s *AccountQuotaService) refreshOpenAIAgentIdentity(ctx context.Context, account *model.UpstreamAccount, snapshot *model.AccountQuotaSnapshot) error {
+	if account == nil || account.Platform != model.PlatformOpenAI {
+		return fmt.Errorf("Agent Identity is only available for OpenAI accounts")
+	}
+	client, err := s.clientFor(account)
+	if err != nil {
+		return err
+	}
+	record, err := AgentIdentityRecordFromAccount(account)
+	if err != nil {
+		return err
+	}
+	for recovered := false; ; {
+		if record.TaskID == "" {
+			record.TaskID, err = RegisterOpenAIAgentTask(ctx, client, record)
+			if err != nil {
+				return fmt.Errorf("Agent Identity task registration failed: %w", err)
+			}
+			if err := s.persistAgentIdentityRecord(account, record); err != nil {
+				return err
+			}
+		}
+		authorization, authErr := OpenAIAgentIdentityAuthorization(record, time.Now())
+		if authErr != nil {
+			return authErr
+		}
+		err = s.refreshOpenAI(ctx, account, authorization, "", snapshot)
+		if err == nil {
+			return nil
+		}
+		var upstreamErr *quotaHTTPError
+		if recovered || !errors.As(err, &upstreamErr) || !IsOpenAIAgentTaskInvalid(upstreamErr.StatusCode, upstreamErr.Body) {
+			return err
+		}
+		recovered = true
+		record.TaskID = ""
+	}
+}
+
+func (s *AccountQuotaService) persistAgentIdentityRecord(account *model.UpstreamAccount, record AgentIdentityRecord) error {
+	extra, err := model.EncodeExtra(AgentIdentityExtra(record))
+	if err != nil {
+		return err
+	}
+	if err := s.db.Model(&model.UpstreamAccount{}).Where("id = ?", account.ID).Update("extra", extra).Error; err != nil {
+		return err
+	}
+	account.Extra = extra
 	return nil
 }
 
@@ -677,6 +746,15 @@ func (s *AccountQuotaService) clientFor(account *model.UpstreamAccount) (*http.C
 	return config.NewProxyHTTPClient("", "", accountQuotaTimeout)
 }
 
+type quotaHTTPError struct {
+	StatusCode int
+	Body       []byte
+}
+
+func (e *quotaHTTPError) Error() string {
+	return fmt.Sprintf("upstream status %d: %s", e.StatusCode, truncateQuotaText(string(e.Body), 220))
+}
+
 func doQuotaJSON(client *http.Client, req *http.Request, target any) error {
 	resp, err := client.Do(req)
 	if err != nil {
@@ -688,7 +766,7 @@ func doQuotaJSON(client *http.Client, req *http.Request, target any) error {
 		return readErr
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("upstream status %d: %s", resp.StatusCode, truncateQuotaText(string(body), 220))
+		return &quotaHTTPError{StatusCode: resp.StatusCode, Body: body}
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("invalid upstream JSON")
