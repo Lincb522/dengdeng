@@ -993,7 +993,7 @@ body {
   .key-setup-secret { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .55rem; padding: .65rem .72rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface-muted); }
   .key-setup-secret span { color: var(--ink-soft); font-size: .65rem; font-weight: 750; }
   .key-setup-secret code { overflow: hidden; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
-  .key-setup-key-input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; }
+  .key-setup-key-input { min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .72rem; -webkit-text-security: disc; }
   .key-setup-effort { min-width: 0; min-height: 1.9rem; padding: 0 .5rem; border-color: var(--line); background: var(--surface); color: var(--ink); font-size: .7rem; font-weight: 700; }
   .key-setup-key-input::placeholder { color: var(--ink-soft); }
   .key-setup-tabs { display: flex; gap: .18rem; margin-top: 1rem; padding: .2rem; overflow-x: auto; border-radius: .65rem; background: var(--surface-muted); }

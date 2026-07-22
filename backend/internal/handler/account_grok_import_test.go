@@ -71,6 +71,44 @@ func TestImportDoesNotOverrideExplicitPlatformMismatch(t *testing.T) {
 	}
 }
 
+func TestImportGrokOAuthUpdatesExistingAccountIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := appcrypto.Init("", "grok-import-idempotent-test"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := gorm.Open(sqlite.Open("file:grok-import-idempotent?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Group{}, &model.Proxy{}, &model.UpstreamAccount{}); err != nil {
+		t.Fatal(err)
+	}
+	group := model.Group{Name: "grok", Platform: model.PlatformGrok, Status: model.StatusActive}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	first := `{"accounts":[{"name":"grok-oauth","platform":"grok","type":"oauth","credentials":{"access_token":"access-old","refresh_token":"refresh-old","account_id":"grok-account-1"}}]}`
+	second := `{"accounts":[{"name":"grok-oauth-new-name","platform":"grok","type":"oauth","credentials":{"access_token":"access-new","refresh_token":"refresh-new","account_id":"grok-account-1"}}]}`
+	if result := importAccountPayload(t, db, group.ID, first); result.Imported != 1 || result.Updated != 0 {
+		t.Fatalf("first import = %#v", result)
+	}
+	if result := importAccountPayload(t, db, group.ID, second); result.Imported != 0 || result.Updated != 1 {
+		t.Fatalf("second import = %#v", result)
+	}
+
+	var accounts []model.UpstreamAccount
+	if err := db.Find(&accounts).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("accounts = %d, want 1", len(accounts))
+	}
+	if accounts[0].Name != "grok-oauth" || string(accounts[0].AccessToken) != "access-new" || string(accounts[0].RefreshToken) != "refresh-new" {
+		t.Fatalf("updated account = %#v", accounts[0])
+	}
+}
+
 type importAccountTestResult struct {
 	Imported      int `json:"imported"`
 	Updated       int `json:"updated"`
