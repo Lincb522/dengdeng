@@ -1169,6 +1169,60 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 				continue
 			}
 		}
+		if p.AuthType == model.AuthOAuth && strings.TrimSpace(p.AccountID) != "" {
+			existing, findErr := h.findOAuthImportTarget(group.ID, group.Platform, p.AccountID)
+			if findErr != nil && findErr != gorm.ErrRecordNotFound {
+				skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
+				continue
+			}
+			if existing != nil {
+				mergedExtra := existing.DecodeExtra()
+				for key, value := range p.Extra {
+					mergedExtra[key] = value
+				}
+				extra, _ = model.EncodeExtra(mergedExtra)
+				updates := map[string]any{
+					"email":          firstNonEmpty(p.Email, existing.Email),
+					"account_id":     p.AccountID,
+					"extra":          extra,
+					"status":         model.StatusActive,
+					"error_count":    0,
+					"cooldown_until": nil,
+					"last_error":     "",
+				}
+				if p.AccessToken != "" {
+					updates["access_token"] = crypto.EncryptedString(p.AccessToken)
+				}
+				if p.RefreshToken != "" {
+					updates["refresh_token"] = crypto.EncryptedString(p.RefreshToken)
+				}
+				if p.ExpiresAt != nil {
+					updates["expires_at"] = p.ExpiresAt
+				}
+				if baseURL := firstNonEmpty(p.BaseURL, req.BaseURL); baseURL != "" {
+					updates["base_url"] = baseURL
+				}
+				if req.ProxyID > 0 || existing.ProxyID != 0 {
+					updates["proxy_id"] = req.ProxyID
+				}
+				if p.Priority != nil {
+					updates["priority"] = *p.Priority
+				} else if req.Priority != nil {
+					updates["priority"] = *req.Priority
+				}
+				if p.Concurrency != nil {
+					updates["concurrency"] = *p.Concurrency
+				} else if req.Concurrency != nil {
+					updates["concurrency"] = *req.Concurrency
+				}
+				if err := h.db.Model(existing).Updates(updates).Error; err != nil {
+					skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
+					continue
+				}
+				updated = append(updated, existing.Name)
+				continue
+			}
+		}
 		maxDisplayOrder++
 		acc := model.UpstreamAccount{
 			GroupID: group.ID, ProxyID: req.ProxyID, Name: p.Name, Platform: group.Platform,
@@ -1213,6 +1267,22 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		"updated_names":  updated,
 		"skipped_detail": skipped,
 	})
+}
+
+func (h *AdminHandler) findOAuthImportTarget(groupID int64, platform, accountID string) (*model.UpstreamAccount, error) {
+	accountID = strings.TrimSpace(accountID)
+	if accountID == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var existing model.UpstreamAccount
+	err := h.db.Where(
+		"group_id = ? AND platform = ? AND auth_type = ? AND account_id = ?",
+		groupID, platform, model.AuthOAuth, accountID,
+	).Order("id ASC").First(&existing).Error
+	if err != nil {
+		return nil, err
+	}
+	return &existing, nil
 }
 
 // findAgentIdentityImportTarget mirrors Sub2API's Team-aware identity match:

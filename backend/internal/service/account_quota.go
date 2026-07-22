@@ -1138,6 +1138,13 @@ func (s *AccountQuotaService) refreshGrok(ctx context.Context, account *model.Up
 				window.ResetAt = parseQuotaTime(config.CurrentPeriod.End)
 			}
 			snapshot.Windows = append(snapshot.Windows, window)
+		} else if config.CurrentPeriod != nil {
+			// Free and unified-billing accounts can return the weekly period
+			// without creditUsagePercent. Preserve the provider's reset time
+			// instead of treating the otherwise valid response as unknown.
+			snapshot.Windows = append(snapshot.Windows, model.AccountQuotaWindow{
+				Key: "weekly", Label: "周额度", Unit: "%", ResetAt: parseQuotaTime(config.CurrentPeriod.End),
+			})
 		}
 		for _, product := range config.ProductUsage {
 			if product.UsagePercent == nil || strings.TrimSpace(product.Product) == "" {
@@ -1160,11 +1167,13 @@ func (s *AccountQuotaService) refreshGrok(ctx context.Context, account *model.Up
 				limit := *limitCents / 100
 				window.Limit = &limit
 			}
-			if limitCents != nil && usedCents != nil && *limitCents > 0 {
-				used := clampPercent(*usedCents / *limitCents * 100)
+			if limitCents != nil && usedCents != nil {
 				remaining := math.Max(0, (*limitCents-*usedCents)/100)
-				window.UsedPercent = &used
 				window.Remaining = &remaining
+				if *limitCents > 0 {
+					used := clampPercent(*usedCents / *limitCents * 100)
+					window.UsedPercent = &used
+				}
 			}
 			snapshot.Windows = append(snapshot.Windows, window)
 			if snapshot.PlanType == "" && limitCents != nil {
@@ -1550,6 +1559,17 @@ func parseQuotaTime(raw string) *time.Time {
 }
 
 func rawFloat(raw json.RawMessage) *float64 {
+	if len(raw) == 0 {
+		return nil
+	}
+	// Grok billing represents currency values as {"val": 123}; older
+	// responses and compatible relays may still return a bare number/string.
+	var wrapped struct {
+		Val json.RawMessage `json:"val"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err == nil && len(wrapped.Val) > 0 {
+		return rawFloat(wrapped.Val)
+	}
 	text := strings.Trim(strings.TrimSpace(string(raw)), "\"")
 	if text == "" || text == "null" {
 		return nil

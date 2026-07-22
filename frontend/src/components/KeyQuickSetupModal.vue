@@ -35,7 +35,13 @@ const savingEffort = ref(false)
 const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
 const geminiBase = computed(() => `${origin.value}/v1beta`)
-const configuredApiKey = computed(() => workingApiKey.value.trim())
+function validDengDengApiKey(value: string) {
+  const normalized = value.trim()
+  return /^dd-[A-Za-z0-9]{20,}$/.test(normalized) ? normalized : ''
+}
+
+const configuredApiKey = computed(() => validDengDengApiKey(workingApiKey.value))
+const invalidApiKeyInput = computed(() => !!workingApiKey.value.trim() && !configuredApiKey.value)
 const isOpenAICompatible = computed(() => activePlatform.value === 'openai' || activePlatform.value === 'grok')
 const availablePlatforms = computed(() => {
   const values = props.platforms?.length ? props.platforms : [props.platform || 'openai']
@@ -87,8 +93,9 @@ function rememberApiKey(value: string) {
   const storageKey = quickSetupStorageKey()
   if (!storageKey) return
   try {
-    if (value.trim()) sessionStorage.setItem(storageKey, value.trim())
-    else sessionStorage.removeItem(storageKey)
+    const normalized = validDengDengApiKey(value)
+    if (normalized) sessionStorage.setItem(storageKey, normalized)
+    else if (!value.trim()) sessionStorage.removeItem(storageKey)
   } catch {
     // A restricted browser session can still use the pasted key in memory.
   }
@@ -195,8 +202,8 @@ async function loadModels() {
   if (!apiKey) {
     models.value = []
     selectedModel.value = ''
-    modelsState.value = 'idle'
-    modelsError.value = ''
+    modelsState.value = invalidApiKeyInput.value ? 'error' : 'idle'
+    modelsError.value = invalidApiKeyInput.value ? '请输入完整的 dd- 密钥；浏览器可能自动填入了登录密码' : ''
     return
   }
   modelsState.value = 'loading'
@@ -403,11 +410,12 @@ function openCCSwitch() {
         <div class="key-setup-head"><div><p>密钥快速配置</p><h3>{{ keyName }}</h3></div><button class="btn-ghost !px-2 !py-1 text-xs" @click="emit('close')">关闭</button></div>
 
         <div class="key-setup-summary">
-          <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
+          <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
           <div class="key-setup-secret"><span>接口地址</span><code>{{ activeEndpoint }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
 			<div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><span class="text-[10px] text-slate-500">{{ availablePlatforms.length }} 个</span></div>
 			<div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" aria-label="思考强度 Effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
         </div>
+		<p v-if="invalidApiKeyInput" class="key-setup-status is-error">输入内容不是有效的 dd- 密钥；浏览器可能自动填入了登录密码。</p>
 
         <div v-if="configuredApiKey" class="key-setup-model-row">
           <label><span>模型</span><select v-model="selectedModel" class="input" :disabled="modelsState === 'loading' || !models.length"><option v-if="!models.length" value="">{{ modelsState === 'loading' ? '正在读取模型…' : '暂无模型' }}</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>

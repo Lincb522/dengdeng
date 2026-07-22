@@ -221,6 +221,47 @@ func TestFetchGrokBillingUsesVersionedCLIPathsAndHeaders(t *testing.T) {
 	}
 }
 
+func TestRefreshGrokSupportsFreeUnifiedBillingPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("format") == "credits" {
+			_, _ = w.Write([]byte(`{"config":{"currentPeriod":{"type":"WEEKLY","start":"2026-07-20T00:00:00Z","end":"2026-07-27T00:00:00Z"},"isUnifiedBillingUser":true,"onDemandCap":{"val":0},"onDemandUsed":{"val":0},"prepaidBalance":{"val":0}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"config":{"monthlyLimit":{"val":0},"used":{"val":0},"billingPeriodStart":"2026-07-01T00:00:00Z","billingPeriodEnd":"2026-08-01T00:00:00Z"}}`))
+	}))
+	defer server.Close()
+	previousURL := grokCLIBillingBaseURL
+	grokCLIBillingBaseURL = server.URL + "/v1"
+	defer func() { grokCLIBillingBaseURL = previousURL }()
+
+	quota := NewAccountQuotaService(nil, nil, nil, server.Client())
+	snapshot := model.AccountQuotaSnapshot{}
+	account := &model.UpstreamAccount{Platform: model.PlatformGrok, AuthType: model.AuthOAuth}
+	if err := quota.refreshGrok(context.Background(), account, "grok-access", &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != "ready" || len(snapshot.Windows) != 2 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	weekly, monthly := snapshot.Windows[0], snapshot.Windows[1]
+	if weekly.Key != "weekly" || weekly.UsedPercent != nil || weekly.ResetAt == nil || weekly.ResetAt.Format(time.RFC3339) != "2026-07-27T00:00:00Z" {
+		t.Fatalf("weekly window = %#v", weekly)
+	}
+	if monthly.Key != "monthly" || monthly.Limit == nil || *monthly.Limit != 0 || monthly.Remaining == nil || *monthly.Remaining != 0 || monthly.UsedPercent != nil {
+		t.Fatalf("monthly window = %#v", monthly)
+	}
+}
+
+func TestRawFloatSupportsGrokMoneyWrapper(t *testing.T) {
+	for _, raw := range []json.RawMessage{json.RawMessage(`{"val":15000}`), json.RawMessage(`{"val":"15000"}`), json.RawMessage(`15000`)} {
+		value := rawFloat(raw)
+		if value == nil || *value != 15000 {
+			t.Fatalf("rawFloat(%s) = %v", raw, value)
+		}
+	}
+}
+
 func TestFriendlyQuotaErrorDistinguishesGrokPathFailure(t *testing.T) {
 	got := friendlyQuotaError(errors.New("Grok billing: upstream status 404: not found"))
 	if got != "Grok 额度接口地址无效，请检查上游 Base URL" {

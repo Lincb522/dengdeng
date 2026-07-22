@@ -8,6 +8,9 @@
 
 - 通用 OAuth / API Key JSON 未声明平台时，改为采用管理员明确选择的目标分组，不再一律误判成 OpenAI。
 - Grok 额度查询修正为 CLI Proxy 的 `/v1/billing` 与 `/v1/billing?format=credits`，不再请求不存在的根路径 `/billing`。
+- Grok 免费/统一账单账号现在能识别 `{"val": ...}` 金额结构；上游未返回用量百分比时，仍会显示周重置时间与真实月额度。
+- OAuth 账号导入按目标分组和上游 `account_id` 幂等更新；重复点击导入只刷新凭证，不再新建重复账号。
+- 密钥快速配置阻止移动端密码管理器把登录密码填入 API Key 输入框；非 `dd-` 密钥不再发起模型检测或覆盖浏览器临时密钥。
 - Grok 导入新增 `auth.x.ai`、`api.x.ai`、Grok CLI Base URL、Scope 与订阅字段识别，并保留订阅层级、权益状态及 Team 元数据。
 - 明确声明平台的文件仍执行严格分组校验，不会把真正的 OpenAI 凭证写入 Grok 分组。
 - 导入弹窗不再把 `tokens` 结构直接等同于 OpenAI；全量跳过时显示真实原因，不再先提示“导入完成”。
