@@ -53,6 +53,7 @@ type Gateway struct {
 	runtime      *service.RuntimeMetrics
 	policy       *service.RuntimePolicyService
 	imageStorage *service.ImageStorageService
+	quota        *service.AccountQuotaService
 	concurrency  *service.ClientConcurrencyLimiter
 	client       *http.Client
 	proxyClients sync.Map // map[proxy-id:updated-at]*http.Client
@@ -74,6 +75,29 @@ func (g *Gateway) SetRuntimePolicy(policy *service.RuntimePolicyService) {
 
 func (g *Gateway) SetImageStorageService(storage *service.ImageStorageService) {
 	g.imageStorage = storage
+}
+
+// SetAccountQuotaService lets the relay persist the rate-limit allowance
+// headers returned by real upstream requests. Model-list probes do not always
+// carry these headers, while inference responses usually contain the most
+// current key-level request and token windows.
+func (g *Gateway) SetAccountQuotaService(quota *service.AccountQuotaService) {
+	g.quota = quota
+}
+
+func (g *Gateway) observeAccountQuota(account *model.UpstreamAccount, headers http.Header) {
+	if g == nil || g.quota == nil || account == nil || account.ID <= 0 || account.AuthType != model.AuthAPIKey {
+		return
+	}
+	accountCopy := *account
+	headerCopy := headers.Clone()
+	observedAt := time.Now().UTC()
+	// Quota persistence must never delay the first response byte.
+	go func() {
+		if err := g.quota.ObserveRateLimitHeaders(&accountCopy, headerCopy, observedAt); err != nil {
+			log.Printf("[gateway] account %d quota headers: %v", accountCopy.ID, err)
+		}
+	}()
 }
 
 func (g *Gateway) relayAttempts() int {
@@ -694,6 +718,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			}
 			continue
 		}
+		g.observeAccountQuota(acc, resp.Header)
 
 		if resp.StatusCode >= 400 {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 	"time"
@@ -145,22 +146,43 @@ func parseCPA(raw []byte) ([]Account, error) {
 }
 
 func decodeEntries(raw []byte) ([]map[string]any, error) {
-	trimmed := strings.TrimSpace(string(raw))
-	if strings.HasPrefix(trimmed, "[") {
-		var entries []map[string]any
-		if err := json.Unmarshal(raw, &entries); err != nil {
-			return nil, fmt.Errorf("parse auth-file array: %w", err)
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.UseNumber()
+	entries := make([]map[string]any, 0, 1)
+	var appendValue func(any) error
+	appendValue = func(value any) error {
+		switch typed := value.(type) {
+		case map[string]any:
+			entries = append(entries, typed)
+			return nil
+		case []any:
+			for _, item := range typed {
+				if err := appendValue(item); err != nil {
+					return err
+				}
+			}
+			return nil
+		default:
+			return fmt.Errorf("auth-file entry must be a JSON object, got %T", value)
 		}
-		return entries, nil
 	}
-	var entry map[string]any
-	if err := json.Unmarshal(raw, &entry); err != nil {
-		return nil, fmt.Errorf("parse auth-file json: %w", err)
+	for {
+		var value any
+		err := decoder.Decode(&value)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse auth-file json: %w", err)
+		}
+		if err := appendValue(value); err != nil {
+			return nil, err
+		}
 	}
-	if entry == nil {
+	if len(entries) == 0 {
 		return nil, errors.New("no accounts in auth payload")
 	}
-	return []map[string]any{entry}, nil
+	return entries, nil
 }
 
 func parseEntry(entry map[string]any, platformHint string) Account {
@@ -211,14 +233,23 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 		if fedramp, ok := boolFrom(values, "chatgpt_account_is_fedramp", "chatgptAccountIsFedramp"); ok {
 			extra["chatgpt_account_is_fedramp"] = fedramp
 		}
+		// The Agent Identity record is the complete durable credential. Codex may
+		// keep its original OAuth tokens beside the record, but Sub2API's import
+		// path intentionally does not copy those bootstrap credentials.
+		apiKey = ""
+		accessToken = ""
+		refreshToken = ""
+		idToken = ""
 	}
-	putIf(extra, "id_token", idToken)
-	putIf(extra, "session_token", get("session_token", "sessionToken"))
-	putIf(extra, "client_id", get("client_id", "clientId"))
-	putIf(extra, "client_secret", get("client_secret", "clientSecret"))
-	putIf(extra, "scope", get("scope", "scopes"))
-	putIf(extra, "project_id", get("project_id", "projectId"))
-	putIf(extra, "oauth_type", get("oauth_type", "oauthType"))
+	if !isAgentIdentity {
+		putIf(extra, "id_token", idToken)
+		putIf(extra, "session_token", get("session_token", "sessionToken"))
+		putIf(extra, "client_id", get("client_id", "clientId"))
+		putIf(extra, "client_secret", get("client_secret", "clientSecret"))
+		putIf(extra, "scope", get("scope", "scopes"))
+		putIf(extra, "project_id", get("project_id", "projectId"))
+		putIf(extra, "oauth_type", get("oauth_type", "oauthType"))
+	}
 	putIf(extra, "plan_type", get("plan_type", "planType", "subscription_type", "subscriptionType"))
 	if subscriptionExpiry := firstTime(getAny("subscription_expires_at", "subscriptionExpiresAt", "subscription_active_until", "subscriptionActiveUntil")); subscriptionExpiry != nil {
 		extra["subscription_expires_at"] = subscriptionExpiry.UTC().Format(time.RFC3339)

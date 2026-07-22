@@ -230,6 +230,10 @@ type UpstreamAccount struct {
 	Name     string `gorm:"size:64;not null" json:"name"`
 	Platform string `gorm:"size:16;not null" json:"platform"`
 	BaseURL  string `gorm:"size:512" json:"base_url"`
+	// QuotaURL optionally selects a non-standard third-party relay usage
+	// endpoint. It must be a path or a same-origin URL so the upstream API key
+	// can never be sent to an unrelated host.
+	QuotaURL string `gorm:"size:512" json:"quota_url"`
 	// AuthType is api_key (default), oauth, or agent_identity.
 	AuthType string `gorm:"size:16;not null;default:api_key" json:"auth_type"`
 	// APIKey holds the provider key for AuthType == api_key (encrypted).

@@ -34,13 +34,11 @@ const form = ref({
   group_id: 0,
   name: '',
   base_url: '',
+	quota_url: '',
   auth_type: 'api_key' as 'api_key' | 'oauth' | 'agent_identity',
   api_key: '',
   access_token: '',
   refresh_token: '',
-	web_session: '',
-	chatgpt_user_id: '',
-	plan_type: '',
   account_id: '',
   email: '',
   proxy_id: 0,
@@ -48,8 +46,6 @@ const form = ref({
 	concurrency: 0,
   status: 'active',
 })
-type AgentIdentityInputMode = 'auth_json' | 'session'
-const agentIdentityInputMode = ref<AgentIdentityInputMode>('auth_json')
 const agentIdentityJSON = ref('')
 
 type AccountPage = { items: UpstreamAccount[]; total: number; page: number; size: number }
@@ -138,11 +134,10 @@ function openCreate() {
   editing.value = null
   form.value = {
     group_id: groups.value[0]?.id ?? 0,
-    name: '', base_url: '', auth_type: 'api_key',
-    api_key: '', access_token: '', refresh_token: '', web_session: '', account_id: '', chatgpt_user_id: '', email: '', plan_type: '', proxy_id: 0,
+    name: '', base_url: '', quota_url: '', auth_type: 'api_key',
+    api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
   }
-	agentIdentityInputMode.value = 'auth_json'
 	agentIdentityJSON.value = ''
   showForm.value = true
 }
@@ -150,8 +145,8 @@ function openCreate() {
 function openEdit(a: UpstreamAccount) {
   editing.value = a
   form.value = {
-    group_id: a.group_id, name: a.name, base_url: a.base_url, auth_type: a.auth_type,
-    api_key: '', access_token: '', refresh_token: '', web_session: '', account_id: a.account_id, chatgpt_user_id: '', email: a.email, plan_type: '', proxy_id: a.proxy_id || 0,
+    group_id: a.group_id, name: a.name, base_url: a.base_url, quota_url: a.quota_url || '', auth_type: a.auth_type,
+    api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
   showForm.value = true
@@ -159,30 +154,40 @@ function openEdit(a: UpstreamAccount) {
 
 const canSave = computed(() => {
   if (editing.value) return true
-	if (form.value.auth_type === 'agent_identity' && agentIdentityInputMode.value === 'auth_json') {
-		return !!agentIdentityJSON.value.trim()
-	}
+	if (form.value.auth_type === 'agent_identity') return !!agentIdentityJSON.value.trim()
   if (!form.value.name) return false
   if (form.value.auth_type === 'api_key') return !!form.value.api_key
-  if (form.value.auth_type === 'agent_identity') return !!(form.value.access_token || form.value.web_session)
   return !!(form.value.access_token || form.value.refresh_token)
 })
 
-async function save() {
-	if (!editing.value && form.value.auth_type === 'agent_identity' && agentIdentityInputMode.value === 'auth_json') {
-		let parsed: Record<string, unknown>
+function isAgentIdentityImportContent(content: string): boolean {
+	const isAgentIdentityValue = (value: unknown): boolean => {
+		if (Array.isArray(value)) return value.length > 0 && value.every(isAgentIdentityValue)
+		if (!value || typeof value !== 'object') return false
+		const record = value as Record<string, unknown>
+		const authMode = String(record.auth_mode ?? record.authMode ?? '').toLowerCase()
+		const nested = record.agent_identity ?? record.agentIdentity
+		if (nested && typeof nested === 'object' && !Array.isArray(nested)) return true
+		return authMode === 'agentidentity'
+	}
+
+	try {
+		return isAgentIdentityValue(JSON.parse(content) as unknown)
+	} catch {
+		const lines = content.split('\n').map((line) => line.trim()).filter(Boolean)
+		if (!lines.length) return false
 		try {
-			const value = JSON.parse(agentIdentityJSON.value) as unknown
-			if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid object')
-			parsed = value as Record<string, unknown>
+			return lines.every((line) => isAgentIdentityValue(JSON.parse(line) as unknown))
 		} catch {
-			toast.show('Agent Identity auth.json 不是有效的 JSON', 'error')
-			return
+			return false
 		}
-		const identity = parsed.agent_identity ?? parsed.agentIdentity ?? parsed
-		const authMode = String(parsed.auth_mode ?? parsed.authMode ?? '').toLowerCase()
-		if (!identity || typeof identity !== 'object' || (authMode && authMode !== 'agentidentity')) {
-			toast.show('请选择 auth_mode=agentIdentity 的 Codex auth.json', 'error')
+	}
+}
+
+async function save() {
+	if (!editing.value && form.value.auth_type === 'agent_identity') {
+		if (!isAgentIdentityImportContent(agentIdentityJSON.value.trim())) {
+			toast.show('请输入包含 agent_identity 的 Codex auth.json', 'error')
 			return
 		}
 		const result = await withToast(
@@ -199,7 +204,7 @@ async function save() {
 			}),
 			'Agent Identity 已导入',
 		)
-		if (result?.imported) {
+		if (result && (result.imported + (result.updated || 0) > 0)) {
 			showForm.value = false
 			await loadAccounts()
 			return
@@ -210,6 +215,7 @@ async function save() {
   const body: Record<string, unknown> = {
     name: form.value.name,
     base_url: form.value.base_url,
+		quota_url: form.value.auth_type === 'api_key' ? form.value.quota_url : '',
     auth_type: form.value.auth_type,
     priority: Number(form.value.priority),
 		concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
@@ -218,22 +224,16 @@ async function save() {
   }
   if (form.value.auth_type === 'api_key') {
     if (form.value.api_key) body.api_key = form.value.api_key
-  } else if (form.value.auth_type === 'oauth') {
+	} else if (form.value.auth_type === 'oauth') {
     if (form.value.access_token) body.access_token = form.value.access_token
     if (form.value.refresh_token) body.refresh_token = form.value.refresh_token
     if (form.value.account_id) body.account_id = form.value.account_id
     if (form.value.email) body.email = form.value.email
-	} else {
-		if (form.value.access_token) body.access_token = form.value.access_token
-		if (form.value.web_session) body.web_session = form.value.web_session
   }
   let ok: unknown = null
   if (editing.value) {
     ok = await withToast(() => api.put(`/api/admin/accounts/${editing.value!.id}`, body), '已保存')
-  } else if (form.value.auth_type === 'agent_identity') {
-		body.group_id = form.value.group_id
-		ok = await withToast(() => api.post('/api/admin/accounts/agent-identity', body), 'Agent Identity 已注册')
-	} else {
+  } else {
     body.group_id = form.value.group_id
     ok = await withToast(() => api.post('/api/admin/accounts', body), '账号已添加')
   }
@@ -324,8 +324,10 @@ type ImportPlatform = Group['platform']
 const detectedImportPlatforms = ref<ImportPlatform[]>([])
 type ImportResult = {
   imported: number
+	updated?: number
   skipped: number
   imported_names: string[]
+	updated_names?: string[]
   skipped_detail: { name: string; reason: string }[]
 }
 const impResult = ref<ImportResult | null>(null)
@@ -354,7 +356,7 @@ async function readImportFile(event: Event) {
   }
   try {
     const data = await file.text()
-    JSON.parse(data)
+		if (!isValidImportJSON(data)) throw new Error('invalid JSON')
     imp.value.data = data
     importFileName.value = file.name
     impResult.value = null
@@ -366,6 +368,22 @@ async function readImportFile(event: Event) {
     // Allow selecting the same corrected file again.
     input.value = ''
   }
+}
+
+function isValidImportJSON(raw: string): boolean {
+	try {
+		JSON.parse(raw)
+		return true
+	} catch {
+		const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean)
+		if (!lines.length) return false
+		try {
+			lines.forEach((line) => JSON.parse(line))
+			return true
+		} catch {
+			return false
+		}
+	}
 }
 
 function clearImportFile() {
@@ -399,7 +417,12 @@ function normalizeImportPlatform(value: unknown): ImportPlatform | null {
 
 function detectImportPlatforms(raw: string): ImportPlatform[] {
   try {
-    const root = JSON.parse(raw) as unknown
+		let roots: unknown[]
+		try {
+			roots = [JSON.parse(raw) as unknown]
+		} catch {
+			roots = raw.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => JSON.parse(line) as unknown)
+		}
     const found = new Set<ImportPlatform>()
     const inspect = (entry: unknown) => {
       if (!entry || typeof entry !== 'object') return
@@ -410,14 +433,17 @@ function detectImportPlatforms(raw: string): ImportPlatform[] {
       // Native Codex auth.json has `tokens` / `auth_mode` but no platform.
       if (record.tokens || record.agent_identity || record.agentIdentity || record.auth_mode === 'chatgpt' || record.authMode === 'chatgpt' || record.auth_mode === 'agentIdentity' || record.authMode === 'agentIdentity') found.add('openai')
     }
-    if (Array.isArray(root)) {
-      root.forEach(inspect)
-    } else if (root && typeof root === 'object') {
-      const record = root as Record<string, unknown>
-      const accounts = record.accounts ?? (record.data as Record<string, unknown> | undefined)?.accounts
-      if (Array.isArray(accounts)) accounts.forEach(inspect)
-      else inspect(root)
-    }
+		const inspectRoot = (root: unknown) => {
+			if (Array.isArray(root)) {
+				root.forEach(inspect)
+			} else if (root && typeof root === 'object') {
+				const record = root as Record<string, unknown>
+				const accounts = record.accounts ?? (record.data as Record<string, unknown> | undefined)?.accounts
+				if (Array.isArray(accounts)) accounts.forEach(inspect)
+				else inspect(root)
+			}
+		}
+		roots.forEach(inspectRoot)
     return [...found]
   } catch {
     return []
@@ -520,6 +546,8 @@ function quotaSourceLabel(snapshot?: AccountQuotaSnapshot) {
 		case 'codex_subscription': return 'Codex 订阅'
 		case 'claude_subscription': return 'Claude 订阅'
 		case 'grok_billing': return 'Grok 订阅'
+		case 'api_key_usage': return 'API Key 额度'
+		case 'api_key_probe': return 'API Key 状态'
 		case 'rate_limit_headers': return '上游限额'
 		default: return `${PLATFORM_LABELS[snapshot.platform] || '上游'} 用量`
 	}
@@ -541,6 +569,7 @@ function quotaWindowText(window: AccountQuotaWindow) {
 function quotaUnit(unit?: string) {
 	if (unit === 'requests') return '次'
 	if (unit === 'tokens') return 'Tokens'
+	if (unit === 'quota' || unit === 'upstream') return '上游额度单位'
 	return unit || ''
 }
 
@@ -892,7 +921,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               </div>
             </div>
             <div>
-              <label class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' && agentIdentityInputMode === 'auth_json' ? '（留空使用文件信息）' : '' }}</label>
+              <label class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</label>
               <input v-model="form.name" class="input" placeholder="例如:key-01 或邮箱" />
             </div>
             <div>
@@ -913,6 +942,11 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 <label class="label">API Key {{ editing ? '(留空保持不变)' : '' }}</label>
                 <input v-model="form.api_key" class="input font-mono" placeholder="sk-..." />
               </div>
+			  <div>
+				<label class="label">额度查询地址（可选）</label>
+				<input v-model="form.quota_url" class="input font-mono text-xs" placeholder="留空自动识别，或填写 /v1/usage" />
+				<p class="mt-1 text-xs text-slate-500">支持同站路径或与 Base URL 同域的完整地址。</p>
+			  </div>
             </template>
             <template v-else-if="form.auth_type === 'oauth'">
               <div v-if="!editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
@@ -953,35 +987,15 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 			<template v-else>
 				<div v-if="editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3 text-sm text-slate-300">该账号使用动态 AgentAssertion。编辑时不会展示或覆盖私钥。</div>
 				<template v-else>
-					<div class="agent-identity-methods" role="group" aria-label="Agent Identity 添加方式">
-						<button type="button" :class="{ 'is-active': agentIdentityInputMode === 'auth_json' }" @click="agentIdentityInputMode = 'auth_json'">导入 auth.json</button>
-						<button type="button" :class="{ 'is-active': agentIdentityInputMode === 'session' }" @click="agentIdentityInputMode = 'session'">从登录会话生成</button>
+					<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
+						<p class="text-sm font-medium text-slate-200">Codex Agent Identity auth.json</p>
+						<p class="mt-1 text-xs leading-5 text-slate-500">直接导入 Codex 已生成的身份文件，不在站内录入 Access Token 或 Web Session。</p>
 					</div>
-					<template v-if="agentIdentityInputMode === 'auth_json'">
-						<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
-							<p class="text-sm font-medium text-slate-200">Codex Agent Identity auth.json</p>
-							<p class="mt-1 text-xs leading-5 text-slate-500">导入 runtime、Ed25519 私钥和账户身份；不需要 OAuth access token 或 refresh token。</p>
-						</div>
-						<div>
-							<label class="label">Agent Identity auth.json</label>
-							<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
-							<p class="mt-1 text-xs text-slate-500">缺少 task_id 时，系统会在首次请求前自动注册新的任务身份。</p>
-						</div>
-					</template>
-					<template v-else>
-						<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
-							<p class="text-sm font-medium text-slate-200">从已登录会话生成</p>
-							<p class="mt-1 text-xs leading-5 text-slate-500">系统从 Token 自动读取 Account ID、User ID、邮箱和套餐，再注册 Ed25519 身份；引导凭据不会保存。</p>
-						</div>
-						<div>
-							<label class="label">Access Token（二选一）</label>
-							<textarea v-model="form.access_token" rows="2" class="input font-mono text-xs" placeholder="eyJ..."></textarea>
-						</div>
-						<div>
-							<label class="label">Web Session（二选一）</label>
-							<textarea v-model="form.web_session" rows="2" class="input font-mono text-xs" placeholder="Session Token 或完整 Cookie"></textarea>
-						</div>
-					</template>
+					<div>
+						<label class="label">Agent Identity auth.json</label>
+						<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"chatgpt","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
+						<p class="mt-1 text-xs text-slate-500">支持单个对象、JSON 数组和每行一个对象；缺少 task_id 时会在首次请求前自动注册。</p>
+					</div>
 				</template>
 			</template>
 
@@ -1093,7 +1107,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             </label>
 
             <div v-if="impResult" class="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
-              <div class="text-slate-200">成功导入 <span class="text-signal-green font-semibold">{{ impResult.imported }}</span> 个,跳过 <span class="text-signal-red font-semibold">{{ impResult.skipped }}</span> 个。</div>
+              <div class="text-slate-200">新增 <span class="text-signal-green font-semibold">{{ impResult.imported }}</span> 个，更新 <span class="text-signal-cyan font-semibold">{{ impResult.updated || 0 }}</span> 个，跳过 <span class="text-signal-red font-semibold">{{ impResult.skipped }}</span> 个。</div>
               <ul v-if="impResult.skipped_detail.length" class="mt-2 space-y-1 text-xs text-slate-500">
                 <li v-for="(s, i) in impResult.skipped_detail" :key="i">跳过 {{ s.name || '(未命名)' }}:{{ s.reason }}</li>
               </ul>

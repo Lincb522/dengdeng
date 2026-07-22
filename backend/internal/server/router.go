@@ -67,6 +67,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	gw := gateway.New(db, scheduler, billing, rates, oauthManager, runtimeMetrics, providerClient)
 	gw.SetRuntimePolicy(runtimePolicy)
 	gw.SetImageStorageService(imageStorage)
+	gw.SetAccountQuotaService(accountQuota)
 
 	authH := handler.NewAuthHandler(db, cfg)
 	userH := handler.NewUserHandler(db, cfg)
@@ -167,7 +168,6 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.DELETE("/groups/:id", adminH.DeleteGroup)
 			admin.GET("/accounts", adminH.ListAccounts)
 			admin.POST("/accounts", adminH.CreateAccount)
-			admin.POST("/accounts/agent-identity", adminH.RegisterAgentIdentity)
 			admin.POST("/accounts/import", adminH.ImportAccounts)
 			admin.PUT("/accounts/order", adminH.ReorderAccounts)
 			admin.POST("/accounts/:id/quota/refresh", adminH.RefreshAccountQuota)
