@@ -32,7 +32,10 @@ var (
 	openAISubscriptionsURL = "https://chatgpt.com/backend-api/subscriptions"
 	openAIAccountsCheckURL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
 	claudeOAuthUsageURL    = "https://api.anthropic.com/api/oauth/usage"
-	grokCLIBillingBaseURL  = "https://cli-chat-proxy.grok.com"
+	// Grok billing lives below the CLI proxy's versioned API root. Keeping /v1
+	// here matches the official CLI and prevents /billing from returning an
+	// HTML 404 that can be mistaken for an invalid OAuth credential.
+	grokCLIBillingBaseURL = "https://cli-chat-proxy.grok.com/v1"
 )
 
 // AccountQuotaService normalizes provider subscription windows, passive
@@ -1608,6 +1611,8 @@ func friendlyQuotaError(err error) string {
 		return "额度查询地址格式无效，请填写同站路径或同域完整地址"
 	case strings.Contains(message, "custom api key quota endpoint returned status"):
 		return "第三方中转拒绝了额度查询，请检查 API Key 与查询地址"
+	case strings.Contains(message, "grok billing") && strings.Contains(message, "status 404"):
+		return "Grok 额度接口地址无效，请检查上游 Base URL"
 	case strings.Contains(message, "api key is inactive"):
 		return "上游返回该 API Key 已停用"
 	case strings.Contains(message, "api key credential probe returned status 401"), strings.Contains(message, "api key credential probe returned status 403"):
