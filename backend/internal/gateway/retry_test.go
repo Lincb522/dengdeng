@@ -25,6 +25,7 @@ func TestRetryableUpstreamIncludesAccountSpecificPayloadFailures(t *testing.T) {
 		want   bool
 	}{
 		{http.StatusRequestEntityTooLarge, `<html>413 Request Entity Too Large</html>`, true},
+		{http.StatusPaymentRequired, `{"code":"personal-team-blocked:spending-limit"}`, true},
 		{http.StatusMethodNotAllowed, `method not allowed`, true},
 		{http.StatusBadRequest, `{"error":{"message":"The model is not supported when using Codex with a ChatGPT account"}}`, true},
 		{http.StatusUnprocessableEntity, `{"error":{"code":"model_not_found"}}`, true},

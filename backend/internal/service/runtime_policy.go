@@ -88,7 +88,7 @@ func (p GatewayRuntimePolicy) EffortMultiplier(effort string) float64 {
 func (p GatewayRuntimePolicy) CooldownFor(statusCode int) time.Duration {
 	seconds := p.NetworkFailureCooldownSeconds
 	switch {
-	case statusCode == 401 || statusCode == 403:
+	case statusCode == 401 || statusCode == 402 || statusCode == 403:
 		seconds = p.UnauthorizedCooldownSeconds
 	case statusCode == 429:
 		seconds = p.RateLimitCooldownSeconds

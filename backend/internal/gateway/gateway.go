@@ -867,6 +867,7 @@ func failInsufficientQuota(c *gin.Context, message string) {
 func retryableUpstream(status int, body []byte) bool {
 	switch {
 	case status == http.StatusUnauthorized,
+		status == http.StatusPaymentRequired,
 		status == http.StatusForbidden,
 		status == http.StatusNotFound,
 		status == http.StatusMethodNotAllowed,
