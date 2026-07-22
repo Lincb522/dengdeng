@@ -6,12 +6,23 @@
 
 ### Agent Identity 与 OpenAI 账号
 
-- 支持导入 Sub2API / Codex `auth_mode=agentIdentity` 凭证，并可用短期 Access Token 或已登录 Web Session 注册官方 Ed25519 Agent Identity。注册完成后不保存 OAuth Token。
-- 添加账号界面将“导入 Agent Identity auth.json”和“从登录会话生成”拆为两条独立流程；默认导入身份文件，会话生成所需的 Account ID、User ID、邮箱和套餐全部从 Token 自动读取，不能再被表单误覆盖。
-- 单个身份文件导入可同时应用账号名称、独立代理、优先级与并发上限；缺少 `task_id` 时仍由首次请求自动补注册。
+- Agent Identity 按最新 Sub2API 收敛为 Codex `auth.json` 导入，不再在管理端接收 Access Token 或 Web Session；导入后只保留 Runtime、Ed25519 私钥和账户身份。
+- 同时兼容 `auth_mode=agentIdentity` 和 Codex 托管模式生成的 `auth_mode=chatgpt + agent_identity`，并支持单对象、JSON 数组和 JSONL 批量导入。
+- Agent Identity 按 ChatGPT Account ID 与 User ID 去重：同一 Team 成员更新现有 Runtime，不同 Team 或成员独立保存；单个文件仍可应用账号名称、独立代理、优先级与并发上限。
+- 缺少 `task_id` 时由首次请求自动补注册；导入文件中并存的 OAuth Token、Refresh Token 和 ID Token 不会写入数据库。
 - 导入时忽略 Agent Identity JSON 中残留的 OAuth `expires_at`，不会再把仍可签名的账号误判为过期并跳过。
 - OpenAI Responses、Chat Completions、生图和账号额度查询统一使用动态 `AgentAssertion`；`task_id` 失效时自动重建一次并加密回写。
 - 账号健康检查将 Agent Identity 视为订阅通道，不再错误使用 API Key 的 `/v1/models` 探针。
+
+### 全凭证上游额度
+
+- OAuth 与 Agent Identity 继续读取上游订阅窗口；API Key 不再只显示本站记录，会直接查询第三方中转站的余额、密钥额度与订阅窗口。
+- 自动识别 DengDeng / Sub2API `/v1/usage`、New API `/api/usage/token`、One API dashboard billing 和 credit grants 返回结构，兼容驼峰、下划线及中转原生额度单位。
+- 上游账号可单独填写同域“额度查询地址”，用于接入非标准第三方中转；同源校验会阻止 API Key 被发送到其他域名。
+- OpenAI、Anthropic、Gemini、Grok API Key 均支持主动凭证探测；上游不开放余额时明确显示密钥可用状态，不再伪造现金余额。
+- 网关会从真实对话、生图与模型请求响应中持续采集请求、Token、输入 Token、输出 Token 限额，账号卡片随实际调用更新。
+- 兼容额度接口支持 Bearer 与原生平台认证头，Base URL 可填写主机地址或带 `/v1`、`/v1beta` 的 SDK 地址。
+- `limit=0` 按无限额度处理，不再错误显示为“剩余 0”或触发账号额度耗尽。
 
 ### 调度、流式响应与计费
 
@@ -73,7 +84,7 @@
 
 - 后端：`go test ./...`
 - 前端：`pnpm build`
-- 覆盖密钥多分组创建与编辑、旧数据迁移、跨分组故障切换、分平台模型目录，以及浅色、深色和移动端界面验收。
+- 覆盖全平台 API Key 额度/凭证探测、真实响应限额采集、密钥多分组创建与编辑、旧数据迁移、跨分组故障切换、分平台模型目录，以及浅色、深色和移动端界面验收。
 
 ## v0.1.0 — 2026-07-18
 

@@ -17,7 +17,7 @@
 | 事情 | DengDeng 的处理方式 |
 | --- | --- |
 | 接入模型 | 保留 OpenAI、Anthropic、Gemini 兼容路径；xAI / Grok 使用 OpenAI 兼容路径 |
-| 管理上游 | 按分组维护账号池，支持优先级、代理、冷却和故障切换 |
+| 管理上游 | 按分组维护账号池，支持额度查询、优先级、代理、冷却和故障切换 |
 | 管理密钥 | 用户自助创建 `dd-` 密钥；可设置额度、失效时间、模型与 IP 规则 |
 | 看用量 | 记录输入、输出、缓存 Token、图像用量、费用和请求状态 |
 | 收款与运营 | 兑换码、在线充值、用户余额、模型定价、告警和运行监控 |
@@ -78,7 +78,9 @@ go build -o dengdeng ./cmd/server
 3. 在「模型配置」确认对外模型名、上游模型名和定价。
 4. 用户在「API 密钥」创建 `dd-` 密钥时可同时选择多个分组；请求会按模型平台自动路由，同平台分组不可用时自动切换。之后即可将 Base URL 和密钥填入 SDK 或 CLI。
 
-浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI Agent Identity 默认直接导入 Codex `auth.json`；也可以临时使用 Access Token / Web Session 生成签名身份，系统只保存加密的 Runtime 私钥，不保留引导 Token。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI Agent Identity 按 Sub2API 的方式直接导入 Codex `auth.json`，支持单对象、数组和 JSONL；系统只保存加密的 Runtime 私钥与账户身份，不接收或保留 Access Token、Refresh Token、ID Token 和 Web Session。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+
+所有上游账号都有统一额度视图。OAuth / Agent Identity 显示订阅窗口；API Key 会查询所接第三方中转的密钥余额与额度，自动兼容 DengDeng、Sub2API、New API 和 One API，也可为非标准中转填写同域额度查询地址。真实请求返回的请求与 Token 限额会持续同步；上游没有余额接口时才回退显示密钥可用状态和本站实测消耗。
 
 ### 客户端示例
 

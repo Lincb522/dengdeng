@@ -206,3 +206,57 @@ func TestParseNativeCodexAgentIdentityAuthJSON(t *testing.T) {
 		t.Fatalf("native Agent Identity fields were not retained: %#v", got)
 	}
 }
+
+func TestParseManagedChatGPTAuthJSONWithAgentIdentity(t *testing.T) {
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encodedKey := base64.StdEncoding.EncodeToString(der)
+	raw := []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"bootstrap-token","refresh_token":"bootstrap-refresh","id_token":"bootstrap-id"},"session_token":"bootstrap-session","agent_identity":{"agent_runtime_id":"runtime-managed","agent_private_key":"` + encodedKey + `","account_id":"team-managed","chatgpt_user_id":"user-managed","email":"managed@example.com","plan_type":"team"}}`)
+	accounts, err := Parse("auto", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || accounts[0].AuthType != model.AuthAgentIdentity {
+		t.Fatalf("unexpected accounts: %#v", accounts)
+	}
+	if accounts[0].AccessToken != "" || accounts[0].RefreshToken != "" {
+		t.Fatalf("managed identity import retained OAuth tokens: %#v", accounts[0])
+	}
+	if accounts[0].Extra["id_token"] != nil || accounts[0].Extra["session_token"] != nil {
+		t.Fatalf("managed identity import retained bootstrap metadata: %#v", accounts[0].Extra)
+	}
+	if accounts[0].AccountID != "team-managed" || accounts[0].Extra["chatgpt_user_id"] != "user-managed" {
+		t.Fatalf("managed identity metadata was not retained: %#v", accounts[0])
+	}
+}
+
+func TestParseAgentIdentityJSONLines(t *testing.T) {
+	makeEntry := func(runtimeID, accountID, userID string) string {
+		_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		der, err := x509.MarshalPKCS8PrivateKey(privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return `{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"` + runtimeID + `","agent_private_key":"` + base64.StdEncoding.EncodeToString(der) + `","account_id":"` + accountID + `","chatgpt_user_id":"` + userID + `"}}`
+	}
+	raw := []byte(makeEntry("runtime-a", "team-a", "user-a") + "\n" + makeEntry("runtime-b", "team-b", "user-b"))
+	accounts, err := Parse("auto", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 2 {
+		t.Fatalf("got %d accounts, want 2", len(accounts))
+	}
+	if accounts[0].AccountID != "team-a" || accounts[1].AccountID != "team-b" {
+		t.Fatalf("unexpected JSONL accounts: %#v", accounts)
+	}
+}

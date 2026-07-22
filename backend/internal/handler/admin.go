@@ -873,6 +873,7 @@ type accountReq struct {
 	ProxyID      *int64     `json:"proxy_id"`
 	Name         string     `json:"name"`
 	BaseURL      string     `json:"base_url"`
+	QuotaURL     string     `json:"quota_url"`
 	AuthType     string     `json:"auth_type"`
 	APIKey       string     `json:"api_key"`
 	AccessToken  string     `json:"access_token"`
@@ -904,7 +905,7 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 	if authType == model.AuthAgentIdentity {
-		util.Fail(c, http.StatusBadRequest, "use the Agent Identity registration or JSON import endpoint")
+		util.Fail(c, http.StatusBadRequest, "use the JSON import endpoint for Agent Identity accounts")
 		return
 	}
 	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
@@ -928,7 +929,7 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	acc := model.UpstreamAccount{
 		GroupID: group.ID, ProxyID: proxyID, Name: req.Name, Platform: group.Platform,
-		BaseURL: req.BaseURL, AuthType: authType,
+		BaseURL: strings.TrimSpace(req.BaseURL), QuotaURL: strings.TrimSpace(req.QuotaURL), AuthType: authType,
 		APIKey:       crypto.EncryptedString(req.APIKey),
 		AccessToken:  crypto.EncryptedString(req.AccessToken),
 		RefreshToken: crypto.EncryptedString(req.RefreshToken),
@@ -966,7 +967,7 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "invalid request")
 		return
 	}
-	updates := map[string]any{"base_url": req.BaseURL}
+	updates := map[string]any{"base_url": strings.TrimSpace(req.BaseURL), "quota_url": strings.TrimSpace(req.QuotaURL)}
 	if req.Name != "" {
 		updates["name"] = req.Name
 	}
@@ -1063,7 +1064,9 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	}
 
 	imported := make([]string, 0, len(parsed))
+	updated := make([]string, 0, len(parsed))
 	skipped := make([]gin.H, 0)
+	seenAgentIdentities := make(map[string]struct{})
 	now := time.Now()
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
@@ -1109,8 +1112,59 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			p.Extra = service.AgentIdentityExtra(record)
 			p.AccountID = record.AccountID
 			p.Email = record.Email
+			identityKey := record.AccountID + "\x00" + record.ChatGPTUserID
+			if _, duplicate := seenAgentIdentities[identityKey]; duplicate {
+				skipped = append(skipped, gin.H{"name": p.Name, "reason": "duplicate Agent Identity for the same account and user"})
+				continue
+			}
+			seenAgentIdentities[identityKey] = struct{}{}
 		}
 		extra, _ := model.EncodeExtra(p.Extra)
+		if p.AuthType == model.AuthAgentIdentity {
+			existing, findErr := h.findAgentIdentityImportTarget(group.ID, p.AccountID, stringMapValue(p.Extra, "chatgpt_user_id"))
+			if findErr != nil && findErr != gorm.ErrRecordNotFound {
+				skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
+				continue
+			}
+			if existing != nil {
+				updates := map[string]any{
+					"auth_type":      model.AuthAgentIdentity,
+					"api_key":        crypto.EncryptedString(""),
+					"access_token":   crypto.EncryptedString(""),
+					"refresh_token":  crypto.EncryptedString(""),
+					"expires_at":     nil,
+					"email":          p.Email,
+					"account_id":     p.AccountID,
+					"extra":          extra,
+					"status":         model.StatusActive,
+					"error_count":    0,
+					"cooldown_until": nil,
+					"last_error":     "",
+				}
+				if baseURL := firstNonEmpty(p.BaseURL, req.BaseURL); baseURL != "" {
+					updates["base_url"] = baseURL
+				}
+				if req.ProxyID > 0 || existing.ProxyID != 0 {
+					updates["proxy_id"] = req.ProxyID
+				}
+				if p.Priority != nil {
+					updates["priority"] = *p.Priority
+				} else if req.Priority != nil {
+					updates["priority"] = *req.Priority
+				}
+				if p.Concurrency != nil {
+					updates["concurrency"] = *p.Concurrency
+				} else if req.Concurrency != nil {
+					updates["concurrency"] = *req.Concurrency
+				}
+				if err := h.db.Model(existing).Updates(updates).Error; err != nil {
+					skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
+					continue
+				}
+				updated = append(updated, existing.Name)
+				continue
+			}
+		}
 		maxDisplayOrder++
 		acc := model.UpstreamAccount{
 			GroupID: group.ID, ProxyID: req.ProxyID, Name: p.Name, Platform: group.Platform,
@@ -1142,111 +1196,41 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 
 	util.OK(c, gin.H{
 		"imported":       len(imported),
+		"updated":        len(updated),
 		"skipped":        len(skipped),
 		"imported_names": imported,
+		"updated_names":  updated,
 		"skipped_detail": skipped,
 	})
 }
 
-type agentIdentityRegisterReq struct {
-	GroupID     int64  `json:"group_id"`
-	ProxyID     int64  `json:"proxy_id"`
-	Name        string `json:"name"`
-	BaseURL     string `json:"base_url"`
-	AccessToken string `json:"access_token"`
-	WebSession  string `json:"web_session"`
-	Priority    *int   `json:"priority"`
-	Concurrency *int   `json:"concurrency"`
-}
-
-// RegisterAgentIdentity turns an already authenticated ChatGPT session into a
-// durable, token-free Codex runtime. The bootstrap access token is used for a
-// single upstream registration call and is never persisted.
-func (h *AdminHandler) RegisterAgentIdentity(c *gin.Context) {
-	var req agentIdentityRegisterReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID <= 0 || strings.TrimSpace(req.Name) == "" {
-		util.Fail(c, http.StatusBadRequest, "group_id and name are required")
-		return
+// findAgentIdentityImportTarget mirrors Sub2API's Team-aware identity match:
+// a runtime is replaced only when the ChatGPT account and member both match.
+// A legacy account without chatgpt_user_id may be upgraded once and backfilled.
+func (h *AdminHandler) findAgentIdentityImportTarget(groupID int64, accountID, userID string) (*model.UpstreamAccount, error) {
+	accountID = strings.TrimSpace(accountID)
+	userID = strings.TrimSpace(userID)
+	if accountID == "" {
+		return nil, gorm.ErrRecordNotFound
 	}
-	if strings.TrimSpace(req.AccessToken) == "" && strings.TrimSpace(req.WebSession) == "" {
-		util.Fail(c, http.StatusBadRequest, "access_token or web_session is required")
-		return
+	var candidates []model.UpstreamAccount
+	if err := h.db.Where("group_id = ? AND platform = ? AND account_id = ?", groupID, model.PlatformOpenAI, accountID).Order("id ASC").Find(&candidates).Error; err != nil {
+		return nil, err
 	}
-	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
-		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
-		return
-	}
-	var group model.Group
-	if err := h.db.First(&group, req.GroupID).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "group not found")
-		return
-	}
-	if group.Platform != model.PlatformOpenAI {
-		util.Fail(c, http.StatusBadRequest, "Agent Identity is only available for OpenAI groups")
-		return
-	}
-	if err := h.validateProxyAssignment(req.ProxyID); err != nil {
-		util.Fail(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	temporary := model.UpstreamAccount{ProxyID: req.ProxyID}
-	if req.ProxyID > 0 {
-		var proxy model.Proxy
-		if err := h.db.First(&proxy, req.ProxyID).Error; err != nil {
-			util.Fail(c, http.StatusBadRequest, "assigned proxy is unavailable")
-			return
+	var legacy *model.UpstreamAccount
+	for index := range candidates {
+		storedUserID := stringMapValue(candidates[index].DecodeExtra(), "chatgpt_user_id")
+		if storedUserID == userID {
+			return &candidates[index], nil
 		}
-		temporary.Proxy = &proxy
-	}
-	client, err := h.codexQuotaClient(&temporary)
-	if err != nil {
-		util.Fail(c, http.StatusBadRequest, err.Error())
-		return
-	}
-	accessToken := strings.TrimSpace(req.AccessToken)
-	if accessToken == "" {
-		accessToken, err = service.ResolveOpenAIWebSession(c.Request.Context(), client, req.WebSession)
-		if err != nil {
-			util.Fail(c, http.StatusBadGateway, "OpenAI Web Session 无效或已过期")
-			return
+		if storedUserID == "" && legacy == nil {
+			legacy = &candidates[index]
 		}
 	}
-	metadata, err := service.OpenAIIdentityFromAccessToken(accessToken)
-	if err != nil {
-		util.Fail(c, http.StatusBadRequest, err.Error())
-		return
+	if legacy != nil {
+		return legacy, nil
 	}
-	record, err := service.RegisterOpenAIAgentIdentity(c.Request.Context(), client, accessToken, metadata)
-	if err != nil {
-		util.Fail(c, http.StatusBadGateway, "Agent Identity 注册失败："+sanitizeAgentIdentityError(err.Error()))
-		return
-	}
-	extra, err := model.EncodeExtra(service.AgentIdentityExtra(record))
-	if err != nil {
-		util.Fail(c, http.StatusInternalServerError, "Agent Identity 凭据保存失败")
-		return
-	}
-	var maxDisplayOrder int
-	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
-	account := model.UpstreamAccount{
-		GroupID: group.ID, ProxyID: req.ProxyID, Name: strings.TrimSpace(req.Name), Platform: model.PlatformOpenAI,
-		BaseURL: strings.TrimSpace(req.BaseURL), AuthType: model.AuthAgentIdentity,
-		Email: record.Email, AccountID: record.AccountID, Extra: extra,
-		Priority: 10, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
-	}
-	if req.Priority != nil {
-		account.Priority = *req.Priority
-	}
-	if req.Concurrency != nil {
-		account.Concurrency = *req.Concurrency
-	}
-	if err := h.db.Create(&account).Error; err != nil {
-		util.Fail(c, http.StatusInternalServerError, "create Agent Identity account failed")
-		return
-	}
-	account.Group = &group
-	account.Proxy = temporary.Proxy
-	util.OK(c, account)
+	return nil, gorm.ErrRecordNotFound
 }
 
 func stringMapValue(values map[string]any, key string) string {
@@ -1257,14 +1241,6 @@ func stringMapValue(values map[string]any, key string) string {
 func boolMapValue(values map[string]any, key string) bool {
 	value, _ := values[key].(bool)
 	return value
-}
-
-func sanitizeAgentIdentityError(message string) string {
-	message = strings.TrimSpace(message)
-	if len(message) > 300 {
-		message = message[:300]
-	}
-	return message
 }
 
 func firstNonEmpty(vals ...string) string {

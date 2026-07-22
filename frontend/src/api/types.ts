@@ -273,6 +273,7 @@ export interface UpstreamAccount {
   name: string
   platform: string
   base_url: string
+	quota_url: string
   auth_type: 'api_key' | 'oauth' | 'agent_identity'
   expires_at: string | null
   email: string
@@ -314,13 +315,13 @@ export interface AccountObservedUsage {
 }
 
 // Unified allowance snapshot for every upstream account. Subscription OAuth
-// accounts expose provider windows; API keys always retain locally observed
-// request/token usage and any rate-limit headers returned by the provider.
+// accounts expose provider windows; API keys actively query compatible usage
+// endpoints, retain rate-limit headers and always include locally observed use.
 export interface AccountQuotaSnapshot {
 	id: number
 	upstream_account_id: number
 	platform: string
-	source: 'codex_subscription' | 'claude_subscription' | 'grok_billing' | 'rate_limit_headers' | 'local_observed' | string
+	source: 'codex_subscription' | 'claude_subscription' | 'grok_billing' | 'api_key_usage' | 'api_key_probe' | 'rate_limit_headers' | 'local_observed' | string
 	state: 'ready' | 'partial' | 'local_only' | 'error'
 	plan_type: string
 	subscription_expires_at?: string | null

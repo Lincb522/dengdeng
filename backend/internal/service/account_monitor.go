@@ -258,6 +258,12 @@ func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 		// The relay path carries /v1, so drop a trailing /v1 an operator may
 		// have entered as part of the xAI base URL.
 		base = strings.TrimSuffix(base, "/v1")
+	} else if account.Platform == model.PlatformGemini {
+		base = strings.TrimSuffix(base, "/v1beta")
+	} else {
+		// Accept both host-style and SDK-style Base URLs. The probe appends its
+		// own versioned path and must not accidentally request /v1/v1/models.
+		base = strings.TrimSuffix(base, "/v1")
 	}
 	if base == "" {
 		switch account.Platform {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
@@ -10,12 +12,16 @@ import (
 )
 
 func TestAgentIdentityAssertionMatchesSignedEnvelope(t *testing.T) {
-	material, err := generateAgentIdentityKeyMaterial()
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	record := AgentIdentityRecord{
-		AgentRuntimeID: "runtime-1", AgentPrivateKey: material.privateKeyPKCS8Base64,
+		AgentRuntimeID: "runtime-1", AgentPrivateKey: base64.StdEncoding.EncodeToString(der),
 		TaskID: "task-1", AccountID: "acct-1", ChatGPTUserID: "user-1",
 	}
 	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
@@ -39,12 +45,12 @@ func TestAgentIdentityAssertionMatchesSignedEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	privateKey, err := parseAgentIdentityPrivateKey(record.AgentPrivateKey)
+	parsedPrivateKey, err := parseAgentIdentityPrivateKey(record.AgentPrivateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 	message := []byte(record.AgentRuntimeID + ":" + record.TaskID + ":" + envelope["timestamp"])
-	if !ed25519.Verify(privateKey.Public().(ed25519.PublicKey), message, signature) {
+	if !ed25519.Verify(parsedPrivateKey.Public().(ed25519.PublicKey), message, signature) {
 		t.Fatal("assertion signature is invalid")
 	}
 }

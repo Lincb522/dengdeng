@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -93,13 +94,20 @@ func (s *AccountQuotaService) refresh(parent context.Context, account *model.Ups
 	snapshot.ObservedUsage = s.observedUsage(account.ID, now)
 	snapshot.Message = ""
 
-	if account.AuthType != model.AuthOAuth && !IsOpenAIAgentIdentity(account) {
-		if snapshot.Source != "rate_limit_headers" || len(snapshot.Windows) == 0 {
-			snapshot.Source = "local_observed"
-			snapshot.State = "local_only"
-			snapshot.Windows = nil
-			snapshot.Message = "上游未向普通 API Key 提供可直接查询的账户额度；当前显示本站记录"
+	if account.AuthType == model.AuthAPIKey {
+		ctx, cancel := context.WithTimeout(parent, accountQuotaTimeout)
+		defer cancel()
+		if err := s.refreshAPIKey(ctx, account, &snapshot); err != nil {
+			return s.saveFailure(&snapshot, err)
 		}
+		return snapshot, s.save(&snapshot)
+	}
+
+	if account.AuthType != model.AuthOAuth && !IsOpenAIAgentIdentity(account) {
+		snapshot.Source = "local_observed"
+		snapshot.State = "local_only"
+		snapshot.Windows = nil
+		snapshot.Message = "当前凭证类型没有可用的额度查询方式；当前显示本站记录"
 		fetched := now
 		snapshot.FetchedAt = &fetched
 		return snapshot, s.save(&snapshot)
@@ -207,6 +215,553 @@ func (s *AccountQuotaService) observedUsage(accountID int64, now time.Time) []mo
 			Key: window.key, Label: window.label, Requests: row.Requests,
 			InputTokens: row.InputTokens, OutputTokens: row.OutputTokens, CostMicro: row.CostMicro,
 		})
+	}
+	return result
+}
+
+// refreshAPIKey actively queries a static-key upstream instead of treating all
+// API keys as local-only. OpenAI-compatible relays commonly expose /v1/usage;
+// official providers generally expose allowance through response headers, so a
+// non-billable model-list request is used as the portable fallback.
+func (s *AccountQuotaService) refreshAPIKey(ctx context.Context, account *model.UpstreamAccount, snapshot *model.AccountQuotaSnapshot) error {
+	client, err := s.clientFor(account)
+	if err != nil {
+		return err
+	}
+	existingRateWindows := onlyRateLimitWindows(snapshot.Windows)
+	var lastErr error
+	endpoints, err := apiKeyUsageEndpoints(account)
+	if err != nil {
+		return err
+	}
+	customEndpointConfigured := strings.TrimSpace(account.QuotaURL) != ""
+	for index, endpoint := range endpoints {
+		payload, headers, status, fetchErr := fetchAPIKeyJSON(ctx, client, endpoint, account)
+		rateWindows := quotaWindowsFromHeaders(account.Platform, headers)
+		if fetchErr != nil {
+			lastErr = fetchErr
+			continue
+		}
+		if customEndpointConfigured && index == 0 && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+			return fmt.Errorf("custom API key quota endpoint returned status %d", status)
+		}
+		if status < http.StatusOK || status >= http.StatusMultipleChoices {
+			continue
+		}
+		windows, plan, active, recognized := parseAPIKeyUsage(payload)
+		if !recognized {
+			continue
+		}
+		if !active {
+			return fmt.Errorf("upstream API key is inactive")
+		}
+		snapshot.Source = "api_key_usage"
+		snapshot.State = "ready"
+		snapshot.Windows = mergeQuotaWindows(windows, existingRateWindows, rateWindows)
+		if plan != "" {
+			snapshot.PlanType = plan
+		}
+		if expiry := apiKeyUsageExpiry(payload); expiry != nil {
+			snapshot.SubscriptionExpiresAt = expiry
+		}
+		if len(snapshot.Windows) == 0 {
+			snapshot.State = "partial"
+			snapshot.Message = "上游额度接口已响应，但没有返回可识别的余额或限额字段"
+		}
+		fetched := time.Now().UTC()
+		snapshot.FetchedAt = &fetched
+		return nil
+	}
+	if base, official, baseErr := apiKeyQuotaBase(account); baseErr == nil && !official {
+		windows, expiry, headers, complete, recognized, dashboardErr := fetchLegacyDashboardQuota(ctx, client, base, account)
+		if dashboardErr != nil {
+			lastErr = dashboardErr
+		} else if recognized {
+			snapshot.Source = "api_key_usage"
+			snapshot.State = "ready"
+			snapshot.PlanType = "中转额度"
+			snapshot.Windows = mergeQuotaWindows(windows, existingRateWindows, quotaWindowsFromHeaders(account.Platform, headers))
+			snapshot.SubscriptionExpiresAt = expiry
+			if !complete {
+				snapshot.State = "partial"
+				snapshot.Message = "第三方中转返回了总额度，但没有返回已用额度"
+			}
+			fetched := time.Now().UTC()
+			snapshot.FetchedAt = &fetched
+			return nil
+		}
+	}
+
+	probeURL, probeErr := accountProbeURL(account)
+	if probeErr != nil {
+		return probeErr
+	}
+	headers, status, probeErr := fetchAPIKeyProbe(ctx, client, probeURL, account)
+	if probeErr != nil {
+		if lastErr != nil {
+			return fmt.Errorf("API key usage query failed: %v; credential probe failed: %w", lastErr, probeErr)
+		}
+		return fmt.Errorf("API key credential probe failed: %w", probeErr)
+	}
+	rateWindows := quotaWindowsFromHeaders(account.Platform, headers)
+	snapshot.Windows = mergeQuotaWindows(existingRateWindows, rateWindows)
+	fetched := time.Now().UTC()
+	snapshot.FetchedAt = &fetched
+	switch {
+	case status >= http.StatusOK && status < http.StatusBadRequest:
+		if len(snapshot.Windows) > 0 {
+			snapshot.Source = "rate_limit_headers"
+			snapshot.State = "ready"
+			snapshot.Message = "上游未返回账户余额；已同步 API Key 的请求与 Token 限额"
+		} else {
+			snapshot.Source = "api_key_probe"
+			snapshot.State = "partial"
+			snapshot.Message = "上游 API Key 已验证，但没有返回余额或限额字段；继续显示本站实测用量"
+		}
+		return nil
+	case status == http.StatusTooManyRequests:
+		snapshot.Source = "rate_limit_headers"
+		snapshot.State = "partial"
+		snapshot.Message = "上游 API Key 当前触发限流；已保留可读取的限额窗口"
+		return nil
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return fmt.Errorf("API key credential probe returned status %d", status)
+	default:
+		return fmt.Errorf("API key credential probe returned status %d", status)
+	}
+}
+
+func apiKeyUsageEndpoints(account *model.UpstreamAccount) ([]string, error) {
+	base, official, err := apiKeyQuotaBase(account)
+	if err != nil {
+		return nil, err
+	}
+	endpoints := make([]string, 0, 5)
+	if strings.TrimSpace(account.QuotaURL) != "" {
+		custom, resolveErr := resolveAPIKeyQuotaURL(account.QuotaURL, base)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		endpoints = append(endpoints, custom)
+	}
+	if !official {
+		endpoints = append(endpoints,
+			base+"/v1/usage",        // Sub2API and DengDeng
+			base+"/api/usage/token", // New API
+			base+"/v1/dashboard/billing/credit_grants",
+			base+"/dashboard/billing/credit_grants",
+		)
+	}
+	result := make([]string, 0, len(endpoints))
+	seen := make(map[string]struct{}, len(endpoints))
+	for _, endpoint := range endpoints {
+		if _, exists := seen[endpoint]; exists {
+			continue
+		}
+		seen[endpoint] = struct{}{}
+		result = append(result, endpoint)
+	}
+	return result, nil
+}
+
+func resolveAPIKeyQuotaURL(raw, base string) (string, error) {
+	baseURL, err := url.Parse(base)
+	if err != nil || baseURL.Scheme == "" || baseURL.Host == "" {
+		return "", fmt.Errorf("invalid API key upstream URL")
+	}
+	raw = strings.TrimSpace(raw)
+	if strings.HasPrefix(raw, "/") {
+		resolved := &url.URL{Scheme: baseURL.Scheme, Host: baseURL.Host, Path: raw}
+		if parsed, parseErr := url.Parse(raw); parseErr == nil {
+			resolved.Path = parsed.Path
+			resolved.RawQuery = parsed.RawQuery
+		}
+		return resolved.String(), nil
+	}
+	custom, err := url.Parse(raw)
+	if err != nil || custom.Scheme == "" || custom.Host == "" || custom.User != nil {
+		return "", fmt.Errorf("invalid API key quota URL")
+	}
+	if !strings.EqualFold(custom.Scheme, baseURL.Scheme) || !strings.EqualFold(custom.Host, baseURL.Host) {
+		return "", fmt.Errorf("API key quota URL must use the same origin as Base URL")
+	}
+	custom.Fragment = ""
+	return custom.String(), nil
+}
+
+func apiKeyQuotaBase(account *model.UpstreamAccount) (string, bool, error) {
+	if account == nil {
+		return "", false, fmt.Errorf("invalid account")
+	}
+	base := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
+	if base == "" {
+		switch account.Platform {
+		case model.PlatformOpenAI:
+			base = "https://api.openai.com"
+		case model.PlatformAnthropic:
+			base = "https://api.anthropic.com"
+		case model.PlatformGemini:
+			base = "https://generativelanguage.googleapis.com"
+		case model.PlatformGrok:
+			base = "https://api.x.ai"
+		default:
+			return "", false, fmt.Errorf("unsupported platform")
+		}
+	}
+	base = strings.TrimSuffix(base, "/v1beta")
+	base = strings.TrimSuffix(base, "/v1")
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", false, fmt.Errorf("invalid API key upstream URL")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	official := host == "api.openai.com" || host == "api.anthropic.com" || host == "generativelanguage.googleapis.com" || host == "api.x.ai"
+	return strings.TrimRight(base, "/"), official, nil
+}
+
+func fetchAPIKeyJSON(ctx context.Context, client *http.Client, endpoint string, account *model.UpstreamAccount) (map[string]any, http.Header, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	applyProbeCredential(req, account)
+	// Compatible relay usage endpoints conventionally authenticate with a
+	// bearer key even when their inference surface emulates Anthropic/Gemini.
+	// Keep the native provider header as well so either convention works.
+	if account.AuthType == model.AuthAPIKey && req.Header.Get("Authorization") == "" {
+		req.Header.Set("Authorization", "Bearer "+string(account.APIKey))
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, resp.Header.Clone(), resp.StatusCode, err
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, resp.Header.Clone(), resp.StatusCode, nil
+	}
+	var payload map[string]any
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&payload); err != nil {
+		return nil, resp.Header.Clone(), resp.StatusCode, fmt.Errorf("invalid upstream usage JSON")
+	}
+	return payload, resp.Header.Clone(), resp.StatusCode, nil
+}
+
+func fetchAPIKeyProbe(ctx context.Context, client *http.Client, endpoint string, account *model.UpstreamAccount) (http.Header, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Accept", "application/json")
+	applyProbeCredential(req, account)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	return resp.Header.Clone(), resp.StatusCode, nil
+}
+
+// fetchLegacyDashboardQuota supports One API and compatible New API releases.
+// Their OpenAI-compatible billing surface splits the total allowance and used
+// amount across two endpoints, so neither response is useful on its own.
+func fetchLegacyDashboardQuota(ctx context.Context, client *http.Client, base string, account *model.UpstreamAccount) ([]model.AccountQuotaWindow, *time.Time, http.Header, bool, bool, error) {
+	subscription, subscriptionHeaders, status, err := fetchAPIKeyJSON(ctx, client, base+"/v1/dashboard/billing/subscription", account)
+	if err != nil {
+		return nil, nil, nil, false, false, err
+	}
+	if status < http.StatusOK || status >= http.StatusMultipleChoices || subscription == nil || quotaMap(subscription["error"]) != nil {
+		return nil, nil, subscriptionHeaders, false, false, nil
+	}
+	limit, hasLimit := quotaNumberField(subscription, "hard_limit_usd", "system_hard_limit_usd", "soft_limit_usd")
+	if !hasLimit || limit <= 0 {
+		return nil, nil, subscriptionHeaders, false, false, nil
+	}
+
+	now := time.Now().UTC()
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format("2006-01-02")
+	end := now.Format("2006-01-02")
+	usageURL := base + "/v1/dashboard/billing/usage?start_date=" + url.QueryEscape(start) + "&end_date=" + url.QueryEscape(end)
+	usage, usageHeaders, usageStatus, usageErr := fetchAPIKeyJSON(ctx, client, usageURL, account)
+	headers := make(http.Header)
+	for key, values := range subscriptionHeaders {
+		for _, value := range values {
+			headers.Add(key, value)
+		}
+	}
+	for key, values := range usageHeaders {
+		for _, value := range values {
+			headers.Add(key, value)
+		}
+	}
+	expiresAt := quotaTimeValue(subscription["access_until"])
+	if usageErr != nil {
+		window := model.AccountQuotaWindow{Key: "total", Label: "中转总额度", Limit: &limit, Unit: "upstream"}
+		return []model.AccountQuotaWindow{window}, expiresAt, headers, false, true, nil
+	}
+	if usageStatus < http.StatusOK || usageStatus >= http.StatusMultipleChoices || usage == nil || quotaMap(usage["error"]) != nil {
+		window := model.AccountQuotaWindow{Key: "total", Label: "中转总额度", Limit: &limit, Unit: "upstream"}
+		return []model.AccountQuotaWindow{window}, expiresAt, headers, false, true, nil
+	}
+	usedCents, hasUsed := quotaNumberField(usage, "total_usage")
+	if !hasUsed {
+		window := model.AccountQuotaWindow{Key: "total", Label: "中转总额度", Limit: &limit, Unit: "upstream"}
+		return []model.AccountQuotaWindow{window}, expiresAt, headers, false, true, nil
+	}
+	used := usedCents / 100
+	remaining := math.Max(0, limit-used)
+	window := quotaAmountWindow("total", "中转额度", limit, used, remaining, true, "upstream")
+	return []model.AccountQuotaWindow{window}, expiresAt, headers, true, true, nil
+}
+
+func parseAPIKeyUsage(payload map[string]any) ([]model.AccountQuotaWindow, string, bool, bool) {
+	if payload == nil {
+		return nil, "", true, false
+	}
+	root := payload
+	for _, key := range []string{"data", "result"} {
+		if nested := quotaMap(root[key]); nested != nil {
+			root = nested
+			break
+		}
+	}
+	active := true
+	if value, ok := quotaBoolField(root, "is_active", "isValid", "is_valid", "active", "enabled"); ok {
+		active = value
+	}
+	plan := quotaStringField(root, "plan_name", "planName", "plan", "plan_type")
+	unit := quotaStringField(root, "unit", "currency")
+	if unit == "" {
+		unit = "USD"
+		if quotaStringField(root, "object") == "token_usage" {
+			unit = "quota"
+		}
+	}
+	windows := make([]model.AccountQuotaWindow, 0, 8)
+	recognized := false
+	if unlimited, ok := quotaBoolField(root, "unlimited_quota", "unlimited"); ok && unlimited {
+		recognized = true
+		if plan == "" {
+			plan = "无限额度"
+		}
+		windows = append(windows, model.AccountQuotaWindow{Key: "unlimited", Label: "无限额度"})
+	}
+	if balance, ok := quotaNumberField(root, "remaining", "balance", "available_balance", "available_credits", "total_available"); ok {
+		recognized = true
+		windows = append(windows, model.AccountQuotaWindow{Key: "balance", Label: "可用余额", Remaining: &balance, Unit: unit})
+	}
+	if granted, ok := quotaNumberField(root, "total_granted"); ok {
+		recognized = true
+		used, _ := quotaNumberField(root, "total_used")
+		remaining, hasRemaining := quotaNumberField(root, "total_available")
+		windows = append(windows, quotaAmountWindow("total", "累计额度", granted, used, remaining, hasRemaining, unit))
+	}
+	if quota := quotaMap(root["quota"]); quota != nil {
+		if window, ok := quotaObjectWindow("total", "密钥总额度", quota, unit); ok {
+			recognized = true
+			windows = append(windows, window)
+		}
+	}
+	if quota := quotaMap(root["daily_quota"]); quota != nil {
+		if window, ok := quotaObjectWindow("daily", "今日额度", quota, unit); ok {
+			recognized = true
+			windows = append(windows, window)
+		}
+	}
+	if remaining, ok := quotaNumberField(root, "remaining_requests"); ok {
+		recognized = true
+		windows = append(windows, model.AccountQuotaWindow{Key: "remaining_requests", Label: "剩余调用次数", Remaining: &remaining, Unit: "requests"})
+	}
+	if rateLimits := quotaSlice(root["rate_limits"]); len(rateLimits) > 0 {
+		for _, rateLimit := range rateLimits {
+			windowName := quotaStringField(rateLimit, "window", "name")
+			key := "rate_" + strings.TrimSpace(windowName)
+			if key == "rate_" {
+				continue
+			}
+			label := strings.ToUpper(windowName) + " 额度"
+			if window, ok := quotaObjectWindow(key, label, rateLimit, unit); ok {
+				window.ResetAt = quotaTimeValue(rateLimit["reset_at"])
+				recognized = true
+				windows = append(windows, window)
+			}
+		}
+	}
+	if subscription := quotaMap(root["subscription"]); subscription != nil {
+		for _, item := range []struct {
+			key, label, limitKey, usedKey, resetKey string
+		}{
+			{"subscription_daily", "订阅日额度", "daily_limit_usd", "daily_usage_usd", ""},
+			{"subscription_weekly", "订阅周额度", "weekly_limit_usd", "weekly_usage_usd", "weekly_window_start"},
+			{"subscription_monthly", "订阅月额度", "monthly_limit_usd", "monthly_usage_usd", ""},
+		} {
+			limit, hasLimit := quotaNumberField(subscription, item.limitKey)
+			used, hasUsed := quotaNumberField(subscription, item.usedKey)
+			if !hasLimit || limit <= 0 {
+				continue
+			}
+			remaining := math.Max(0, limit-used)
+			window := quotaAmountWindow(item.key, item.label, limit, used, remaining, hasUsed, "USD")
+			if item.resetKey != "" {
+				if start := quotaTimeValue(subscription[item.resetKey]); start != nil {
+					reset := start.Add(7 * 24 * time.Hour)
+					window.ResetAt = &reset
+				}
+			}
+			recognized = true
+			windows = append(windows, window)
+		}
+	}
+	return mergeQuotaWindows(windows), plan, active, recognized
+}
+
+func apiKeyUsageExpiry(payload map[string]any) *time.Time {
+	root := payload
+	for _, key := range []string{"data", "result"} {
+		if nested := quotaMap(root[key]); nested != nil {
+			root = nested
+			break
+		}
+	}
+	if expiry := quotaTimeValue(root["expires_at"]); expiry != nil {
+		return expiry
+	}
+	if subscription := quotaMap(root["subscription"]); subscription != nil {
+		return quotaTimeValue(subscription["expires_at"])
+	}
+	return nil
+}
+
+func quotaObjectWindow(key, label string, payload map[string]any, fallbackUnit string) (model.AccountQuotaWindow, bool) {
+	limit, hasLimit := quotaNumberField(payload, "limit", "total", "quota")
+	used, hasUsed := quotaNumberField(payload, "used", "usage", "consumed")
+	remaining, hasRemaining := quotaNumberField(payload, "remaining", "available")
+	if !hasLimit && !hasUsed && !hasRemaining {
+		return model.AccountQuotaWindow{}, false
+	}
+	// DengDeng-compatible usage responses use limit=0 for an unlimited key.
+	// Do not turn that sentinel into a misleading "0 remaining" allowance.
+	if hasLimit && limit <= 0 {
+		return model.AccountQuotaWindow{}, false
+	}
+	unit := quotaStringField(payload, "unit", "currency")
+	if unit == "" {
+		unit = fallbackUnit
+	}
+	window := model.AccountQuotaWindow{Key: key, Label: label, Unit: unit}
+	if hasLimit && limit > 0 {
+		window.Limit = &limit
+	}
+	if hasRemaining {
+		window.Remaining = &remaining
+	} else if hasLimit && hasUsed && limit > 0 {
+		value := math.Max(0, limit-used)
+		window.Remaining = &value
+	}
+	if hasLimit && limit > 0 {
+		value := used
+		if !hasUsed && hasRemaining {
+			value = limit - remaining
+		}
+		percent := clampPercent(value / limit * 100)
+		window.UsedPercent = &percent
+	}
+	return window, true
+}
+
+func quotaAmountWindow(key, label string, limit, used, remaining float64, hasRemaining bool, unit string) model.AccountQuotaWindow {
+	window := model.AccountQuotaWindow{Key: key, Label: label, Limit: &limit, Unit: unit}
+	if hasRemaining {
+		window.Remaining = &remaining
+	} else {
+		value := math.Max(0, limit-used)
+		window.Remaining = &value
+	}
+	if limit > 0 {
+		percent := clampPercent(used / limit * 100)
+		window.UsedPercent = &percent
+	}
+	return window
+}
+
+func quotaNumberField(payload map[string]any, keys ...string) (float64, bool) {
+	for _, key := range keys {
+		value, exists := payload[key]
+		if !exists || value == nil {
+			continue
+		}
+		switch typed := value.(type) {
+		case float64:
+			return typed, true
+		case float32:
+			return float64(typed), true
+		case int:
+			return float64(typed), true
+		case int64:
+			return float64(typed), true
+		case json.Number:
+			if parsed, err := typed.Float64(); err == nil {
+				return parsed, true
+			}
+		case string:
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+				return parsed, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func quotaStringField(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func quotaBoolField(payload map[string]any, keys ...string) (bool, bool) {
+	for _, key := range keys {
+		if value, ok := payload[key].(bool); ok {
+			return value, true
+		}
+	}
+	return false, false
+}
+
+func mergeQuotaWindows(groups ...[]model.AccountQuotaWindow) []model.AccountQuotaWindow {
+	result := make([]model.AccountQuotaWindow, 0)
+	positions := make(map[string]int)
+	for _, windows := range groups {
+		for _, window := range windows {
+			if window.Key == "" {
+				continue
+			}
+			if index, exists := positions[window.Key]; exists {
+				result[index] = window
+				continue
+			}
+			positions[window.Key] = len(result)
+			result = append(result, window)
+		}
+	}
+	return result
+}
+
+func onlyRateLimitWindows(windows []model.AccountQuotaWindow) []model.AccountQuotaWindow {
+	result := make([]model.AccountQuotaWindow, 0, len(windows))
+	for _, window := range windows {
+		if strings.HasPrefix(window.Key, "rate_") || window.Key == "requests" || window.Key == "tokens" || window.Key == "input_tokens" || window.Key == "output_tokens" {
+			result = append(result, window)
+		}
 	}
 	return result
 }
@@ -666,15 +1221,7 @@ func (s *AccountQuotaService) ObserveRateLimitHeaders(account *model.UpstreamAcc
 	if s == nil || s.db == nil || account == nil || account.ID <= 0 {
 		return nil
 	}
-	requestsLimit, requestsRemaining, requestsReset := providerRateHeaders(account.Platform, headers, "requests")
-	tokensLimit, tokensRemaining, tokensReset := providerRateHeaders(account.Platform, headers, "tokens")
-	windows := make([]model.AccountQuotaWindow, 0, 2)
-	if requestsLimit != nil || requestsRemaining != nil {
-		windows = append(windows, rateHeaderWindow("requests", "请求限额", requestsLimit, requestsRemaining, requestsReset))
-	}
-	if tokensLimit != nil || tokensRemaining != nil {
-		windows = append(windows, rateHeaderWindow("tokens", "Token 限额", tokensLimit, tokensRemaining, tokensReset))
-	}
+	windows := quotaWindowsFromHeaders(account.Platform, headers)
 	if len(windows) == 0 {
 		return nil
 	}
@@ -685,12 +1232,18 @@ func (s *AccountQuotaService) ObserveRateLimitHeaders(account *model.UpstreamAcc
 	_ = s.db.Where("upstream_account_id = ?", account.ID).First(&snapshot).Error
 	snapshot.UpstreamAccountID = account.ID
 	snapshot.Platform = account.Platform
-	snapshot.Source = "rate_limit_headers"
+	if snapshot.Source != "api_key_usage" {
+		snapshot.Source = "rate_limit_headers"
+	}
 	snapshot.State = "ready"
 	snapshot.PlanType = accountPlanType(account)
-	snapshot.Message = ""
-	snapshot.Windows = windows
-	snapshot.LastAttemptAt = observedAt.UTC()
+	if snapshot.Source == "api_key_usage" {
+		snapshot.Message = "上游 API Key 余额与实时限额已同步"
+		snapshot.Windows = mergeQuotaWindows(snapshot.Windows, windows)
+	} else {
+		snapshot.Message = ""
+		snapshot.Windows = windows
+	}
 	fetched := observedAt.UTC()
 	snapshot.FetchedAt = &fetched
 	if len(snapshot.ObservedUsage) == 0 {
@@ -699,19 +1252,52 @@ func (s *AccountQuotaService) ObserveRateLimitHeaders(account *model.UpstreamAcc
 	return s.save(&snapshot)
 }
 
+func quotaWindowsFromHeaders(platform string, headers http.Header) []model.AccountQuotaWindow {
+	dimensions := []struct {
+		key, label, dimension string
+	}{
+		{"rate_requests", "请求限额", "requests"},
+		{"rate_tokens", "Token 限额", "tokens"},
+		{"rate_input_tokens", "输入 Token 限额", "input_tokens"},
+		{"rate_output_tokens", "输出 Token 限额", "output_tokens"},
+	}
+	windows := make([]model.AccountQuotaWindow, 0, len(dimensions))
+	for _, item := range dimensions {
+		limit, remaining, reset := providerRateHeaders(platform, headers, item.dimension)
+		if limit == nil && remaining == nil {
+			continue
+		}
+		windows = append(windows, rateHeaderWindow(item.key, item.label, limit, remaining, reset))
+	}
+	return windows
+}
+
 func providerRateHeaders(platform string, headers http.Header, dimension string) (*float64, *float64, *time.Time) {
+	headerDimension := strings.ReplaceAll(dimension, "_", "-")
 	prefix := "x-ratelimit-"
 	if platform == model.PlatformAnthropic {
 		prefix = "anthropic-ratelimit-"
 	}
-	limit := headerFloat(headers, prefix+dimension+"-limit", "x-ratelimit-limit-"+dimension)
-	remaining := headerFloat(headers, prefix+dimension+"-remaining", "x-ratelimit-remaining-"+dimension)
-	reset := headerReset(headers, prefix+dimension+"-reset", "x-ratelimit-reset-"+dimension)
+	limitNames := []string{prefix + headerDimension + "-limit", "x-ratelimit-limit-" + headerDimension}
+	remainingNames := []string{prefix + headerDimension + "-remaining", "x-ratelimit-remaining-" + headerDimension}
+	resetNames := []string{prefix + headerDimension + "-reset", "x-ratelimit-reset-" + headerDimension}
+	if dimension == "requests" {
+		limitNames = append(limitNames, "ratelimit-limit")
+		remainingNames = append(remainingNames, "ratelimit-remaining")
+		resetNames = append(resetNames, "ratelimit-reset")
+	}
+	limit := headerFloat(headers, limitNames...)
+	remaining := headerFloat(headers, remainingNames...)
+	reset := headerReset(headers, resetNames...)
 	return limit, remaining, reset
 }
 
 func rateHeaderWindow(key, label string, limit, remaining *float64, reset *time.Time) model.AccountQuotaWindow {
-	window := model.AccountQuotaWindow{Key: key, Label: label, Limit: limit, Remaining: remaining, Unit: key, ResetAt: reset}
+	unit := "tokens"
+	if strings.Contains(key, "request") {
+		unit = "requests"
+	}
+	window := model.AccountQuotaWindow{Key: key, Label: label, Limit: limit, Remaining: remaining, Unit: unit, ResetAt: reset}
 	if limit != nil && remaining != nil && *limit > 0 {
 		used := clampPercent((*limit - *remaining) / *limit * 100)
 		window.UsedPercent = &used
@@ -835,6 +1421,17 @@ func quotaJWTClaims(token string) map[string]any {
 
 func quotaMap(value any) map[string]any {
 	result, _ := value.(map[string]any)
+	return result
+}
+
+func quotaSlice(value any) []map[string]any {
+	items, _ := value.([]any)
+	result := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if mapped := quotaMap(item); mapped != nil {
+			result = append(result, mapped)
+		}
+	}
 	return result
 }
 
@@ -1005,6 +1602,16 @@ func friendlyQuotaError(err error) string {
 	switch {
 	case strings.Contains(message, "missing chatgpt account"):
 		return "缺少上游账号标识，请重新授权或重新导入凭证"
+	case strings.Contains(message, "quota url must use the same origin"):
+		return "额度查询地址必须与 Base URL 同域"
+	case strings.Contains(message, "invalid api key quota url"):
+		return "额度查询地址格式无效，请填写同站路径或同域完整地址"
+	case strings.Contains(message, "custom api key quota endpoint returned status"):
+		return "第三方中转拒绝了额度查询，请检查 API Key 与查询地址"
+	case strings.Contains(message, "api key is inactive"):
+		return "上游返回该 API Key 已停用"
+	case strings.Contains(message, "api key credential probe returned status 401"), strings.Contains(message, "api key credential probe returned status 403"):
+		return "上游拒绝了当前 API Key，请检查密钥和 Base URL"
 	case strings.Contains(message, "status 401"), strings.Contains(message, "status 403"), strings.Contains(message, "invalid_grant"):
 		return "上游拒绝了当前凭证，请重新授权"
 	case strings.Contains(message, "status 429"):

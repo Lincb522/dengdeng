@@ -84,20 +84,141 @@ func TestAccountQuotaRefreshesClaudeSubscriptionAndObservedUsage(t *testing.T) {
 	}
 }
 
-func TestAccountQuotaAPIKeyUsesLocalUsageAndRateLimitHeaders(t *testing.T) {
+func TestAccountQuotaAPIKeyQueriesCompatibleUsageEndpoint(t *testing.T) {
+	db := newAccountQuotaTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/usage" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"is_active": true,
+			"remaining": 12.5,
+			"unit":      "USD",
+			"plan_name": "标准余额",
+			"quota": map[string]any{
+				"limit": 20, "used": 5, "remaining": 15,
+			},
+			"daily_quota": map[string]any{
+				"limit": 2, "used": 0.5, "remaining": 1.5,
+			},
+			"remaining_requests": 80,
+		})
+	}))
+	defer server.Close()
+
+	account := model.UpstreamAccount{GroupID: 1, Name: "openai-key", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, APIKey: "key", BaseURL: server.URL + "/v1", Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	quota := NewAccountQuotaService(db, nil, nil, server.Client())
+	snapshot, err := quota.RefreshAccount(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != "ready" || snapshot.Source != "api_key_usage" || snapshot.PlanType != "标准余额" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	windows := make(map[string]model.AccountQuotaWindow, len(snapshot.Windows))
+	for _, window := range snapshot.Windows {
+		windows[window.Key] = window
+	}
+	if len(windows) != 4 || windows["balance"].Remaining == nil || *windows["balance"].Remaining != 12.5 {
+		t.Fatalf("windows = %#v", snapshot.Windows)
+	}
+	if windows["total"].UsedPercent == nil || *windows["total"].UsedPercent != 25 {
+		t.Fatalf("total window = %#v", windows["total"])
+	}
+	if windows["daily"].UsedPercent == nil || *windows["daily"].UsedPercent != 25 {
+		t.Fatalf("daily window = %#v", windows["daily"])
+	}
+}
+
+func TestAccountQuotaAPIKeyProbeSupportsEveryPlatform(t *testing.T) {
+	tests := []struct {
+		platform string
+		path     string
+		header   string
+		value    string
+	}{
+		{model.PlatformOpenAI, "/v1/models", "Authorization", "Bearer key"},
+		{model.PlatformAnthropic, "/v1/models", "x-api-key", "key"},
+		{model.PlatformGemini, "/v1beta/models", "x-goog-api-key", "key"},
+		{model.PlatformGrok, "/v1/models", "Authorization", "Bearer key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.platform, func(t *testing.T) {
+			db := newAccountQuotaTestDB(t)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tt.path {
+					http.NotFound(w, r)
+					return
+				}
+				if r.Header.Get(tt.header) != tt.value {
+					t.Fatalf("unexpected %s header: %q", tt.header, r.Header.Get(tt.header))
+				}
+				if tt.platform == model.PlatformAnthropic && r.Header.Get("anthropic-version") != "2023-06-01" {
+					t.Fatalf("missing anthropic version: %#v", r.Header)
+				}
+				w.Header().Set("x-ratelimit-limit-requests", "100")
+				w.Header().Set("x-ratelimit-remaining-requests", "75")
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+			}))
+			defer server.Close()
+
+			account := model.UpstreamAccount{GroupID: 1, Name: tt.platform + "-key", Platform: tt.platform, AuthType: model.AuthAPIKey, APIKey: "key", BaseURL: server.URL, Status: model.StatusActive}
+			if err := db.Create(&account).Error; err != nil {
+				t.Fatal(err)
+			}
+			quota := NewAccountQuotaService(db, nil, nil, server.Client())
+			snapshot, err := quota.RefreshAccount(context.Background(), account.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.State != "ready" || snapshot.Source != "rate_limit_headers" || len(snapshot.Windows) != 1 {
+				t.Fatalf("snapshot = %#v", snapshot)
+			}
+			if snapshot.Windows[0].Key != "rate_requests" || snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 25 {
+				t.Fatalf("window = %#v", snapshot.Windows[0])
+			}
+		})
+	}
+}
+
+func TestAccountQuotaAPIKeyProbeRetainsVerifiedStateWithoutAllowanceHeaders(t *testing.T) {
+	db := newAccountQuotaTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{}})
+	}))
+	defer server.Close()
+	account := model.UpstreamAccount{GroupID: 1, Name: "verified-key", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, APIKey: "key", BaseURL: server.URL, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	quota := NewAccountQuotaService(db, nil, nil, server.Client())
+	snapshot, err := quota.RefreshAccount(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != "partial" || snapshot.Source != "api_key_probe" || len(snapshot.Windows) != 0 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestAccountQuotaRateLimitHeadersAreStoredForAPIKeys(t *testing.T) {
 	db := newAccountQuotaTestDB(t)
 	account := model.UpstreamAccount{GroupID: 1, Name: "openai-key", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, APIKey: "key", Status: model.StatusActive}
 	if err := db.Create(&account).Error; err != nil {
 		t.Fatal(err)
 	}
 	quota := NewAccountQuotaService(db, nil, nil, nil)
-	snapshot, err := quota.RefreshAccount(context.Background(), account.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.State != "local_only" || snapshot.Source != "local_observed" {
-		t.Fatalf("snapshot = %#v", snapshot)
-	}
 
 	headers := http.Header{}
 	headers.Set("x-ratelimit-limit-requests", "100")
@@ -106,14 +227,125 @@ func TestAccountQuotaAPIKeyUsesLocalUsageAndRateLimitHeaders(t *testing.T) {
 	if err := quota.ObserveRateLimitHeaders(&account, headers, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
+	var snapshot model.AccountQuotaSnapshot
 	if err := db.Where("upstream_account_id = ?", account.ID).First(&snapshot).Error; err != nil {
 		t.Fatal(err)
 	}
 	if snapshot.State != "ready" || snapshot.Source != "rate_limit_headers" || len(snapshot.Windows) != 1 {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
-	if snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 25 {
+	if !snapshot.LastAttemptAt.IsZero() {
+		t.Fatalf("passive headers must not postpone an active quota refresh: %v", snapshot.LastAttemptAt)
+	}
+	if snapshot.Windows[0].Key != "rate_requests" || snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 25 {
 		t.Fatalf("window = %#v", snapshot.Windows[0])
+	}
+}
+
+func TestParseAPIKeyUsageSkipsUnlimitedQuotaSentinel(t *testing.T) {
+	windows, _, active, recognized := parseAPIKeyUsage(map[string]any{
+		"is_active": true,
+		"remaining": 8.5,
+		"quota":     map[string]any{"limit": 0, "used": 3, "remaining": 0},
+	})
+	if !active || !recognized || len(windows) != 1 || windows[0].Key != "balance" {
+		t.Fatalf("windows=%#v active=%v recognized=%v", windows, active, recognized)
+	}
+}
+
+func TestParseAPIKeyUsageSupportsSub2APIAndNewAPI(t *testing.T) {
+	t.Run("sub2api", func(t *testing.T) {
+		windows, plan, active, recognized := parseAPIKeyUsage(map[string]any{
+			"mode":     "quota_limited",
+			"isValid":  true,
+			"planName": "团队套餐",
+			"unit":     "USD",
+			"quota": map[string]any{
+				"limit": 30.0, "used": 10.0, "remaining": 20.0,
+			},
+			"rate_limits": []any{
+				map[string]any{"window": "5h", "limit": 5.0, "used": 1.0, "remaining": 4.0, "reset_at": "2026-07-22T12:00:00Z"},
+			},
+			"subscription": map[string]any{
+				"daily_limit_usd": 8.0, "daily_usage_usd": 2.0,
+			},
+		})
+		if !active || !recognized || plan != "团队套餐" {
+			t.Fatalf("plan=%q active=%v recognized=%v", plan, active, recognized)
+		}
+		byKey := make(map[string]model.AccountQuotaWindow, len(windows))
+		for _, window := range windows {
+			byKey[window.Key] = window
+		}
+		if len(byKey) != 3 || byKey["rate_5h"].ResetAt == nil || byKey["subscription_daily"].Remaining == nil || *byKey["subscription_daily"].Remaining != 6 {
+			t.Fatalf("windows = %#v", windows)
+		}
+	})
+
+	t.Run("new-api-token-usage", func(t *testing.T) {
+		windows, _, active, recognized := parseAPIKeyUsage(map[string]any{
+			"code": true,
+			"data": map[string]any{
+				"object": "token_usage", "total_granted": 1000.0, "total_used": 250.0, "total_available": 750.0,
+				"unlimited_quota": false, "expires_at": 1784678400.0,
+			},
+		})
+		if !active || !recognized {
+			t.Fatalf("active=%v recognized=%v", active, recognized)
+		}
+		if len(windows) != 2 || windows[0].Unit != "quota" || windows[1].Unit != "quota" {
+			t.Fatalf("windows = %#v", windows)
+		}
+		expiry := apiKeyUsageExpiry(map[string]any{"data": map[string]any{"expires_at": 1784678400.0}})
+		if expiry == nil || expiry.Unix() != 1784678400 {
+			t.Fatalf("expiry = %v", expiry)
+		}
+	})
+}
+
+func TestResolveAPIKeyQuotaURLRequiresSameOrigin(t *testing.T) {
+	got, err := resolveAPIKeyQuotaURL("/custom/usage?scope=key", "https://relay.example/openai")
+	if err != nil || got != "https://relay.example/custom/usage?scope=key" {
+		t.Fatalf("got=%q err=%v", got, err)
+	}
+	if _, err := resolveAPIKeyQuotaURL("https://evil.example/usage", "https://relay.example"); err == nil {
+		t.Fatal("expected cross-origin quota URL to be rejected")
+	}
+}
+
+func TestAccountQuotaAPIKeySupportsOneAPIDashboardBilling(t *testing.T) {
+	db := newAccountQuotaTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer key" {
+			t.Fatalf("unexpected authorization: %q", r.Header.Get("Authorization"))
+		}
+		switch r.URL.Path {
+		case "/v1/dashboard/billing/subscription":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "billing_subscription", "hard_limit_usd": 10.0, "access_until": 1784678400,
+			})
+		case "/v1/dashboard/billing/usage":
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "total_usage": 250.0})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	account := model.UpstreamAccount{GroupID: 1, Name: "one-api-key", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, APIKey: "key", BaseURL: server.URL, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	quota := NewAccountQuotaService(db, nil, nil, server.Client())
+	snapshot, err := quota.RefreshAccount(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State != "ready" || snapshot.Source != "api_key_usage" || len(snapshot.Windows) != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	window := snapshot.Windows[0]
+	if window.Limit == nil || *window.Limit != 10 || window.Remaining == nil || *window.Remaining != 7.5 || window.UsedPercent == nil || *window.UsedPercent != 25 {
+		t.Fatalf("window = %#v", window)
 	}
 }
 

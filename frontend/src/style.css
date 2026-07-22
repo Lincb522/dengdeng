@@ -774,11 +774,6 @@ body {
   .accounts-view-toggle button { min-width: 3rem; border-radius: .42rem; color: var(--ink-soft); font-size: .74rem; font-weight: 750; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
   .accounts-view-toggle button:hover { color: var(--ink); }
   .accounts-view-toggle button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--shadow); }
-	.agent-identity-methods { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem; padding: .28rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface-muted); }
-	.agent-identity-methods button { min-height: 2.35rem; border-radius: .5rem; color: var(--ink-soft); font-size: .75rem; font-weight: 760; white-space: nowrap; transition: color .16s ease, background .16s ease, box-shadow .16s ease; }
-	.agent-identity-methods button:hover { color: var(--ink); }
-	.agent-identity-methods button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.agent-identity-methods button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px var(--shadow); }
   .account-order-hint { margin: -0.55rem 0 1rem; color: var(--ink-soft); font-size: .76rem; line-height: 1.5; }
   .account-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: .9rem; }
   .account-card { display: flex; min-width: 0; flex-direction: column; padding: 1rem; border: 1px solid var(--line); border-radius: .9rem; background: var(--surface); box-shadow: 0 4px 8px var(--shadow); transition: border-color .18s ease, transform .18s ease, box-shadow .18s ease; }
