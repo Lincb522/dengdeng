@@ -24,9 +24,17 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	if err := r.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+	realIPSettings, _ := service.NewSystemSettingsService(db, cfg).Get()
+	trustedProxies := cfg.Server.TrustedProxies
+	forwardedHeaders := cfg.Server.ForwardedClientIPHeaders
+	if len(realIPSettings.ForwardedClientIPHeaders) > 0 {
+		trustedProxies = realIPSettings.TrustedProxies
+		forwardedHeaders = realIPSettings.ForwardedClientIPHeaders
+	}
+	if err := r.SetTrustedProxies(trustedProxies); err != nil {
 		panic("invalid SERVER_TRUSTED_PROXIES: " + err.Error())
 	}
+	r.RemoteIPHeaders = append([]string(nil), forwardedHeaders...)
 	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID())
 	r.Use(middleware.SecurityHeaders())
@@ -55,8 +63,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	}
 	oauthManager := oauth.NewManager(db, cfg.OAuth, oauthClient)
 	accountQuota := service.NewAccountQuotaService(db, cfg, oauthManager, oauthClient)
+	imageStorage := service.NewImageStorageService(db, providerClient)
 	gw := gateway.New(db, scheduler, billing, rates, oauthManager, runtimeMetrics, providerClient)
 	gw.SetRuntimePolicy(runtimePolicy)
+	gw.SetImageStorageService(imageStorage)
 
 	authH := handler.NewAuthHandler(db, cfg)
 	userH := handler.NewUserHandler(db, cfg)
@@ -70,8 +80,11 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	accountMonitor.SetQuotaService(accountQuota)
 	adminH.SetAccountMonitor(accountMonitor)
 	adminH.SetRuntimeMetrics(runtimeMetrics)
+	adminH.SetScheduler(scheduler)
+	adminH.SetImageStorageService(imageStorage)
 	systemSettingsH := handler.NewSystemSettingsHandler(db, cfg)
 	systemSettingsH.SetAuditService(audit)
+	systemSettingsH.SetEngine(r)
 	runtimeSettingsH := handler.NewRuntimeSettingsHandler(db, runtimePolicy, audit)
 	alertH := handler.NewAlertHandler(db, audit)
 	backupH := handler.NewBackupHandler(backupService, audit)
@@ -110,6 +123,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		{
 			user.GET("/me", userH.Me)
 			user.POST("/password", userH.ChangePassword)
+			user.POST("/totp/setup", userH.SetupTOTP)
+			user.POST("/totp/enable", userH.EnableTOTP)
+			user.POST("/totp/disable", userH.DisableTOTP)
 			user.GET("/groups", userH.ListGroups)
 			user.GET("/keys", userH.ListKeys)
 			user.POST("/keys", userH.CreateKey)
@@ -151,6 +167,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.DELETE("/groups/:id", adminH.DeleteGroup)
 			admin.GET("/accounts", adminH.ListAccounts)
 			admin.POST("/accounts", adminH.CreateAccount)
+			admin.POST("/accounts/agent-identity", adminH.RegisterAgentIdentity)
 			admin.POST("/accounts/import", adminH.ImportAccounts)
 			admin.PUT("/accounts/order", adminH.ReorderAccounts)
 			admin.POST("/accounts/:id/quota/refresh", adminH.RefreshAccountQuota)
@@ -165,6 +182,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/proxies/:id/test", adminH.TestProxy)
 			admin.GET("/settings", systemSettingsH.Get)
 			admin.PUT("/settings", systemSettingsH.Update)
+			admin.GET("/image-storage", adminH.GetImageStorage)
+			admin.PUT("/image-storage", adminH.UpdateImageStorage)
+			admin.POST("/image-storage/test", adminH.TestImageStorage)
 			admin.GET("/runtime-settings", runtimeSettingsH.Get)
 			admin.PUT("/runtime-settings", runtimeSettingsH.Update)
 			admin.GET("/audit-logs", runtimeSettingsH.ListAuditLogs)

@@ -4,6 +4,35 @@
 
 ## 未发布
 
+### Agent Identity 与 OpenAI 账号
+
+- 支持导入 Sub2API / Codex `auth_mode=agentIdentity` 凭证，并可用短期 Access Token 或已登录 Web Session 注册官方 Ed25519 Agent Identity。注册完成后不保存 OAuth Token。
+- 导入时忽略 Agent Identity JSON 中残留的 OAuth `expires_at`，不会再把仍可签名的账号误判为过期并跳过。
+- OpenAI Responses、Chat Completions、生图和账号额度查询统一使用动态 `AgentAssertion`；`task_id` 失效时自动重建一次并加密回写。
+- 账号健康检查将 Agent Identity 视为订阅通道，不再错误使用 API Key 的 `/v1/models` 探针。
+
+### 调度、流式响应与计费
+
+- 调度器会记录分组内账号被排除的实际原因，包括停用、冷却、额度耗尽、模型冷却、并发已满和本请求已尝试；运行监控直接展示最新 503 诊断。
+- OAuth / Agent Identity 流在实际输出前预检 HTTP 200 中的错误事件、空流和缺失终止事件；仅在尚未下发内容时安全切换账号，避免重放工具调用。
+- SSE 解析兼容 `event:name` / `data:{...}` 紧凑格式；本地余额和密钥额度错误改为 OpenAI / Anthropic 客户端可识别的标准结构。
+
+### 思考强度策略
+
+- OpenAI / Grok 分组新增思考强度映射和最高档位。客户端显式选择、密钥默认值、分组映射与分组上限按固定顺序生效。
+- OpenAI Responses、Chat Completions 和 Claude Code 转 Responses 共用同一策略，用量日志与账单按最终发给上游的档位计算。
+
+### 管理安全与真实 IP
+
+- 账户设置新增 RFC 6238 TOTP 绑定、二维码和关闭流程；开启后管理员操作要求当前会话已完成验证器校验。
+- 新签发的控制台 JWT 绑定浏览器 User-Agent 指纹，在其他客户端重放时要求重新登录；开关 TOTP 会同时作废旧会话。
+- 系统设置可热更新受信反向代理 IP/CIDR 和真实客户端 IP 请求头，避免未受信来源伪造 `X-Forwarded-For`。
+
+### 异步生图与对象存储
+
+- 新增 S3 兼容图像存储设置，支持 AWS S3、Cloudflare R2、MinIO 及兼容服务；密钥加密保存，管理端可测试 Bucket 连通性。
+- 新增 `POST /v1/images/generations/async` 和 `GET /v1/images/tasks/:task_id`。任务结果会先上传对象存储，数据库只留短链接与状态；任务轮询不受余额耗尽影响，且严格校验密钥所有权。
+
 ### 密钥多分组
 
 - 一把 API 密钥现在可同时绑定最多 32 个开放分组，创建和编辑界面均支持多选；旧密钥会在启动迁移时自动保留原分组，不需要重新生成。

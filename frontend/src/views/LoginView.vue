@@ -15,6 +15,7 @@ const email = ref('')
 const password = ref('')
 const confirm = ref('')
 const verificationCode = ref('')
+const totpCode = ref('')
 const referralCode = ref(new URLSearchParams(window.location.search).get('ref') || '')
 const busy = ref(false)
 const sendingCode = ref(false)
@@ -111,7 +112,7 @@ async function submit() {
   busy.value = true
   try {
     if (mode.value === 'login') {
-      await auth.login(email.value, password.value, agreement.value.revision)
+      await auth.login(email.value, password.value, agreement.value.revision, totpCode.value.trim())
     } else {
       await auth.register(email.value, password.value, verificationCode.value.trim(), agreement.value.revision, referralCode.value.trim())
     }
@@ -171,6 +172,11 @@ async function submit() {
               </button>
             </div>
           </div>
+
+					<div v-if="mode === 'login'" class="login-field">
+						<label for="totp-code">验证器验证码（已开启时填写）</label>
+						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
+					</div>
 
           <div v-if="mode === 'register'" class="login-field">
             <label for="confirm-password">确认密码</label>

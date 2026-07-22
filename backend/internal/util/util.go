@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -45,23 +46,36 @@ func HashAPIKey(plain string) string {
 }
 
 type Claims struct {
-	UserID int64  `json:"uid"`
-	Role   string `json:"role"`
-	Ver    int    `json:"ver"`
+	UserID      int64  `json:"uid"`
+	Role        string `json:"role"`
+	Ver         int    `json:"ver"`
+	Fingerprint string `json:"fp,omitempty"`
+	MFA         bool   `json:"mfa,omitempty"`
 	jwt.RegisteredClaims
 }
 
 func SignJWT(secret string, userID int64, role string, ver int, ttl time.Duration) (string, error) {
+	return SignJWTBound(secret, userID, role, ver, ttl, "", false)
+}
+
+func SignJWTBound(secret string, userID int64, role string, ver int, ttl time.Duration, fingerprint string, mfa bool) (string, error) {
 	claims := Claims{
-		UserID: userID,
-		Role:   role,
-		Ver:    ver,
+		UserID:      userID,
+		Role:        role,
+		Ver:         ver,
+		Fingerprint: fingerprint,
+		MFA:         mfa,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(ttl)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+}
+
+func SessionFingerprint(secret, userAgent string) string {
+	sum := sha256.Sum256([]byte("dengdeng-session/v1|" + secret + "|" + strings.TrimSpace(userAgent)))
+	return hex.EncodeToString(sum[:16])
 }
 
 func ParseJWT(secret, tokenStr string) (*Claims, error) {

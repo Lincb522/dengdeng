@@ -125,9 +125,10 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 		return model.AccountProbe{State: "down", CheckedAt: checkedAt}, fmt.Errorf("invalid account")
 	}
 	probe := model.AccountProbe{AccountID: account.ID, State: "down", CheckedAt: checkedAt}
-	if account.AuthType == model.AuthOAuth {
+	transportProbe := account.AuthType == model.AuthOAuth || IsOpenAIAgentIdentity(account)
+	if transportProbe {
 		probe.Mode = "transport"
-		if m.oauth != nil {
+		if account.AuthType == model.AuthOAuth && m.oauth != nil {
 			refreshCtx, cancel := context.WithTimeout(parent, m.runtimePolicy().ProbeTimeout())
 			_, err := m.oauth.AccessToken(refreshCtx, account)
 			cancel()
@@ -153,7 +154,7 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 	ctx, cancel := context.WithTimeout(parent, m.runtimePolicy().ProbeTimeout())
 	defer cancel()
 	method := http.MethodGet
-	if account.AuthType == model.AuthOAuth {
+	if transportProbe {
 		// A HEAD request is a pure transport check for the ChatGPT/Codex host.
 		// Any completed HTTP response proves the account's configured proxy and
 		// outbound TLS route are alive without generating model output.
@@ -182,7 +183,7 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 	if m.quota != nil {
 		_ = m.quota.ObserveRateLimitHeaders(account, response.Header, checkedAt)
 	}
-	if account.AuthType == model.AuthOAuth {
+	if transportProbe {
 		if response.StatusCode < http.StatusInternalServerError {
 			probe.State = "healthy"
 		} else {
@@ -240,7 +241,7 @@ func (m *AccountMonitor) clientFor(account *model.UpstreamAccount) (*http.Client
 
 func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 	base := strings.TrimSuffix(strings.TrimSpace(account.BaseURL), "/")
-	if account.AuthType == model.AuthOAuth {
+	if account.AuthType == model.AuthOAuth || IsOpenAIAgentIdentity(account) {
 		if base == "" {
 			if account.Platform == model.PlatformGrok {
 				return "https://cli-chat-proxy.grok.com/", nil

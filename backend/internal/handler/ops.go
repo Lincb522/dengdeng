@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 	"dengdeng/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -179,25 +180,26 @@ type opsSystemMetrics struct {
 }
 
 type opsSnapshot struct {
-	GeneratedAt     time.Time          `json:"generated_at"`
-	Range           string             `json:"range"`
-	Start           time.Time          `json:"start"`
-	End             time.Time          `json:"end"`
-	Platform        string             `json:"platform,omitempty"`
-	GroupID         int64              `json:"group_id,omitempty"`
-	Overview        opsOverview        `json:"overview"`
-	Trend           []opsTrend         `json:"trend"`
-	TopModels       []opsRank          `json:"top_models"`
-	TopGroups       []opsRank          `json:"top_groups"`
-	TopUsers        []opsRank          `json:"top_users"`
-	TopAccounts     []opsRank          `json:"top_accounts"`
-	ModelUsage      []opsRank          `json:"model_usage"`
-	RateProfiles    []opsRateProfile   `json:"rate_profiles"`
-	Realtime        opsRealtime        `json:"realtime"`
-	AccountHealth   []opsAccountHealth `json:"account_health"`
-	RecentErrors    []model.UsageLog   `json:"recent_errors"`
-	System          opsSystemMetrics   `json:"system"`
-	SampleTruncated bool               `json:"sample_truncated"`
+	GeneratedAt     time.Time                      `json:"generated_at"`
+	Range           string                         `json:"range"`
+	Start           time.Time                      `json:"start"`
+	End             time.Time                      `json:"end"`
+	Platform        string                         `json:"platform,omitempty"`
+	GroupID         int64                          `json:"group_id,omitempty"`
+	Overview        opsOverview                    `json:"overview"`
+	Trend           []opsTrend                     `json:"trend"`
+	TopModels       []opsRank                      `json:"top_models"`
+	TopGroups       []opsRank                      `json:"top_groups"`
+	TopUsers        []opsRank                      `json:"top_users"`
+	TopAccounts     []opsRank                      `json:"top_accounts"`
+	ModelUsage      []opsRank                      `json:"model_usage"`
+	RateProfiles    []opsRateProfile               `json:"rate_profiles"`
+	Realtime        opsRealtime                    `json:"realtime"`
+	AccountHealth   []opsAccountHealth             `json:"account_health"`
+	RecentErrors    []model.UsageLog               `json:"recent_errors"`
+	System          opsSystemMetrics               `json:"system"`
+	Scheduler       []service.SchedulerDiagnostics `json:"scheduler_diagnostics"`
+	SampleTruncated bool                           `json:"sample_truncated"`
 }
 
 type opsLogMetric struct {
@@ -413,8 +415,23 @@ func (h *AdminHandler) buildOpsSnapshot(filter opsFilter) (opsSnapshot, error) {
 	return opsSnapshot{
 		GeneratedAt: time.Now().UTC(), Range: filter.Range, Start: filter.Start, End: filter.End, Platform: filter.Platform, GroupID: filter.GroupID,
 		Overview: overview, Trend: trend, TopModels: sortedOpsRanks(modelRanks), TopGroups: sortedOpsRanks(groupRanks), TopUsers: sortedOpsRanks(userRanks), TopAccounts: sortedOpsRanks(accountRanks),
-		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(), SampleTruncated: truncated,
+		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(), Scheduler: h.schedulerDiagnostics(filter), SampleTruncated: truncated,
 	}, nil
+}
+
+func (h *AdminHandler) schedulerDiagnostics(filter opsFilter) []service.SchedulerDiagnostics {
+	if h.scheduler == nil {
+		return []service.SchedulerDiagnostics{}
+	}
+	items := h.scheduler.Diagnostics()
+	filtered := make([]service.SchedulerDiagnostics, 0, len(items))
+	for _, item := range items {
+		if filter.GroupID > 0 && item.GroupID != filter.GroupID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func constrainedOpsWindowStart(filter opsFilter, duration time.Duration) time.Time {

@@ -52,6 +52,7 @@ type Gateway struct {
 	oauth        *oauth.Manager
 	runtime      *service.RuntimeMetrics
 	policy       *service.RuntimePolicyService
+	imageStorage *service.ImageStorageService
 	concurrency  *service.ClientConcurrencyLimiter
 	client       *http.Client
 	proxyClients sync.Map // map[proxy-id:updated-at]*http.Client
@@ -69,6 +70,10 @@ type keyRPMWindow struct {
 // configured account and are never operator-mutable here.
 func (g *Gateway) SetRuntimePolicy(policy *service.RuntimePolicyService) {
 	g.policy = policy
+}
+
+func (g *Gateway) SetImageStorageService(storage *service.ImageStorageService) {
+	g.imageStorage = storage
 }
 
 func (g *Gateway) relayAttempts() int {
@@ -261,7 +266,7 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 		return nil, false
 	}
 	if options.enforceUsageLimits && key.QuotaMicro > 0 && key.QuotaUsedMicro >= key.QuotaMicro {
-		util.Fail(c, http.StatusPaymentRequired, "API key quota exhausted")
+		failInsufficientQuota(c, "API key quota exhausted")
 		return nil, false
 	}
 	if options.enforceUsageLimits && key.DailyQuotaMicro > 0 {
@@ -275,7 +280,7 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 			return nil, false
 		}
 		if dailyUsed >= key.DailyQuotaMicro {
-			util.Fail(c, http.StatusPaymentRequired, "API key daily quota reached")
+			failInsufficientQuota(c, "API key daily quota reached")
 			return nil, false
 		}
 	}
@@ -287,7 +292,7 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 	}
 	accessActive := user.AccessExpiresAt != nil && user.AccessExpiresAt.After(time.Now())
 	if options.enforceUsageLimits && user.Role != model.RoleAdmin && !accessActive && user.RemainingRequests <= 0 && user.BalanceMicro <= 0 {
-		util.Fail(c, http.StatusPaymentRequired, "insufficient balance")
+		failInsufficientQuota(c, "insufficient balance")
 		return nil, false
 	}
 
@@ -587,7 +592,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			if current.AccessExpiresAt != nil && current.AccessExpiresAt.After(time.Now()) {
 				ak.AccessActive = true
 			} else if current.BalanceMicro <= 0 {
-				util.Fail(c, http.StatusPaymentRequired, "insufficient balance")
+				failInsufficientQuota(c, "insufficient balance")
 				return
 			}
 		}
@@ -657,7 +662,9 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 					break // fall through to lastStatus passthrough
 				}
 				g.setRelayTimingHeaders(c, trace)
-				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, "no available upstream account in the selected groups")
+				diagnosticMessage := g.schedulerFailureMessage(routeGroup.ID, "no available upstream account in the selected groups")
+				log.Printf("[scheduler] group=%d model=%s %s", routeGroup.ID, req.Model, diagnosticMessage)
+				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, diagnosticMessage)
 				util.Fail(c, http.StatusServiceUnavailable, "no available upstream account in the selected groups")
 				return
 			}
@@ -749,6 +756,16 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	c.Data(lastStatus, "application/json", lastBody)
 }
 
+func (g *Gateway) schedulerFailureMessage(groupID int64, fallback string) string {
+	if g == nil || g.scheduler == nil {
+		return fallback
+	}
+	if diagnostic, ok := g.scheduler.Diagnostic(groupID); ok {
+		return fallback + " (" + diagnostic.Summary() + ")"
+	}
+	return fallback
+}
+
 // recordRelayFailure persists an authenticated, billable request that never
 // produced an upstream success. This is intentionally cost-neutral, but makes
 // scheduler exhaustion and final upstream failures visible in the same ledger
@@ -812,6 +829,16 @@ func billingRates(user model.User, group model.Group, groupRate float64) service
 	}
 }
 
+func failInsufficientQuota(c *gin.Context, message string) {
+	if strings.Contains(c.Request.URL.Path, "/messages") {
+		c.JSON(http.StatusPaymentRequired, gin.H{"type": "error", "error": gin.H{"type": "billing_error", "message": message}})
+		return
+	}
+	c.JSON(http.StatusPaymentRequired, gin.H{"error": gin.H{
+		"message": message, "type": "insufficient_quota", "param": nil, "code": "insufficient_quota",
+	}})
+}
+
 func retryableUpstream(status int, body []byte) bool {
 	switch {
 	case status == http.StatusUnauthorized,
@@ -850,7 +877,7 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 	// An OpenAI OAuth credential is a ChatGPT/Codex subscription credential,
 	// not an API Platform key. It has a separate Responses-shaped upstream and
 	// needs protocol adaptation before it can serve the public OpenAI APIs.
-	if req.Platform == model.PlatformOpenAI && acc.AuthType == model.AuthOAuth {
+	if req.Platform == model.PlatformOpenAI && (acc.AuthType == model.AuthOAuth || service.IsOpenAIAgentIdentity(acc)) {
 		return g.forwardOpenAIOAuth(c, acc, req)
 	}
 

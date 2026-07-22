@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	CtxUser = "ctx_user"
+	CtxUser   = "ctx_user"
+	CtxClaims = "ctx_claims"
 )
 
 // JWTAuth validates the bearer token and loads the current user.
@@ -42,25 +43,44 @@ func JWTAuth(db *gorm.DB, secret string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		if claims.Fingerprint != "" && claims.Fingerprint != util.SessionFingerprint(secret, c.Request.UserAgent()) {
+			util.Fail(c, http.StatusUnauthorized, "session device changed, please sign in again")
+			c.Abort()
+			return
+		}
 		if user.Status != model.StatusActive {
 			util.Fail(c, http.StatusForbidden, "account disabled")
 			c.Abort()
 			return
 		}
 		c.Set(CtxUser, &user)
+		c.Set(CtxClaims, claims)
 		c.Next()
 	}
 }
 
 func AdminOnly() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if CurrentUser(c).Role != model.RoleAdmin {
+		user := CurrentUser(c)
+		if user.Role != model.RoleAdmin {
 			util.Fail(c, http.StatusForbidden, "admin only")
+			c.Abort()
+			return
+		}
+		claims := CurrentClaims(c)
+		if user.TOTPEnabled && (claims == nil || !claims.MFA) {
+			util.Fail(c, http.StatusUnauthorized, "TOTP verification is required for administrator actions")
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+func CurrentClaims(c *gin.Context) *util.Claims {
+	claims, _ := c.Get(CtxClaims)
+	value, _ := claims.(*util.Claims)
+	return value
 }
 
 func CurrentUser(c *gin.Context) *model.User {

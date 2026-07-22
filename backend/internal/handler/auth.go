@@ -84,6 +84,7 @@ func (h *AuthHandler) clearFailures(email string) {
 type credentials struct {
 	Email         string `json:"email" binding:"required,email"`
 	Password      string `json:"password" binding:"required,min=8,max=72"`
+	TOTPCode      string `json:"totp_code"`
 	TermsRevision string `json:"terms_revision"`
 }
 
@@ -334,6 +335,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		util.Fail(c, http.StatusForbidden, "account disabled")
 		return
 	}
+	if user.TOTPEnabled && !util.ValidateTOTP(string(user.TOTPSecret), req.TOTPCode, time.Now()) {
+		h.recordFailure(email)
+		util.Fail(c, http.StatusUnauthorized, "authenticator code is required or invalid")
+		return
+	}
 	settings, err := h.settings.Get()
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "load login settings failed")
@@ -359,7 +365,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) issueToken(c *gin.Context, user *model.User) {
-	token, err := util.SignJWT(h.cfg.JWT.Secret, user.ID, user.Role, user.TokenVersion, time.Duration(h.cfg.JWT.ExpireHour)*time.Hour)
+	token, err := util.SignJWTBound(
+		h.cfg.JWT.Secret, user.ID, user.Role, user.TokenVersion,
+		time.Duration(h.cfg.JWT.ExpireHour)*time.Hour,
+		util.SessionFingerprint(h.cfg.JWT.Secret, c.Request.UserAgent()), user.TOTPEnabled,
+	)
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "sign token failed")
 		return

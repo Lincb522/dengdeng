@@ -28,6 +28,7 @@
 | --- | --- |
 | Anthropic | `/v1/messages` |
 | OpenAI / xAI | `/v1/chat/completions`、`/v1/responses`、`/v1/images/generations`、`/v1/images/edits` |
+| 异步生图 | `POST /v1/images/generations/async`、`GET /v1/images/tasks/:task_id` |
 | Gemini | `/v1beta/models/*` |
 
 具体模型由管理端的模型目录和分组决定。`GET /v1/models` 直接读取本地启用目录，因此即使账号池临时不可用，客户端仍能正常拉取模型列表。
@@ -77,7 +78,7 @@ go build -o dengdeng ./cmd/server
 3. 在「模型配置」确认对外模型名、上游模型名和定价。
 4. 用户在「API 密钥」创建 `dd-` 密钥时可同时选择多个分组；请求会按模型平台自动路由，同平台分组不可用时自动切换。之后即可将 Base URL 和密钥填入 SDK 或 CLI。
 
-浏览器 OAuth 直连目前用于 Claude 和 OpenAI。生产环境需要先在上游登记回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI 还支持导入 Codex / Sub2API Agent Identity，或临时使用 Access Token / Web Session 注册为不持久化 OAuth Token 的签名身份。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
 
 ### 客户端示例
 

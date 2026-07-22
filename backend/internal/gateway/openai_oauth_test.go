@@ -79,7 +79,7 @@ func TestRequireOAuthSSEKeepsEventStream(t *testing.T) {
 	upstream := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{"Content-Type": []string{"text/event-stream; charset=utf-8"}},
-		Body:       io.NopCloser(strings.NewReader("data: {}\n\n")),
+		Body:       io.NopCloser(strings.NewReader("data:{\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n")),
 	}
 
 	response, err := requireOAuthSSE(upstream, nil)
@@ -92,7 +92,7 @@ func TestRequireOAuthSSEAcceptsHeaderlessSSE(t *testing.T) {
 	upstream := &http.Response{
 		StatusCode: http.StatusOK,
 		Header:     http.Header{},
-		Body:       io.NopCloser(strings.NewReader("event: response.created\ndata: {\"type\":\"response.created\"}\n\n")),
+		Body:       io.NopCloser(strings.NewReader("event:response.created\ndata:{\"type\":\"response.created\"}\n\ndata:{\"type\":\"response.completed\",\"response\":{}}\n\n")),
 	}
 	response, err := requireOAuthSSE(upstream, nil)
 	if err != nil {
@@ -108,8 +108,42 @@ func TestRequireOAuthSSEAcceptsHeaderlessSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(body), "event: response.created") {
+	if !strings.HasPrefix(string(body), "event:response.created") {
 		t.Fatalf("SSE bytes were not preserved: %q", body)
+	}
+}
+
+func TestRequireOAuthSSERejectsEmptySuccessfulStream(t *testing.T) {
+	upstream := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader("data:{\"type\":\"response.created\"}\n\ndata:[DONE]\n\n")),
+	}
+	response, err := requireOAuthSSE(upstream, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+	body, _ := io.ReadAll(response.Body)
+	if !strings.Contains(string(body), "missing_terminal_event") {
+		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestRequireOAuthSSEConvertsPreOutputRateLimitToRetryableStatus(t *testing.T) {
+	upstream := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader("data:{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"limited\"}}\n\n")),
+	}
+	response, err := requireOAuthSSE(upstream, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("status = %d", response.StatusCode)
 	}
 }
 

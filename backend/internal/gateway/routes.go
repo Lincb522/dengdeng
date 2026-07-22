@@ -2,12 +2,14 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"time"
 
@@ -34,6 +36,8 @@ func (g *Gateway) Register(r *gin.Engine) {
 	r.POST("/v1/chat/completions", g.handleOpenAIChat)
 	r.POST("/v1/responses", g.handleOpenAIResponses)
 	r.POST("/v1/images/generations", g.handleOpenAIImageGeneration)
+	r.POST("/v1/images/generations/async", g.handleOpenAIImageGenerationAsync)
+	r.GET("/v1/images/tasks/:task_id", g.handleOpenAIImageTask)
 	r.POST("/v1/images/edits", g.handleOpenAIImageEdit)
 
 	// Gemini (native v1beta path style)
@@ -46,6 +50,109 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// CCSwitch and similar desktop clients use this authenticated endpoint to
 	// display the key's remaining balance and configured caps.
 	r.GET("/v1/usage", g.handleUsage)
+}
+
+func (g *Gateway) handleOpenAIImageGenerationAsync(c *gin.Context) {
+	ak, ok := g.authenticateUsage(c)
+	if !ok {
+		return
+	}
+	if g.imageStorage == nil {
+		writeAdapterJSON(c, http.StatusNotFound, map[string]any{"error": map[string]any{"type": "not_found_error", "message": "asynchronous image tasks are not enabled"}})
+		return
+	}
+	body, err := readBody(c)
+	if err != nil {
+		writeReadBodyError(c, err)
+		return
+	}
+	fields := peekJSON(body)
+	if fields == nil || strings.TrimSpace(jsonString(fields["prompt"])) == "" {
+		util.Fail(c, http.StatusBadRequest, "prompt is required")
+		return
+	}
+	if !ak.selectGroup(model.PlatformOpenAI) {
+		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI image group")
+		return
+	}
+	task, err := g.imageStorage.CreateTask(c.Request.Context(), ak.User.ID, ak.Key.ID)
+	if err != nil {
+		writeAdapterJSON(c, http.StatusServiceUnavailable, map[string]any{"error": map[string]any{"type": "service_unavailable", "message": err.Error()}})
+		return
+	}
+	authorization := c.GetHeader("Authorization")
+	userAgent := c.Request.UserAgent()
+	acceptLanguage := c.GetHeader("Accept-Language")
+	go g.runAsyncImageTask(task.ID, authorization, userAgent, acceptLanguage, body)
+	c.JSON(http.StatusAccepted, imageTaskResponse(task))
+}
+
+func (g *Gateway) handleOpenAIImageTask(c *gin.Context) {
+	ak, ok := g.authenticateUsage(c)
+	if !ok {
+		return
+	}
+	if g.imageStorage == nil {
+		util.Fail(c, http.StatusNotFound, "image task not found")
+		return
+	}
+	task, err := g.imageStorage.GetTask(c.Request.Context(), c.Param("task_id"), ak.User.ID, ak.Key.ID)
+	if err != nil {
+		util.Fail(c, http.StatusNotFound, "image task not found")
+		return
+	}
+	c.JSON(http.StatusOK, imageTaskResponse(task))
+}
+
+func imageTaskResponse(task model.ImageTask) map[string]any {
+	result := any(nil)
+	if strings.TrimSpace(task.Result) != "" {
+		var decoded any
+		if json.Unmarshal([]byte(task.Result), &decoded) == nil {
+			result = decoded
+		}
+	}
+	taskError := any(nil)
+	if strings.TrimSpace(task.Error) != "" {
+		var decoded any
+		if json.Unmarshal([]byte(task.Error), &decoded) == nil {
+			taskError = decoded
+		}
+	}
+	return map[string]any{
+		"id": task.ID, "task_id": task.ID, "object": "image.generation.task", "status": task.Status,
+		"http_status": task.HTTPStatus, "result": result, "error": taskError,
+		"created_at": task.CreatedAt.Unix(), "completed_at": task.CompletedAt, "expires_at": task.ExpiresAt.Unix(),
+	}
+}
+
+func (g *Gateway) runAsyncImageTask(taskID, authorization, userAgent, acceptLanguage string, body []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body)).WithContext(ctx)
+	request.Header.Set("Authorization", authorization)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("User-Agent", userAgent)
+	request.Header.Set("Accept-Language", acceptLanguage)
+	c.Request = request
+	g.handleOpenAIImageGeneration(c)
+	status := recorder.Code
+	if status == 0 {
+		status = http.StatusOK
+	}
+	result := recorder.Body.Bytes()
+	if status >= http.StatusOK && status < http.StatusMultipleChoices {
+		stored, err := g.imageStorage.RewriteImageResult(ctx, taskID, result)
+		if err == nil {
+			_ = g.imageStorage.FinishTask(context.Background(), taskID, "completed", status, stored, nil)
+			return
+		}
+		result, _ = json.Marshal(map[string]any{"error": map[string]any{"type": "storage_error", "message": "failed to store generated image"}})
+		status = http.StatusBadGateway
+	}
+	_ = g.imageStorage.FinishTask(context.Background(), taskID, "failed", status, nil, result)
 }
 
 func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
@@ -165,7 +272,7 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 	if !ok {
 		return
 	}
-	body, effort := applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningChatCompletions)
+	body, effort := applyOpenAIReasoningPolicy(fields, body, ak.Key.ReasoningEffort, ak.Group, openAIReasoningChatCompletions)
 	stream := jsonBool(fields["stream"])
 	// Guarantee a usage chunk on streams so billing never misses tokens.
 	if stream {
@@ -232,7 +339,7 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	body, effort := applyOpenAIReasoningDefault(fields, body, ak.Key.ReasoningEffort, openAIReasoningResponses)
+	body, effort := applyOpenAIReasoningPolicy(fields, body, ak.Key.ReasoningEffort, ak.Group, openAIReasoningResponses)
 	_, hasTools := fields["tools"]
 	_, hasParallel := fields["parallel_tool_calls"]
 	_, hasMetadata := fields["client_metadata"]
@@ -289,7 +396,7 @@ func (g *Gateway) relayAnthropicViaResponses(c *gin.Context, ak *authedKey, body
 		return
 	}
 	converted["model"] = resolved.UpstreamModel
-	effort := applyOpenAIResponsesReasoningDefault(converted, ak.Key.ReasoningEffort)
+	effort := applyOpenAIResponsesReasoningPolicy(converted, ak.Key.ReasoningEffort, ak.Group)
 	encoded, err := json.Marshal(converted)
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, "convert Anthropic request failed")

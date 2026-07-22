@@ -84,6 +84,23 @@ function probeClass(account: OpsAccountHealth) {
   return account.probe_state === 'healthy' ? 'text-signal-green' : account.probe_state ? 'text-amber' : 'text-slate-500'
 }
 
+function schedulerReasonLabel(reason: string) {
+	return ({
+		attempted: '本次已尝试',
+		cooldown: '账号冷却',
+		quota_exhausted: '额度用尽',
+		model_cooldown: '模型临时冷却',
+		concurrency_full: '并发已满',
+		disabled: '账号停用',
+		account_missing: '账号缺失',
+		selection_exhausted: '调度已耗尽',
+	} as Record<string, string>)[reason] || reason
+}
+
+function schedulerGroupName(groupId: number) {
+	return groups.value.find((group) => group.id === groupId)?.name || `分组 #${groupId}`
+}
+
 async function triggerAllProbes() {
   probingAll.value = true
   try {
@@ -124,6 +141,7 @@ function normalizeSnapshot(data: OpsSnapshot): OpsSnapshot {
     rate_profiles: Array.isArray(data.rate_profiles) ? data.rate_profiles : [],
     account_health: Array.isArray(data.account_health) ? data.account_health : [],
     recent_errors: Array.isArray(data.recent_errors) ? data.recent_errors : [],
+		scheduler_diagnostics: Array.isArray(data.scheduler_diagnostics) ? data.scheduler_diagnostics : [],
     realtime: { ...realtime, last_minute: realtime.last_minute || emptyWindow, breakdown: Array.isArray(realtime.breakdown) ? realtime.breakdown : [] },
   }
 }
@@ -232,6 +250,16 @@ onBeforeUnmount(() => {
           <p class="ops-token-note">上方为当前筛选周期的模型累计；下方明细可核对每个模型的输入、输出和缓存。</p>
         </article>
       </section>
+
+		<section v-if="snapshot?.scheduler_diagnostics.length" class="mb-4 grid gap-3" aria-label="调度诊断">
+			<article v-for="diagnostic in snapshot.scheduler_diagnostics" :key="diagnostic.group_id" class="card border-signal-red/20 p-4">
+				<div class="flex flex-wrap items-start justify-between gap-3">
+					<div><div class="text-xs font-semibold uppercase tracking-[.12em] text-signal-red">最近一次 503 调度诊断</div><h3 class="mt-1 text-sm font-semibold text-slate-200">{{ schedulerGroupName(diagnostic.group_id) }}<span v-if="diagnostic.model" class="ml-2 font-mono text-xs text-slate-500">{{ diagnostic.model }}</span></h3></div>
+					<div class="text-right text-xs text-slate-500"><strong class="num block text-base text-slate-200">{{ diagnostic.pool }}</strong>账号池 · {{ new Date(diagnostic.updated_at).toLocaleString() }}</div>
+				</div>
+				<div class="mt-3 flex flex-wrap gap-2"><span v-for="(count, reason) in diagnostic.reasons" :key="reason" class="tag-red">{{ schedulerReasonLabel(String(reason)) }} {{ count }}</span></div>
+			</article>
+		</section>
 
       <section class="ops-main-grid">
         <OpsTrendChart :items="snapshot?.trend ?? []" />

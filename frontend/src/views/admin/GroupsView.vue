@@ -7,6 +7,7 @@ import { PLATFORM_LABELS } from '../../api/types'
 const groups = ref<Group[]>([])
 const showForm = ref(false)
 const editing = ref<Group | null>(null)
+const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 const form = ref({
   name: '',
@@ -18,6 +19,8 @@ const form = ref({
 	cache_write_1h_multiplier: 1,
 	image_rate_independent: false,
 	image_rate_multiplier: 1,
+	max_reasoning_effort: 'auto',
+	reasoning_effort_mappings: {} as Record<string, string>,
   is_public: true,
   status: 'active',
 })
@@ -33,6 +36,7 @@ function openCreate() {
     name: '', platform: 'anthropic', description: '', rate_multiplier: 1,
     cache_read_multiplier: 1, cache_write_5m_multiplier: 1, cache_write_1h_multiplier: 1,
     image_rate_independent: false, image_rate_multiplier: 1,
+		max_reasoning_effort: 'auto', reasoning_effort_mappings: {} as Record<string, string>,
     is_public: true, status: 'active',
   }
   showForm.value = true
@@ -50,6 +54,8 @@ function openEdit(g: Group) {
 		cache_write_1h_multiplier: g.cache_write_1h_multiplier || 1,
 		image_rate_independent: g.image_rate_independent || false,
 		image_rate_multiplier: g.image_rate_multiplier || 1,
+		max_reasoning_effort: g.max_reasoning_effort || 'auto',
+		reasoning_effort_mappings: { ...(g.reasoning_effort_mappings || {}) },
     is_public: g.is_public,
     status: g.status,
   }
@@ -64,6 +70,9 @@ async function save() {
     cache_write_5m_multiplier: Number(form.value.cache_write_5m_multiplier),
     cache_write_1h_multiplier: Number(form.value.cache_write_1h_multiplier),
     image_rate_multiplier: Number(form.value.image_rate_multiplier),
+		reasoning_effort_mappings: Object.fromEntries(
+			Object.entries(form.value.reasoning_effort_mappings).filter(([source, target]) => target && source !== target),
+		),
   }
   const ok = editing.value
     ? await withToast(() => api.put(`/api/admin/groups/${editing.value!.id}`, body), '已保存')
@@ -126,6 +135,7 @@ async function togglePublic(g: Group) {
 					<div class="num text-sm">基础 x{{ g.rate_multiplier }}</div>
 					<div class="mt-1 text-xs text-slate-500">命中 x{{ g.cache_read_multiplier || 1 }} · 5m x{{ g.cache_write_5m_multiplier || 1 }} · 1h x{{ g.cache_write_1h_multiplier || 1 }}</div>
 					<div v-if="g.image_rate_independent" class="mt-1 text-xs text-amber">图像 x{{ g.image_rate_multiplier || 1 }}</div>
+					<div v-if="g.platform === 'openai' || g.platform === 'grok'" class="mt-1 text-xs text-slate-500">思考上限 {{ g.max_reasoning_effort && g.max_reasoning_effort !== 'auto' ? g.max_reasoning_effort : '不限制' }}</div>
 				</td>
             <td>
               <span :class="g.is_public ? 'tag-green' : 'tag-gray'">{{ g.is_public ? '公开' : '私有' }}</span>
@@ -148,7 +158,7 @@ async function togglePublic(g: Group) {
 
     <Teleport to="body">
       <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
-        <div class="card w-full max-w-2xl p-6">
+        <div class="card max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto p-5 sm:p-6">
           <h3 class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑分组' : '新建分组' }}</h3>
           <div class="space-y-4">
             <div>
@@ -168,7 +178,7 @@ async function togglePublic(g: Group) {
               <label class="label">描述</label>
               <input v-model="form.description" class="input" placeholder="可选" />
             </div>
-            <div class="grid grid-cols-2 gap-4">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label class="label">基础倍率</label>
                 <input v-model.number="form.rate_multiplier" type="number" step="0.1" min="0.1" class="input" />
@@ -187,7 +197,7 @@ async function togglePublic(g: Group) {
 						<span class="text-[11px] text-slate-500">在基础倍率之上叠加</span>
 					</div>
 					<p class="mb-3 text-xs leading-5 text-slate-500">缓存命中、短缓存创建和长缓存创建分开计费；没有 TTL 明细的旧上游响应按 5m 规则处理。</p>
-					<div class="grid grid-cols-3 gap-3">
+					<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
 						<div>
 							<label class="label">命中</label>
 							<input v-model.number="form.cache_read_multiplier" type="number" step="0.1" min="0.1" class="input" />
@@ -216,6 +226,30 @@ async function togglePublic(g: Group) {
 					<div class="mt-3 max-w-[180px]">
 						<label class="label">图像倍率</label>
 						<input v-model.number="form.image_rate_multiplier" :disabled="!form.image_rate_independent" type="number" step="0.1" min="0.1" class="input disabled:cursor-not-allowed disabled:opacity-50" />
+					</div>
+				</div>
+				<div v-if="form.platform === 'openai' || form.platform === 'grok'" class="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
+					<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+						<div>
+							<label class="label !mb-1">思考强度策略</label>
+							<p class="text-xs text-slate-500">客户端参数先映射，再按分组上限限制；账单记录实际生效档位。</p>
+						</div>
+						<div class="w-full sm:w-44">
+							<label class="label">最高档位</label>
+							<select v-model="form.max_reasoning_effort" class="input">
+								<option value="auto">不限制</option>
+								<option v-for="effort in reasoningEfforts" :key="effort" :value="effort">{{ effort }}</option>
+							</select>
+						</div>
+					</div>
+					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+						<div v-for="effort in reasoningEfforts" :key="effort" class="rounded-lg border border-slate-800/80 p-2.5">
+							<label class="label font-mono">{{ effort }} →</label>
+							<select v-model="form.reasoning_effort_mappings[effort]" class="input !py-2 text-xs">
+								<option value="">保持原值</option>
+								<option v-for="target in reasoningEfforts" :key="target" :value="target">{{ target }}</option>
+							</select>
+						</div>
 					</div>
 				</div>
             <label class="flex items-center gap-2 text-sm text-slate-300">

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"strings"
 
 	"dengdeng/internal/config"
@@ -54,6 +56,8 @@ type SystemSettings struct {
 	RegistrationEmailSuffixes []string               `json:"registration_email_suffixes"`
 	InitBalanceMicro          int64                  `json:"init_balance_micro"`
 	LoginAgreement            LoginAgreementSettings `json:"login_agreement"`
+	TrustedProxies            []string               `json:"trusted_proxies"`
+	ForwardedClientIPHeaders  []string               `json:"forwarded_client_ip_headers"`
 }
 
 type AdminSystemSettings struct {
@@ -153,18 +157,26 @@ func (s *SystemSettingsService) defaults() SystemSettings {
 	name := "DengDeng AI · 蹬蹬ai"
 	allowRegister := true
 	initBalance := int64(0)
+	trustedProxies := []string{}
+	forwardedHeaders := []string{"X-Forwarded-For", "X-Real-IP"}
 	if s.cfg != nil {
 		if strings.TrimSpace(s.cfg.Site.Name) != "" {
 			name = strings.TrimSpace(s.cfg.Site.Name)
 		}
 		allowRegister = s.cfg.Site.AllowRegister
 		initBalance = s.cfg.Site.InitBalanceMicro
+		trustedProxies = append([]string(nil), s.cfg.Server.TrustedProxies...)
+		if len(s.cfg.Server.ForwardedClientIPHeaders) > 0 {
+			forwardedHeaders = append([]string(nil), s.cfg.Server.ForwardedClientIPHeaders...)
+		}
 	}
 	return SystemSettings{
-		SiteName:         name,
-		SiteSubtitle:     "统一管理模型接入与用量",
-		AllowRegister:    allowRegister,
-		InitBalanceMicro: initBalance,
+		SiteName:                 name,
+		SiteSubtitle:             "统一管理模型接入与用量",
+		AllowRegister:            allowRegister,
+		InitBalanceMicro:         initBalance,
+		TrustedProxies:           trustedProxies,
+		ForwardedClientIPHeaders: forwardedHeaders,
 		LoginAgreement: LoginAgreementSettings{
 			Enabled: true, Mode: "modal", UpdatedAt: "2026-07-16", Documents: defaultLegalDocuments(),
 		},
@@ -218,6 +230,48 @@ func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, 
 		return SystemSettings{}, errors.New("at most 64 registration email suffixes are allowed")
 	}
 	next.RegistrationEmailSuffixes = suffixes
+
+	proxies := make([]string, 0, len(next.TrustedProxies))
+	proxySeen := make(map[string]struct{}, len(next.TrustedProxies))
+	for _, raw := range next.TrustedProxies {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if len(value) > 128 {
+			return SystemSettings{}, errors.New("trusted proxy is too long")
+		}
+		if ip := net.ParseIP(value); ip == nil {
+			if _, _, err := net.ParseCIDR(value); err != nil {
+				return SystemSettings{}, errors.New("trusted proxies must be IP addresses or CIDR ranges")
+			}
+		}
+		if _, ok := proxySeen[value]; !ok {
+			proxySeen[value] = struct{}{}
+			proxies = append(proxies, value)
+		}
+	}
+	if len(proxies) > 64 {
+		return SystemSettings{}, errors.New("at most 64 trusted proxies are allowed")
+	}
+	next.TrustedProxies = proxies
+
+	headers := make([]string, 0, len(next.ForwardedClientIPHeaders))
+	headerSeen := make(map[string]struct{}, len(next.ForwardedClientIPHeaders))
+	for _, raw := range next.ForwardedClientIPHeaders {
+		name := http.CanonicalHeaderKey(strings.TrimSpace(raw))
+		if name == "" || strings.ContainsAny(name, " :\t\r\n") {
+			return SystemSettings{}, errors.New("forwarded client IP header is invalid")
+		}
+		if _, ok := headerSeen[name]; !ok {
+			headerSeen[name] = struct{}{}
+			headers = append(headers, name)
+		}
+	}
+	if len(headers) == 0 || len(headers) > 8 {
+		return SystemSettings{}, errors.New("between 1 and 8 forwarded client IP headers are required")
+	}
+	next.ForwardedClientIPHeaders = headers
 
 	a := &next.LoginAgreement
 	if a.Mode != "checkbox" {
@@ -285,7 +339,7 @@ func (s *SystemSettingsService) Get() (SystemSettings, error) {
 	if err != nil {
 		return SystemSettings{}, err
 	}
-	var next SystemSettings
+	next := defaults
 	if err := json.Unmarshal([]byte(record.Value), &next); err != nil {
 		return SystemSettings{}, fmt.Errorf("decode system settings: %w", err)
 	}

@@ -24,10 +24,11 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host           string   `yaml:"host"`
-	Port           int      `yaml:"port"`
-	Mode           string   `yaml:"mode"` // debug | release
-	TrustedProxies []string `yaml:"trusted_proxies"`
+	Host                     string   `yaml:"host"`
+	Port                     int      `yaml:"port"`
+	Mode                     string   `yaml:"mode"` // debug | release
+	TrustedProxies           []string `yaml:"trusted_proxies"`
+	ForwardedClientIPHeaders []string `yaml:"forwarded_client_ip_headers"`
 }
 
 // DatabaseConfig selects the storage backend. Driver "sqlite" needs only a
@@ -129,7 +130,7 @@ type ProxyConfig struct {
 
 func Default() *Config {
 	return &Config{
-		Server:   ServerConfig{Host: "0.0.0.0", Port: 9100, Mode: "release"},
+		Server:   ServerConfig{Host: "0.0.0.0", Port: 9100, Mode: "release", ForwardedClientIPHeaders: []string{"X-Forwarded-For", "X-Real-IP"}},
 		Database: DatabaseConfig{Driver: "sqlite", Path: "data/dengdeng.db", Host: "localhost", Port: 5432, User: "dengdeng", DBName: "dengdeng", SSLMode: "disable"},
 		JWT:      JWTConfig{ExpireHour: 72},
 		Admin:    AdminConfig{Email: "admin@dengdeng.local", Password: ""},
@@ -189,6 +190,9 @@ func applyEnv(cfg *Config) {
 	if raw := os.Getenv("SERVER_TRUSTED_PROXIES"); raw != "" {
 		parts := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t' })
 		cfg.Server.TrustedProxies = parts
+	}
+	if raw := os.Getenv("SERVER_FORWARDED_CLIENT_IP_HEADERS"); raw != "" {
+		cfg.Server.ForwardedClientIPHeaders = strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '\n' || r == '\t' })
 	}
 
 	envStr("DATABASE_DRIVER", &cfg.Database.Driver)

@@ -26,7 +26,7 @@ const accountView = ref<AccountView>('table')
 const sortBy = ref<AccountSort>('custom')
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const filterPlatform = ref<'all' | 'openai' | 'anthropic' | 'gemini' | 'grok'>('all')
-const filterAuthType = ref<'all' | 'api_key' | 'oauth'>('all')
+const filterAuthType = ref<'all' | 'api_key' | 'oauth' | 'agent_identity'>('all')
 const draggingAccountID = ref<number | null>(null)
 const accountPresentationStorageKey = 'dengdeng.admin.accounts.presentation.v1'
 
@@ -34,10 +34,13 @@ const form = ref({
   group_id: 0,
   name: '',
   base_url: '',
-  auth_type: 'api_key' as 'api_key' | 'oauth',
+  auth_type: 'api_key' as 'api_key' | 'oauth' | 'agent_identity',
   api_key: '',
   access_token: '',
   refresh_token: '',
+	web_session: '',
+	chatgpt_user_id: '',
+	plan_type: '',
   account_id: '',
   email: '',
   proxy_id: 0,
@@ -118,6 +121,7 @@ const platformOfSelectedGroup = computed(
 const oauthAvailable = computed(
   () => platformOfSelectedGroup.value === 'anthropic' || platformOfSelectedGroup.value === 'openai',
 )
+const agentIdentityAvailable = computed(() => platformOfSelectedGroup.value === 'openai')
 const oauthProviderLabel = computed(() => PLATFORM_LABELS[platformOfSelectedGroup.value] || '上游账号')
 const oauthStarting = ref(false)
 
@@ -126,7 +130,7 @@ function openCreate() {
   form.value = {
     group_id: groups.value[0]?.id ?? 0,
     name: '', base_url: '', auth_type: 'api_key',
-    api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
+    api_key: '', access_token: '', refresh_token: '', web_session: '', account_id: '', chatgpt_user_id: '', email: '', plan_type: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
   }
   showForm.value = true
@@ -136,7 +140,7 @@ function openEdit(a: UpstreamAccount) {
   editing.value = a
   form.value = {
     group_id: a.group_id, name: a.name, base_url: a.base_url, auth_type: a.auth_type,
-    api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
+    api_key: '', access_token: '', refresh_token: '', web_session: '', account_id: a.account_id, chatgpt_user_id: '', email: a.email, plan_type: '', proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
   showForm.value = true
@@ -145,9 +149,9 @@ function openEdit(a: UpstreamAccount) {
 const canSave = computed(() => {
   if (!form.value.name) return false
   if (editing.value) return true
-  return form.value.auth_type === 'api_key'
-    ? !!form.value.api_key
-    : !!(form.value.access_token || form.value.refresh_token)
+  if (form.value.auth_type === 'api_key') return !!form.value.api_key
+  if (form.value.auth_type === 'agent_identity') return !!(form.value.access_token || form.value.web_session)
+  return !!(form.value.access_token || form.value.refresh_token)
 })
 
 async function save() {
@@ -162,16 +166,26 @@ async function save() {
   }
   if (form.value.auth_type === 'api_key') {
     if (form.value.api_key) body.api_key = form.value.api_key
-  } else {
+  } else if (form.value.auth_type === 'oauth') {
     if (form.value.access_token) body.access_token = form.value.access_token
     if (form.value.refresh_token) body.refresh_token = form.value.refresh_token
     if (form.value.account_id) body.account_id = form.value.account_id
     if (form.value.email) body.email = form.value.email
+	} else {
+		if (form.value.access_token) body.access_token = form.value.access_token
+		if (form.value.web_session) body.web_session = form.value.web_session
+		if (form.value.account_id) body.account_id = form.value.account_id
+		if (form.value.chatgpt_user_id) body.chatgpt_user_id = form.value.chatgpt_user_id
+		if (form.value.email) body.email = form.value.email
+		if (form.value.plan_type) body.plan_type = form.value.plan_type
   }
   let ok: unknown = null
   if (editing.value) {
     ok = await withToast(() => api.put(`/api/admin/accounts/${editing.value!.id}`, body), '已保存')
-  } else {
+  } else if (form.value.auth_type === 'agent_identity') {
+		body.group_id = form.value.group_id
+		ok = await withToast(() => api.post('/api/admin/accounts/agent-identity', body), 'Agent Identity 已注册')
+	} else {
     body.group_id = form.value.group_id
     ok = await withToast(() => api.post('/api/admin/accounts', body), '账号已添加')
   }
@@ -346,7 +360,7 @@ function detectImportPlatforms(raw: string): ImportPlatform[] {
       if (explicit) found.add(explicit)
       if (record.claudeAiOauth || record.claude_ai_oauth) found.add('anthropic')
       // Native Codex auth.json has `tokens` / `auth_mode` but no platform.
-      if (record.tokens || record.auth_mode === 'chatgpt' || record.authMode === 'chatgpt') found.add('openai')
+      if (record.tokens || record.agent_identity || record.agentIdentity || record.auth_mode === 'chatgpt' || record.authMode === 'chatgpt' || record.auth_mode === 'agentIdentity' || record.authMode === 'agentIdentity') found.add('openai')
     }
     if (Array.isArray(root)) {
       root.forEach(inspect)
@@ -416,6 +430,7 @@ function healthState(a: UpstreamAccount): { label: string; cls: string } {
 }
 
 function authBadge(a: UpstreamAccount): { label: string; cls: string } {
+	if (a.auth_type === 'agent_identity') return { label: 'Agent Identity', cls: 'tag-cyan' }
   return a.auth_type === 'oauth'
     ? { label: 'OAuth', cls: 'tag-cyan' }
     : { label: 'API Key', cls: 'tag-gray' }
@@ -630,6 +645,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <option value="all">全部凭证</option>
           <option value="api_key">API Key</option>
           <option value="oauth">OAuth</option>
+						<option value="agent_identity">Agent Identity</option>
         </select>
         <select v-model="sortBy" class="input accounts-toolbar-select" @change="updateSort">
           <option value="custom">自定义排序</option>
@@ -817,6 +833,14 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                   :title="oauthAvailable ? '' : 'Gemini 暂不支持 OAuth 自动续期'"
                   @click="form.auth_type = 'oauth'"
                 >OAuth</button>
+				<button
+					type="button"
+					class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
+					:class="form.auth_type === 'agent_identity' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
+					:disabled="!agentIdentityAvailable"
+					title="仅 OpenAI 分组支持"
+					@click="form.auth_type = 'agent_identity'"
+				>Agent Identity</button>
               </div>
             </div>
             <div>
@@ -842,7 +866,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 <input v-model="form.api_key" class="input font-mono" placeholder="sk-..." />
               </div>
             </template>
-            <template v-else>
+            <template v-else-if="form.auth_type === 'oauth'">
               <div v-if="!editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
                 <div class="flex items-center justify-between gap-3">
                   <div>
@@ -878,6 +902,29 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 </div>
               </div>
             </template>
+			<template v-else>
+				<div v-if="editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3 text-sm text-slate-300">该账号使用动态 AgentAssertion。编辑时不会展示或覆盖私钥。</div>
+				<template v-else>
+					<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
+						<p class="text-sm font-medium text-slate-200">注册 Agent Identity</p>
+						<p class="mt-1 text-xs leading-5 text-slate-500">填写有效 Access Token 或 Web Session。注册完成后只保存加密私钥和 Runtime ID，不保存这里的 Token。</p>
+					</div>
+					<div>
+						<label class="label">Access Token（二选一）</label>
+						<textarea v-model="form.access_token" rows="2" class="input font-mono text-xs" placeholder="eyJ..."></textarea>
+					</div>
+					<div>
+						<label class="label">Web Session（二选一）</label>
+						<textarea v-model="form.web_session" rows="2" class="input font-mono text-xs" placeholder="Session Token 或完整 Cookie"></textarea>
+					</div>
+					<div class="grid grid-cols-2 gap-4">
+						<div><label class="label">Account ID（通常自动识别）</label><input v-model="form.account_id" class="input font-mono text-xs" /></div>
+						<div><label class="label">ChatGPT User ID</label><input v-model="form.chatgpt_user_id" class="input font-mono text-xs" /></div>
+						<div><label class="label">邮箱</label><input v-model="form.email" class="input text-xs" /></div>
+						<div><label class="label">套餐</label><input v-model="form.plan_type" class="input text-xs" placeholder="free / plus / pro" /></div>
+					</div>
+				</template>
+			</template>
 
             <div class="grid grid-cols-2 gap-4">
               <div>

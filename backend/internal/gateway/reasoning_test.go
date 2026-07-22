@@ -3,6 +3,8 @@ package gateway
 import (
 	"encoding/json"
 	"testing"
+
+	"dengdeng/internal/model"
 )
 
 func TestApplyOpenAIReasoningDefaultResponses(t *testing.T) {
@@ -21,6 +23,33 @@ func TestApplyOpenAIReasoningDefaultResponses(t *testing.T) {
 	}
 	if effort != "low" {
 		t.Fatalf("effective effort = %q, want low", effort)
+	}
+}
+
+func TestGroupReasoningMappingAndCeilingRewriteAndBillFinalEffort(t *testing.T) {
+	body := []byte(`{"model":"gpt-5","reasoning":{"effort":"max"}}`)
+	group := model.Group{MaxReasoningEffort: "medium", ReasoningEffortMappings: map[string]string{"max": "xhigh"}}
+	patched, effort := applyOpenAIReasoningPolicy(peekJSON(body), body, "auto", group, openAIReasoningResponses)
+	var got struct {
+		Reasoning struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+	}
+	if err := json.Unmarshal(patched, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Reasoning.Effort != "medium" || effort != "medium" {
+		t.Fatalf("outgoing=%q billing=%q, want medium", got.Reasoning.Effort, effort)
+	}
+}
+
+func TestGroupReasoningPolicyAppliesToClaudeCodeBridge(t *testing.T) {
+	request := map[string]any{"reasoning": map[string]any{"effort": "high"}}
+	group := model.Group{ReasoningEffortMappings: map[string]string{"high": "low"}}
+	effort := applyOpenAIResponsesReasoningPolicy(request, "auto", group)
+	got := request["reasoning"].(map[string]any)["effort"]
+	if got != "low" || effort != "low" {
+		t.Fatalf("outgoing=%v billing=%q, want low", got, effort)
 	}
 }
 

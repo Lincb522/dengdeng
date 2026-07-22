@@ -52,6 +52,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
 		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.BackupRecord{},
+		&model.ImageStorageConfig{}, &model.ImageTask{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
