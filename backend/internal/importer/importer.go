@@ -19,20 +19,25 @@ import (
 
 // Account is the normalized result of parsing one entry.
 type Account struct {
-	Name         string
-	Platform     string
-	AuthType     string
-	APIKey       string
-	AccessToken  string
-	RefreshToken string
-	ExpiresAt    *time.Time
-	Email        string
-	AccountID    string
-	BaseURL      string
-	Priority     *int
-	Concurrency  *int
-	GroupIDs     []int64
-	Extra        map[string]any
+	Name     string
+	Platform string
+	// PlatformDetected is true when the payload contains a trustworthy
+	// provider signal. Generic OAuth/API-key files intentionally keep the
+	// legacy OpenAI fallback in Platform while allowing the import handler to
+	// use the administrator-selected target group's platform.
+	PlatformDetected bool
+	AuthType         string
+	APIKey           string
+	AccessToken      string
+	RefreshToken     string
+	ExpiresAt        *time.Time
+	Email            string
+	AccountID        string
+	BaseURL          string
+	Priority         *int
+	Concurrency      *int
+	GroupIDs         []int64
+	Extra            map[string]any
 }
 
 // Parse decodes raw bytes in the named format ("sub2api", "cpa", or
@@ -193,24 +198,14 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 	get := func(keys ...string) string { return stringFrom(values, keys...) }
 	getAny := func(keys ...string) any { return valueFrom(values, keys...) }
 
-	platform := normalizePlatform(firstNonEmpty(platformHint, get("platform", "provider", "provider_type")))
 	declared := firstNonEmpty(get("type", "auth_type", "authType", "auth_mode", "authMode"))
 	authMode := get("auth_mode", "authMode")
 	isAgentIdentity := agentIdentity != nil || strings.EqualFold(authMode, "agentIdentity") || strings.EqualFold(declared, "agentIdentity")
-	if platform == "" {
-		switch strings.ToLower(declared) {
-		case "claude", "anthropic":
-			platform = model.PlatformAnthropic
-		case "gemini", "google":
-			platform = model.PlatformGemini
-		default:
-			platform = model.PlatformOpenAI // native Codex auth.json has no platform field
-		}
-	}
 	accessToken := get("access_token", "accessToken")
 	refreshToken := get("refresh_token", "refreshToken")
 	idToken := get("id_token", "idToken")
 	apiKey := get("api_key", "apiKey", "OPENAI_API_KEY", "openai_api_key")
+	platform, platformDetected := detectPlatform(values, platformHint, declared, authMode, idToken, isAgentIdentity)
 	email := get("email")
 	accountID := get("chatgpt_account_id", "chatgptAccountId", "account_id", "accountId", "organization_id", "organizationId")
 	if email == "" || accountID == "" {
@@ -220,6 +215,15 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 		}
 		if accountID == "" {
 			accountID = jwtAccountID
+		}
+	}
+	if platform == model.PlatformGrok && accountID == "" {
+		accountID = get("sub", "team_id", "teamId")
+		if accountID == "" {
+			if claims := jwtClaims(idToken); claims != nil {
+				accountID, _ = claims["sub"].(string)
+				accountID = strings.TrimSpace(accountID)
+			}
 		}
 	}
 
@@ -251,6 +255,10 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 		putIf(extra, "oauth_type", get("oauth_type", "oauthType"))
 	}
 	putIf(extra, "plan_type", get("plan_type", "planType", "subscription_type", "subscriptionType"))
+	putIf(extra, "subscription_tier", get("subscription_tier", "subscriptionTier"))
+	putIf(extra, "entitlement_status", get("entitlement_status", "entitlementStatus"))
+	putIf(extra, "team_id", get("team_id", "teamId"))
+	putIf(extra, "sub", get("sub"))
 	if subscriptionExpiry := firstTime(getAny("subscription_expires_at", "subscriptionExpiresAt", "subscription_active_until", "subscriptionActiveUntil")); subscriptionExpiry != nil {
 		extra["subscription_expires_at"] = subscriptionExpiry.UTC().Format(time.RFC3339)
 	} else if subscriptionExpiry := subscriptionExpiryFromIDToken(idToken); subscriptionExpiry != nil {
@@ -267,8 +275,9 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 	}
 
 	return Account{
-		Name:     get("name", "label", "display_name", "displayName"),
-		Platform: platform,
+		Name:             get("name", "label", "display_name", "displayName"),
+		Platform:         platform,
+		PlatformDetected: platformDetected,
 		AuthType: func() string {
 			if isAgentIdentity {
 				return model.AuthAgentIdentity
@@ -285,6 +294,83 @@ func parseEntry(entry map[string]any, platformHint string) Account {
 		Concurrency:  intPointer(getAny("concurrency")),
 		Extra:        extra,
 	}
+}
+
+// detectPlatform separates a trustworthy provider signal from the historical
+// OpenAI default. That distinction matters for generic OAuth exports: the same
+// access/refresh-token shape is used by OpenAI, Grok and other CLI clients, so
+// the selected group is the only reliable provider hint when metadata is
+// absent.
+func detectPlatform(values []map[string]any, platformHint, declared, authMode, idToken string, isAgentIdentity bool) (string, bool) {
+	if platform := normalizePlatform(firstNonEmpty(platformHint, stringFrom(values, "platform", "provider", "provider_type"))); platform != "" {
+		return platform, true
+	}
+
+	switch strings.ToLower(strings.TrimSpace(declared)) {
+	case "claude", "anthropic":
+		return model.PlatformAnthropic, true
+	case "gemini", "google":
+		return model.PlatformGemini, true
+	case "grok", "xai", "x.ai":
+		return model.PlatformGrok, true
+	case "chatgpt", "codex":
+		return model.PlatformOpenAI, true
+	}
+	if isAgentIdentity || strings.EqualFold(authMode, "chatgpt") || strings.EqualFold(authMode, "agentIdentity") {
+		return model.PlatformOpenAI, true
+	}
+	if platform := platformFromCredentialMetadata(values, idToken); platform != "" {
+		return platform, true
+	}
+
+	// Keep Parse's backwards-compatible result for callers that do not have a
+	// target group. ImportAccounts checks PlatformDetected and replaces only
+	// this uncertain fallback with the selected group's platform.
+	return model.PlatformOpenAI, false
+}
+
+func platformFromCredentialMetadata(values []map[string]any, idToken string) string {
+	baseURL := strings.ToLower(stringFrom(values, "base_url", "baseUrl", "api_base", "apiBase"))
+	scope := strings.ToLower(stringFrom(values, "scope", "scopes"))
+	oauthType := strings.ToLower(stringFrom(values, "oauth_type", "oauthType"))
+	if strings.Contains(baseURL, "cli-chat-proxy.grok.com") || strings.Contains(baseURL, "api.x.ai") ||
+		strings.Contains(scope, "grok-cli:") || strings.Contains(oauthType, "grok") || strings.Contains(oauthType, "xai") {
+		return model.PlatformGrok
+	}
+	if stringFrom(values, "subscription_tier", "subscriptionTier", "entitlement_status", "entitlementStatus") != "" {
+		return model.PlatformGrok
+	}
+	if claims := jwtClaims(idToken); claims != nil {
+		identity := strings.ToLower(strings.Join(jwtProviderClaims(claims), " "))
+		switch {
+		case strings.Contains(identity, "auth.x.ai"), strings.Contains(identity, "api.x.ai"), strings.Contains(identity, "grok-cli"):
+			return model.PlatformGrok
+		case strings.Contains(identity, "auth.openai.com"), strings.Contains(identity, "api.openai.com"):
+			return model.PlatformOpenAI
+		case strings.Contains(identity, "accounts.google.com"), strings.Contains(identity, "googleapis.com"):
+			return model.PlatformGemini
+		case strings.Contains(identity, "anthropic.com"), strings.Contains(identity, "claude.ai"):
+			return model.PlatformAnthropic
+		}
+	}
+	return ""
+}
+
+func jwtProviderClaims(claims map[string]any) []string {
+	out := make([]string, 0, 5)
+	for _, key := range []string{"iss", "aud", "azp", "scope", "scp"} {
+		switch value := claims[key].(type) {
+		case string:
+			out = append(out, value)
+		case []any:
+			for _, item := range value {
+				if text, ok := item.(string); ok {
+					out = append(out, text)
+				}
+			}
+		}
+	}
+	return out
 }
 
 // ---- shared helpers ----

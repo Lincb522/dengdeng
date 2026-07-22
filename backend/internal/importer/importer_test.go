@@ -33,8 +33,51 @@ func TestParseCodexAuthJSON(t *testing.T) {
 	if got.Platform != model.PlatformOpenAI || got.AuthType != model.AuthOAuth {
 		t.Fatalf("platform/auth = %q/%q", got.Platform, got.AuthType)
 	}
+	if !got.PlatformDetected {
+		t.Fatal("native Codex auth_mode must be treated as an explicit OpenAI signal")
+	}
 	if got.AccessToken != "access" || got.RefreshToken != "refresh" || got.Email != "codex@example.com" || got.AccountID != "acct-1" {
 		t.Fatalf("credential metadata was not retained: %#v", got)
+	}
+}
+
+func TestParseGenericOAuthLeavesPlatformForTargetGroup(t *testing.T) {
+	raw := []byte(`{"accounts":[{"name":"generic-oauth","type":"oauth","credentials":{"access_token":"access","refresh_token":"refresh","client_id":"client"}}]}`)
+	accounts, err := Parse("auto", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(accounts))
+	}
+	got := accounts[0]
+	if got.Platform != model.PlatformOpenAI {
+		t.Fatalf("legacy fallback platform = %q, want openai", got.Platform)
+	}
+	if got.PlatformDetected {
+		t.Fatal("generic OAuth credentials must let the selected group decide the platform")
+	}
+}
+
+func TestParseGrokOAuthSignals(t *testing.T) {
+	claims := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://auth.x.ai","aud":"grok-cli","email":"grok@example.com","sub":"grok-user"}`))
+	raw := []byte(`{"type":"oauth","credentials":{"access_token":"access","refresh_token":"refresh","id_token":"x.` + claims + `.x","client_id":"grok-client","scope":"openid grok-cli:access","subscription_tier":"supergrok","entitlement_status":"active"}}`)
+	accounts, err := Parse("auto", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("got %d accounts, want 1", len(accounts))
+	}
+	got := accounts[0]
+	if got.Platform != model.PlatformGrok || !got.PlatformDetected || got.AuthType != model.AuthOAuth {
+		t.Fatalf("unexpected Grok import: %#v", got)
+	}
+	if got.AccountID != "grok-user" || got.Email != "grok@example.com" {
+		t.Fatalf("Grok identity was not retained: %#v", got)
+	}
+	if got.Extra["subscription_tier"] != "supergrok" || got.Extra["entitlement_status"] != "active" {
+		t.Fatalf("Grok entitlement metadata was not retained: %#v", got.Extra)
 	}
 }
 

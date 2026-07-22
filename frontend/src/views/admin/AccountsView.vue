@@ -322,6 +322,7 @@ const importFileInput = ref<HTMLInputElement | null>(null)
 const importFileName = ref('')
 type ImportPlatform = Group['platform']
 const detectedImportPlatforms = ref<ImportPlatform[]>([])
+const selectedImportGroup = computed(() => groups.value.find((group) => group.id === Number(imp.value.group_id)))
 type ImportResult = {
   imported: number
 	updated?: number
@@ -427,11 +428,23 @@ function detectImportPlatforms(raw: string): ImportPlatform[] {
     const inspect = (entry: unknown) => {
       if (!entry || typeof entry !== 'object') return
       const record = entry as Record<string, unknown>
-      const explicit = normalizeImportPlatform(record.platform ?? record.provider ?? record.type)
+			const credentials = record.credentials && typeof record.credentials === 'object'
+				? record.credentials as Record<string, unknown>
+				: {}
+			const explicit = normalizeImportPlatform(record.platform ?? record.provider ?? record.provider_type)
       if (explicit) found.add(explicit)
       if (record.claudeAiOauth || record.claude_ai_oauth) found.add('anthropic')
-      // Native Codex auth.json has `tokens` / `auth_mode` but no platform.
-      if (record.tokens || record.agent_identity || record.agentIdentity || record.auth_mode === 'chatgpt' || record.authMode === 'chatgpt' || record.auth_mode === 'agentIdentity' || record.authMode === 'agentIdentity') found.add('openai')
+			const authMode = String(record.auth_mode ?? record.authMode ?? '').toLowerCase()
+			// Agent Identity and auth_mode=chatgpt are unambiguous Codex records.
+			// A generic `tokens` object is not: Grok and other CLI exports use the
+			// same shape, so the administrator-selected group must decide.
+			if (record.agent_identity || record.agentIdentity || authMode === 'chatgpt' || authMode === 'agentidentity') found.add('openai')
+			const baseURL = String(credentials.base_url ?? credentials.baseUrl ?? record.base_url ?? record.baseUrl ?? '').toLowerCase()
+			const scope = String(credentials.scope ?? credentials.scopes ?? record.scope ?? record.scopes ?? '').toLowerCase()
+			const oauthType = String(credentials.oauth_type ?? credentials.oauthType ?? record.oauth_type ?? record.oauthType ?? '').toLowerCase()
+			if (baseURL.includes('cli-chat-proxy.grok.com') || baseURL.includes('api.x.ai') || scope.includes('grok-cli:') || oauthType.includes('grok') || oauthType.includes('xai') || credentials.subscription_tier || credentials.subscriptionTier || credentials.entitlement_status || credentials.entitlementStatus) {
+				found.add('grok')
+			}
     }
 		const inspectRoot = (root: unknown) => {
 			if (Array.isArray(root)) {
@@ -477,6 +490,23 @@ function matchImportGroup(raw: string, notify: boolean) {
   if (notify) toast.show(`已识别为 ${PLATFORM_LABELS[platform]} JSON，请在多个同平台分组中确认目标分组`, 'error')
 }
 
+function localizedImportSkipReason(reason: string): string {
+	const mismatch = reason.match(/^platform\s+(\S+)\s+!=\s+group\s+(\S+)$/i)
+	if (mismatch) {
+		const source = normalizeImportPlatform(mismatch[1])
+		const target = normalizeImportPlatform(mismatch[2])
+		return `平台不匹配：文件为 ${source ? PLATFORM_LABELS[source] : mismatch[1]}，目标分组为 ${target ? PLATFORM_LABELS[target] : mismatch[2]}`
+	}
+	const known: Record<string, string> = {
+		'token expired': '凭证已过期',
+		'missing api_key': '缺少 API Key',
+		'missing access/refresh token': '缺少 Access Token 或 Refresh Token',
+		'invalid concurrency': '并发数无效',
+		'db error': '保存账号失败',
+	}
+	return known[reason] || reason
+}
+
 async function doImport() {
   matchImportGroup(imp.value.data, true)
   const res = await withToast(
@@ -487,12 +517,18 @@ async function doImport() {
       base_url: imp.value.base_url,
       skip_expired: imp.value.skip_expired,
     }),
-    '导入完成',
   )
   if (res) {
     impResult.value = res
     page.value = 1
     await loadAccounts()
+		const changed = res.imported + (res.updated || 0)
+		if (changed > 0) {
+			const suffix = res.skipped > 0 ? `，跳过 ${res.skipped} 个` : ''
+			toast.show(`已新增 ${res.imported} 个，更新 ${res.updated || 0} 个${suffix}`, 'success')
+		} else {
+			toast.show(res.skipped_detail?.[0] ? localizedImportSkipReason(res.skipped_detail[0].reason) : '没有可导入的账号', 'error')
+		}
   }
 }
 
@@ -1101,6 +1137,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               <p class="mt-1 text-xs text-slate-600">支持 sub2api、Codex auth.json、Claude Code credentials 与 CPA 导出；文件上限 850 KB。</p>
               <p v-if="detectedImportPlatforms.length === 1" class="mt-1 text-xs text-signal-cyan">已识别平台：{{ PLATFORM_LABELS[detectedImportPlatforms[0]] }}。请确认目标分组；系统会保留你的选择。</p>
               <p v-else-if="detectedImportPlatforms.length > 1" class="mt-1 text-xs text-amber">文件包含多个平台，请按目标分组分别导入；不匹配的条目会跳过。</p>
+							<p v-else-if="imp.data.trim() && selectedImportGroup" class="mt-1 text-xs text-signal-cyan">文件未声明平台，将按目标分组「{{ selectedImportGroup.name }}」识别。</p>
             </div>
             <label class="flex items-center gap-2 text-sm text-slate-400">
               <input v-model="imp.skip_expired" type="checkbox" class="accent-amber" /> 跳过已过期的 token
@@ -1109,7 +1146,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             <div v-if="impResult" class="rounded-lg border border-white/10 bg-black/20 p-3 text-sm">
               <div class="text-slate-200">新增 <span class="text-signal-green font-semibold">{{ impResult.imported }}</span> 个，更新 <span class="text-signal-cyan font-semibold">{{ impResult.updated || 0 }}</span> 个，跳过 <span class="text-signal-red font-semibold">{{ impResult.skipped }}</span> 个。</div>
               <ul v-if="impResult.skipped_detail.length" class="mt-2 space-y-1 text-xs text-slate-500">
-                <li v-for="(s, i) in impResult.skipped_detail" :key="i">跳过 {{ s.name || '(未命名)' }}:{{ s.reason }}</li>
+								<li v-for="(s, i) in impResult.skipped_detail" :key="i">跳过 {{ s.name || '(未命名)' }}：{{ localizedImportSkipReason(s.reason) }}</li>
               </ul>
             </div>
 

@@ -4,6 +4,14 @@
 
 ## 未发布
 
+### Grok 与通用凭证导入
+
+- 通用 OAuth / API Key JSON 未声明平台时，改为采用管理员明确选择的目标分组，不再一律误判成 OpenAI。
+- Grok 导入新增 `auth.x.ai`、`api.x.ai`、Grok CLI Base URL、Scope 与订阅字段识别，并保留订阅层级、权益状态及 Team 元数据。
+- 明确声明平台的文件仍执行严格分组校验，不会把真正的 OpenAI 凭证写入 Grok 分组。
+- 导入弹窗不再把 `tokens` 结构直接等同于 OpenAI；全量跳过时显示真实原因，不再先提示“导入完成”。
+- 服务端新增不含凭证内容的导入汇总日志，后续可直接看到目标分组、成功数、更新数及跳过原因统计。
+
 ### Agent Identity 与 OpenAI 账号
 
 - Agent Identity 按最新 Sub2API 收敛为 Codex `auth.json` 导入，不再在管理端接收 Access Token 或 Web Session；导入后只保留 Runtime、Ed25519 私钥和账户身份。
