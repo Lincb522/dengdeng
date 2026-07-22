@@ -311,7 +311,7 @@ function onSetupEffortUpdated(value: string) {
             </td>
             <td>
 				<div class="key-group-tags">
-					<span v-for="group in keyGroups(k)" :key="group.id" class="tag-gray">{{ group.name }} · {{ PLATFORM_LABELS[group.platform] }}</span>
+					<span v-for="group in keyGroups(k)" :key="group.id" class="tag-gray group-tag">{{ group.name }} · {{ PLATFORM_LABELS[group.platform] }}</span>
 					<span v-if="!keyGroups(k).length" class="text-xs text-slate-500">未绑定</span>
 				</div>
             </td>

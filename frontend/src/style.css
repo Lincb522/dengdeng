@@ -551,7 +551,11 @@ body {
   }
   .tag {
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+		max-width: none;
+		flex-shrink: 0;
+		white-space: nowrap;
   }
+	.group-tag { max-width: none; flex: 0 0 auto; overflow: visible; text-overflow: clip; white-space: nowrap; }
   .tag-green {
     @apply tag border border-signal-green/20 bg-signal-green/10 text-signal-green;
   }
@@ -729,6 +733,8 @@ body {
   .account-card-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .72rem .9rem; margin-top: 1rem; padding-top: .95rem; border-top: 1px solid var(--line); }
   .account-card-meta dt { color: var(--ink-soft); font-size: .66rem; font-weight: 700; }
   .account-card-meta dd { overflow: hidden; margin-top: .18rem; color: var(--ink); font-size: .76rem; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+	.account-card-group-meta { grid-column: 1 / -1; min-width: 0; }
+	.account-card-group-meta dd { overflow-x: auto; overflow-y: hidden; text-overflow: clip; }
   .account-card-quota { margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--line); }
   .account-quota-head { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
   .account-card-quota strong { color: var(--ink); font-size: .76rem; font-weight: 800; }
@@ -1692,11 +1698,18 @@ body {
 	.workspace-main .table-base tbody td[data-label='上游额度 / 用量'],
 	.workspace-main .table-base tbody td[data-label='用户 / 密钥'],
 	.workspace-main .table-base tbody td[data-label='账号 / 分组'],
+	.workspace-main .table-base tbody td[data-label='分组'],
 	.workspace-main .table-base tbody td[data-label='错误'],
 	.workspace-main .table-base tbody td[data-label='说明'],
 	.workspace-main .table-base tbody td[data-label='备注'],
 	.workspace-main .table-base tbody td[data-label='操作'] {
 		grid-column: 1 / -1;
+	}
+	.workspace-main .table-base tbody td[data-label='分组'] {
+		overflow-x: auto;
+		overflow-y: hidden;
+		overflow-wrap: normal;
+		white-space: nowrap !important;
 	}
 	.workspace-main .table-base tbody td[data-label='操作'] {
 		display: flex !important;

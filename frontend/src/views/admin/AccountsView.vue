@@ -698,7 +698,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         </div>
 
         <dl class="account-card-meta">
-          <div><dt>分组</dt><dd class="truncate" :title="a.group?.name">{{ a.group?.name || '未分组' }}</dd></div>
+          <div class="account-card-group-meta"><dt>分组</dt><dd><span class="tag-gray group-tag">{{ a.group?.name || '未分组' }}</span></dd></div>
           <div><dt>优先级</dt><dd class="num">{{ a.priority }}</dd></div>
 							<div><dt>并发上限</dt><dd class="num">{{ a.concurrency > 0 ? a.concurrency : '不限' }}</dd></div>
           <div><dt>最近使用</dt><dd>{{ a.last_used_at ? new Date(a.last_used_at).toLocaleString() : '从未使用' }}</dd></div>
@@ -754,7 +754,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               <div v-if="a.email" class="text-xs text-slate-500">{{ a.email }}</div>
             </td>
             <td>
-              <span class="tag-gray">{{ a.group?.name }}</span>
+              <span class="tag-gray group-tag">{{ a.group?.name }}</span>
               <span class="ml-1 text-xs text-slate-500">{{ PLATFORM_LABELS[a.platform] }}</span>
             </td>
             <td>
