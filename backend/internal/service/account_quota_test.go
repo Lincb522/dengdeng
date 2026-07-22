@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -185,6 +186,45 @@ func TestAccountQuotaAPIKeyProbeSupportsEveryPlatform(t *testing.T) {
 				t.Fatalf("window = %#v", snapshot.Windows[0])
 			}
 		})
+	}
+}
+
+func TestFetchGrokBillingUsesVersionedCLIPathsAndHeaders(t *testing.T) {
+	requests := make(chan *http.Request, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		_ = json.NewEncoder(w).Encode(map[string]any{"config": map[string]any{"creditUsagePercent": 12.5}})
+	}))
+	defer server.Close()
+	previousURL := grokCLIBillingBaseURL
+	grokCLIBillingBaseURL = server.URL + "/v1"
+	defer func() { grokCLIBillingBaseURL = previousURL }()
+
+	quota := NewAccountQuotaService(nil, nil, nil, server.Client())
+	account := &model.UpstreamAccount{Platform: model.PlatformGrok, AuthType: model.AuthOAuth}
+	for _, weekly := range []bool{true, false} {
+		if _, err := quota.fetchGrokBilling(context.Background(), account, "grok-access", weekly); err != nil {
+			t.Fatal(err)
+		}
+		req := <-requests
+		wantPath := "/v1/billing"
+		wantQuery := ""
+		if weekly {
+			wantQuery = "format=credits"
+		}
+		if req.URL.Path != wantPath || req.URL.RawQuery != wantQuery {
+			t.Fatalf("billing URL = %s, want %s?%s", req.URL.String(), wantPath, wantQuery)
+		}
+		if req.Header.Get("Authorization") != "Bearer grok-access" || req.Header.Get("x-xai-token-auth") != "xai-grok-cli" || req.Header.Get("x-grok-client-version") != "0.2.93" {
+			t.Fatalf("unexpected Grok billing headers: %#v", req.Header)
+		}
+	}
+}
+
+func TestFriendlyQuotaErrorDistinguishesGrokPathFailure(t *testing.T) {
+	got := friendlyQuotaError(errors.New("Grok billing: upstream status 404: not found"))
+	if got != "Grok 额度接口地址无效，请检查上游 Base URL" {
+		t.Fatalf("message = %q", got)
 	}
 }
 
