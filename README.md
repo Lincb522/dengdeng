@@ -78,7 +78,7 @@ go build -o dengdeng ./cmd/server
 3. 在「模型配置」确认对外模型名、上游模型名和定价。
 4. 用户在「API 密钥」创建 `dd-` 密钥时可同时选择多个分组；请求会按模型平台自动路由，同平台分组不可用时自动切换。之后即可将 Base URL 和密钥填入 SDK 或 CLI。
 
-浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI 还支持导入 Codex / Sub2API Agent Identity，或临时使用 Access Token / Web Session 注册为不持久化 OAuth Token 的签名身份。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI Agent Identity 默认直接导入 Codex `auth.json`；也可以临时使用 Access Token / Web Session 生成签名身份，系统只保存加密的 Runtime 私钥，不保留引导 Token。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
 
 ### 客户端示例
 
