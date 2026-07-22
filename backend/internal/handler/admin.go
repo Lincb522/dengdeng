@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1078,6 +1079,9 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "invalid concurrency"})
 			continue
 		}
+		if !p.PlatformDetected {
+			p.Platform = group.Platform
+		}
 		if p.Platform != "" && p.Platform != group.Platform {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "platform " + p.Platform + " != group " + group.Platform})
 			continue
@@ -1193,6 +1197,13 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		}
 		imported = append(imported, acc.Name)
 	}
+	reasons := make(map[string]int)
+	for _, item := range skipped {
+		if reason, ok := item["reason"].(string); ok && reason != "" {
+			reasons[reason]++
+		}
+	}
+	log.Printf("account import result: group_id=%d group_platform=%s imported=%d updated=%d skipped=%d reasons=%v", group.ID, group.Platform, len(imported), len(updated), len(skipped), reasons)
 
 	util.OK(c, gin.H{
 		"imported":       len(imported),
