@@ -255,6 +255,24 @@ func (h *AdminPaymentHandler) ListOrders(c *gin.Context) {
 	}
 	util.OK(c, items)
 }
+func (h *AdminPaymentHandler) ListLedger(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
+	result, err := h.payments.ListLedger(service.PaymentLedgerFilter{
+		Page:        page,
+		Size:        size,
+		Period:      c.DefaultQuery("period", "30d"),
+		Kind:        c.Query("kind"),
+		Currency:    c.Query("currency"),
+		ProviderKey: c.Query("provider"),
+		User:        c.Query("user"),
+	})
+	if err != nil {
+		paymentError(c, err)
+		return
+	}
+	util.OK(c, result)
+}
 func (h *AdminPaymentHandler) ProcessRefund(c *gin.Context) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {

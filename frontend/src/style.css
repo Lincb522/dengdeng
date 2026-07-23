@@ -1920,6 +1920,247 @@ body {
 	.key-setup-head { gap: .65rem; }
 }
 
+/* Payment center ------------------------------------------------------- */
+.payment-center { min-width: 0; }
+.payment-tabs {
+	display: flex;
+	width: max-content;
+	max-width: 100%;
+	gap: .2rem;
+	margin: -.25rem 0 1.2rem;
+	padding: .25rem;
+	overflow-x: auto;
+	border: 1px solid var(--line);
+	border-radius: .72rem;
+	background: var(--surface-muted);
+	scrollbar-width: thin;
+}
+.payment-tabs button {
+	min-height: 2.2rem;
+	padding: .42rem .85rem;
+	border: 1px solid transparent;
+	border-radius: .5rem;
+	color: var(--ink-soft);
+	font-size: .72rem;
+	font-weight: 760;
+	white-space: nowrap;
+}
+.payment-tabs button:hover { color: var(--ink); }
+.payment-tabs button.is-active {
+	border-color: var(--line);
+	background: var(--surface);
+	box-shadow: 0 2px 8px var(--shadow);
+	color: var(--ink);
+}
+.payment-cashflow {
+	display: grid;
+	grid-template-columns: minmax(15rem, .72fr) minmax(0, 1.28fr);
+	margin-bottom: 1rem;
+	border: 1px solid var(--line);
+	border-radius: .9rem;
+	overflow: hidden;
+	background: var(--surface);
+	box-shadow: 0 5px 12px var(--shadow);
+}
+.payment-net {
+	display: flex;
+	min-width: 0;
+	flex-direction: column;
+	justify-content: center;
+	padding: 1.45rem 1.55rem;
+	border-right: 1px solid var(--line);
+	background: linear-gradient(135deg, var(--surface-muted), var(--surface));
+}
+.payment-net span,
+.payment-net small { color: var(--ink-soft); white-space: nowrap; }
+.payment-net span { font-size: .69rem; font-weight: 760; }
+.payment-net strong {
+	overflow-x: auto;
+	overflow-y: hidden;
+	margin: .45rem 0 .38rem;
+	color: var(--ink);
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: clamp(1.7rem, 4vw, 2.55rem);
+	font-weight: 870;
+	letter-spacing: -.055em;
+	line-height: 1;
+	scrollbar-width: thin;
+	white-space: nowrap;
+}
+.payment-net small { font-size: .64rem; }
+.payment-summary {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	background: var(--line);
+	gap: 1px;
+}
+.payment-summary > div { min-width: 0; padding: 1.05rem 1.15rem; background: var(--surface); }
+.payment-summary dt { color: var(--ink-soft); font-size: .64rem; font-weight: 720; white-space: nowrap; }
+.payment-summary dd {
+	overflow-x: auto;
+	margin-top: .3rem;
+	color: var(--ink);
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: .85rem;
+	font-weight: 820;
+	scrollbar-width: thin;
+	white-space: nowrap;
+}
+.payment-summary dd.is-income { color: rgb(var(--dd-signal-green)); }
+.payment-summary dd.is-expense { color: rgb(var(--dd-signal-red)); }
+.payment-section-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	padding: 1rem 1.2rem;
+	border-bottom: 1px solid var(--line);
+}
+.payment-section-head h3 { color: var(--ink); font-size: .82rem; font-weight: 820; }
+.payment-section-head p { margin-top: .18rem; color: var(--ink-soft); font-size: .64rem; }
+.payment-period { display: flex; gap: .15rem; padding: .18rem; border: 1px solid var(--line); border-radius: .55rem; background: var(--surface-muted); }
+.payment-period button { padding: .3rem .52rem; border-radius: .38rem; color: var(--ink-soft); font-size: .62rem; font-weight: 730; white-space: nowrap; }
+.payment-period button.is-active { background: var(--surface); color: var(--ink); box-shadow: 0 1px 4px var(--shadow); }
+.payment-trend { margin-bottom: 1rem; overflow: hidden; }
+.payment-trend-list { padding: .55rem 1.2rem .85rem; }
+.payment-trend-row {
+	display: grid;
+	grid-template-columns: 3rem minmax(12rem, 1fr) minmax(14rem, auto);
+	align-items: center;
+	gap: .8rem;
+	min-height: 2.55rem;
+	border-bottom: 1px solid var(--line);
+}
+.payment-trend-row:last-child { border-bottom: 0; }
+.payment-trend-row time { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .64rem; white-space: nowrap; }
+.payment-trend-bars { display: grid; gap: .22rem; }
+.payment-trend-bars > div { height: .28rem; overflow: hidden; border-radius: 99px; background: var(--surface-muted); }
+.payment-trend-bars i { display: block; height: 100%; border-radius: inherit; }
+.payment-trend-bars i.is-income { background: rgb(var(--dd-signal-green)); }
+.payment-trend-bars i.is-expense { background: rgb(var(--dd-signal-red) / .78); }
+.payment-trend-values { display: grid; grid-template-columns: repeat(2, minmax(6.6rem, 1fr)); gap: .7rem; text-align: right; }
+.payment-trend-values span { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .67rem; font-weight: 750; white-space: nowrap; }
+.payment-trend-values span:last-child { color: rgb(var(--dd-signal-red)); }
+.payment-trend-values small { margin-left: .18rem; color: var(--ink-soft); font: inherit; font-size: .56rem; font-weight: 620; }
+.payment-recent,
+.payment-ledger { overflow: hidden; }
+.payment-ledger-balance,
+.payment-order-count {
+	color: var(--ink-soft);
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: .68rem;
+	font-weight: 730;
+	white-space: nowrap;
+}
+.payment-ledger-filters {
+	display: grid;
+	grid-template-columns: 7.5rem 6.5rem 7.5rem 8.5rem minmax(13rem, 1fr);
+	gap: .55rem;
+	padding: .8rem 1.2rem;
+	border-bottom: 1px solid var(--line);
+	background: var(--surface-muted);
+}
+.payment-ledger-filters .input { min-width: 0; height: 2.25rem; padding-top: .4rem; padding-bottom: .4rem; font-size: .68rem; }
+.payment-ledger-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .4rem; }
+.payment-ledger-list { min-width: 0; }
+.payment-ledger-row {
+	display: grid;
+	grid-template-columns: 3.5rem minmax(10rem, 1fr) minmax(13rem, 1.1fr) minmax(9rem, auto) minmax(8.2rem, auto);
+	align-items: center;
+	gap: 1rem;
+	min-width: 0;
+	padding: .85rem 1.2rem;
+	border-bottom: 1px solid var(--line);
+}
+.payment-ledger-row:last-child { border-bottom: 0; }
+.payment-ledger-row:hover { background: var(--surface-muted); }
+.payment-ledger-kind {
+	display: inline-flex;
+	width: max-content;
+	align-items: center;
+	justify-content: center;
+	padding: .28rem .5rem;
+	border: 1px solid var(--line);
+	border-radius: 99px;
+	font-size: .62rem;
+	font-weight: 800;
+	white-space: nowrap;
+}
+.payment-ledger-kind.is-income { border-color: rgb(var(--dd-signal-green) / .35); background: rgb(var(--dd-signal-green) / .09); color: rgb(var(--dd-signal-green)); }
+.payment-ledger-kind.is-expense { border-color: rgb(var(--dd-signal-red) / .32); background: rgb(var(--dd-signal-red) / .08); color: rgb(var(--dd-signal-red)); }
+.payment-ledger-user,
+.payment-ledger-order,
+.payment-ledger-amount { min-width: 0; }
+.payment-ledger-user strong,
+.payment-ledger-user small,
+.payment-ledger-order code,
+.payment-ledger-order small,
+.payment-ledger-amount strong,
+.payment-ledger-amount small {
+	display: block;
+	overflow-x: auto;
+	overflow-y: hidden;
+	text-overflow: clip;
+	scrollbar-width: thin;
+	white-space: nowrap;
+}
+.payment-ledger-user strong { color: var(--ink); font-size: .72rem; font-weight: 770; }
+.payment-ledger-user small,
+.payment-ledger-order small,
+.payment-ledger-amount small { margin-top: .16rem; color: var(--ink-soft); font-size: .6rem; }
+.payment-ledger-order code { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .64rem; }
+.payment-ledger-row > time { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .62rem; white-space: nowrap; }
+.payment-ledger-amount { text-align: right; }
+.payment-ledger-amount strong { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; font-weight: 830; }
+.payment-ledger-amount.is-income strong { color: rgb(var(--dd-signal-green)); }
+.payment-ledger-amount.is-expense strong { color: rgb(var(--dd-signal-red)); }
+.payment-empty { display: grid; min-height: 8rem; place-items: center; padding: 1.5rem; color: var(--ink-soft); font-size: .72rem; }
+:root[data-theme='dark'] .payment-tabs,
+:root[data-theme='dark'] .payment-ledger-filters,
+:root[data-theme='dark'] .payment-period { background: rgba(40, 35, 29, .82); }
+:root[data-theme='dark'] .payment-net { background: linear-gradient(135deg, rgba(55, 45, 34, .82), var(--surface)); }
+
+@media (max-width: 900px) {
+	.payment-ledger-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.payment-ledger-search { grid-column: 1 / -1; }
+	.payment-ledger-row { grid-template-columns: 3.5rem minmax(8rem, 1fr) minmax(7rem, auto); }
+	.payment-ledger-order { grid-column: 2 / -1; }
+	.payment-ledger-row > time { grid-column: 2; }
+	.payment-ledger-amount { grid-column: 3; grid-row: 1 / span 2; }
+}
+
+@media (max-width: 767px) {
+	.payment-tabs { width: 100%; }
+	.payment-tabs button { flex: 1 0 auto; }
+	.payment-cashflow { grid-template-columns: minmax(0, 1fr); }
+	.payment-net { border-right: 0; border-bottom: 1px solid var(--line); }
+	.payment-summary > div { padding: .85rem .9rem; }
+	.payment-section-head { align-items: flex-start; flex-direction: column; }
+	.payment-section-head > button,
+	.payment-section-head > .payment-period { width: 100%; }
+	.payment-section-head > button { min-height: 2.45rem; }
+	.payment-period { overflow-x: auto; }
+	.payment-period button { flex: 1 0 auto; }
+	.payment-trend-list { padding: .4rem .85rem .7rem; }
+	.payment-trend-row { grid-template-columns: 2.7rem minmax(0, 1fr); gap: .45rem .65rem; padding: .55rem 0; }
+	.payment-trend-values { grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); text-align: left; }
+	.payment-trend-values span { font-size: .62rem; }
+	.payment-ledger-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: .7rem; }
+	.payment-ledger-search { grid-column: 1 / -1; }
+	.payment-ledger-row {
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		gap: .65rem .7rem;
+		padding: .8rem;
+	}
+	.payment-ledger-kind { grid-column: 1; grid-row: 1; }
+	.payment-ledger-user { grid-column: 2; grid-row: 1; }
+	.payment-ledger-amount { grid-column: 3; grid-row: 1; }
+	.payment-ledger-order { grid-column: 1 / -1; grid-row: 2; padding-top: .58rem; border-top: 1px solid var(--line); }
+	.payment-ledger-row > time { grid-column: 1 / -1; grid-row: 3; }
+	.payment-ledger-amount small { display: none; }
+	.payment-ledger .mt-4.flex { padding: 0 .8rem .8rem; }
+}
+
 /* Mobile data records ---------------------------------------------------
    Dense desktop tables become labeled records on phones. Values remain on one
    line and, when necessary, scroll inside their own field instead of widening

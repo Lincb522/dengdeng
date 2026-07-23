@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dengdeng/internal/config"
 	"dengdeng/internal/model"
@@ -48,6 +49,53 @@ func TestOpenBackfillsLegacyAPIKeyGroup(t *testing.T) {
 	}
 	if len(bindings) != 1 || bindings[0].GroupID != group.ID {
 		t.Fatalf("legacy binding not restored: %#v", bindings)
+	}
+}
+
+func TestBackfillPaymentLedgerIsCompleteAndIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.PaymentOrder{}, &model.PaymentLedgerEntry{}, &model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	completedAt := time.Now().UTC().Add(-2 * time.Hour)
+	refundedAt := time.Now().UTC().Add(-time.Hour)
+	orders := []model.PaymentOrder{
+		{OutTradeNo: "backfill-income", UserID: 1, ProviderID: 1, ProviderKey: "wxpay", PaymentMethod: "wxpay", Status: model.PaymentStatusCompleted, Currency: "CNY", AmountMinor: 1000, CreditMicro: 10_000_000, ExpiresAt: completedAt.Add(time.Hour), CompletedAt: &completedAt},
+		{OutTradeNo: "backfill-refund", UserID: 2, ProviderID: 1, ProviderKey: "stripe", PaymentMethod: "card", Status: model.PaymentStatusRefunded, Currency: "USD", AmountMinor: 2000, CreditMicro: 20_000_000, RefundedMicro: 20_000_000, ExpiresAt: completedAt.Add(time.Hour), RefundedAt: &refundedAt},
+	}
+	if err := db.Create(&orders).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillPaymentLedger(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillPaymentLedger(db); err != nil {
+		t.Fatal(err)
+	}
+	var entries []model.PaymentLedgerEntry
+	if err := db.Order("event_key ASC").Find(&entries).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("ledger entries=%d, want 3: %+v", len(entries), entries)
+	}
+	var income, expense int
+	for _, entry := range entries {
+		if entry.Kind == model.PaymentLedgerIncome {
+			income++
+		}
+		if entry.Kind == model.PaymentLedgerExpense {
+			expense++
+			if !entry.OccurredAt.Equal(refundedAt) {
+				t.Fatalf("refund occurred_at=%s, want %s", entry.OccurredAt, refundedAt)
+			}
+		}
+	}
+	if income != 2 || expense != 1 {
+		t.Fatalf("income=%d expense=%d, want 2/1", income, expense)
 	}
 }
 

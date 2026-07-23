@@ -695,8 +695,8 @@ export interface PaymentCheckout {
 
 export interface PaymentOrder {
   id: number
-	user_id: number
-	user_email?: string
+  user_id: number
+  user_email?: string
   out_trade_no: string
   provider_key: string
   payment_method: string
@@ -711,6 +711,53 @@ export interface PaymentOrder {
   checkout?: PaymentCheckout
   failure_reason?: string
   created_at: string
+}
+
+export interface PaymentLedgerItem {
+  id: number
+  event_key: string
+  order_id: number
+  order_no: string
+  user_id: number
+  user_email: string
+  kind: 'income' | 'expense'
+  currency: string
+  amount_minor: number
+  credit_micro: number
+  provider_key: string
+  payment_method: string
+  occurred_at: string
+}
+
+export interface PaymentLedgerSummary {
+  currency: string
+  income_minor: number
+  expense_minor: number
+  net_minor: number
+  income_credit_micro: number
+  expense_credit_micro: number
+  income_count: number
+  expense_count: number
+}
+
+export interface PaymentLedgerTrend {
+  date: string
+  income_minor: number
+  expense_minor: number
+  income_count: number
+  expense_count: number
+}
+
+export interface PaymentLedgerPage {
+  items: PaymentLedgerItem[]
+  total: number
+  page: number
+  size: number
+  period: string
+  summary: PaymentLedgerSummary
+  trend: PaymentLedgerTrend[]
+  currencies: string[]
+  providers: string[]
 }
 
 export interface PaymentProvider {

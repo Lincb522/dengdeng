@@ -50,6 +50,9 @@ const (
 	PaymentStatusRefundRequested = "REFUND_REQUESTED"
 	PaymentStatusRefunding       = "REFUNDING"
 	PaymentStatusRefunded        = "REFUNDED"
+
+	PaymentLedgerIncome  = "income"
+	PaymentLedgerExpense = "expense"
 )
 
 var AllPlatforms = []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformGrok}
@@ -672,6 +675,24 @@ type PaymentAuditLog struct {
 	Actor     string    `gorm:"size:64;not null" json:"actor"`
 	Detail    string    `gorm:"size:2048" json:"detail"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
+}
+
+// PaymentLedgerEntry is the immutable cash ledger. Order status describes the
+// current workflow state; this table records financial events that actually
+// happened, so retries and later state transitions cannot rewrite history.
+type PaymentLedgerEntry struct {
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	EventKey      string    `gorm:"uniqueIndex;size:80;not null" json:"event_key"`
+	OrderID       int64     `gorm:"index;not null" json:"order_id"`
+	UserID        int64     `gorm:"index;not null" json:"user_id"`
+	Kind          string    `gorm:"size:16;index;not null" json:"kind"`
+	Currency      string    `gorm:"size:8;index;not null" json:"currency"`
+	AmountMinor   int64     `gorm:"not null" json:"amount_minor"`
+	CreditMicro   int64     `gorm:"not null" json:"credit_micro"`
+	ProviderKey   string    `gorm:"size:32;index" json:"provider_key"`
+	PaymentMethod string    `gorm:"size:32" json:"payment_method"`
+	OccurredAt    time.Time `gorm:"index;not null" json:"occurred_at"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 // EmailVerification stores only a keyed digest of a short-lived code. The

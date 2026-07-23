@@ -19,6 +19,7 @@ import (
 	"dengdeng/internal/util"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -495,11 +496,9 @@ func (s *PaymentService) ProcessRefund(ctx context.Context, id int64) (OrderResu
 		return OrderResult{}, errors.New(reason)
 	}
 	if response.Status == payment.StatusRefunded {
-		now := time.Now().UTC()
-		if err := s.db.Model(&model.PaymentOrder{}).Where("id = ? AND status = ?", id, model.PaymentStatusRefunding).Updates(map[string]any{"status": model.PaymentStatusRefunded, "refund_trade_no": response.RefundID, "refunded_micro": order.CreditMicro, "refunded_at": now}).Error; err != nil {
+		if err := s.completeRefund(order, response.RefundID, ""); err != nil {
 			return OrderResult{}, err
 		}
-		s.audit(id, "ORDER_REFUNDED", "admin", "")
 	} else {
 		_ = s.db.Model(&model.PaymentOrder{}).Where("id = ? AND status = ?", id, model.PaymentStatusRefunding).Update("refund_trade_no", response.RefundID).Error
 		s.audit(id, "REFUND_PENDING", "admin", "")
@@ -539,15 +538,44 @@ func (s *PaymentService) FinalizeRefund(ctx context.Context, id int64) (OrderRes
 		return orderResult(order), nil
 	}
 	if result.Status == payment.StatusRefunded {
-		now := time.Now().UTC()
-		if err := s.db.Model(&model.PaymentOrder{}).Where("id=? AND status=?", id, model.PaymentStatusRefunding).Updates(map[string]any{"status": model.PaymentStatusRefunded, "refund_trade_no": result.RefundID, "refunded_micro": order.CreditMicro, "refunded_at": now}).Error; err != nil {
+		if err := s.completeRefund(order, result.RefundID, "reconciled"); err != nil {
 			return OrderResult{}, err
 		}
-		s.audit(id, "ORDER_REFUNDED", "admin", "reconciled")
 		_ = s.db.Preload("User").First(&order, id).Error
 		return orderResult(order), nil
 	}
 	return orderResult(order), nil
+}
+
+func (s *PaymentService) completeRefund(order model.PaymentOrder, refundID, detail string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		res := tx.Model(&model.PaymentOrder{}).
+			Where("id = ? AND status = ?", order.ID, model.PaymentStatusRefunding).
+			Updates(map[string]any{
+				"status":          model.PaymentStatusRefunded,
+				"refund_trade_no": refundID,
+				"refunded_micro":  order.CreditMicro,
+				"refunded_at":     now,
+			})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			var current model.PaymentOrder
+			if err := tx.First(&current, order.ID).Error; err != nil {
+				return err
+			}
+			if current.Status == model.PaymentStatusRefunded {
+				return nil
+			}
+			return errors.New("refund status changed")
+		}
+		if err := recordPaymentLedger(tx, order, model.PaymentLedgerExpense, now); err != nil {
+			return err
+		}
+		return tx.Create(&model.PaymentAuditLog{OrderID: order.ID, Action: "ORDER_REFUNDED", Actor: "admin", Detail: detail}).Error
+	})
 }
 
 func (s *PaymentService) restoreRefundHold(order model.PaymentOrder, reason string) error {
@@ -640,8 +668,34 @@ func (s *PaymentService) confirmPayment(order model.PaymentOrder, tradeNo string
 			}
 			return errors.New("payment fulfillment lease lost")
 		}
+		if err := recordPaymentLedger(tx, order, model.PaymentLedgerIncome, now); err != nil {
+			return err
+		}
 		return tx.Create(&model.PaymentAuditLog{OrderID: order.ID, Action: "ORDER_COMPLETED", Actor: actor, Detail: fmt.Sprintf("credit_micro=%d", order.CreditMicro)}).Error
 	})
+}
+
+func recordPaymentLedger(tx *gorm.DB, order model.PaymentOrder, kind string, occurredAt time.Time) error {
+	credit := order.CreditMicro
+	if kind == model.PaymentLedgerExpense && order.RefundedMicro > 0 {
+		credit = order.RefundedMicro
+	}
+	entry := model.PaymentLedgerEntry{
+		EventKey:      fmt.Sprintf("%s:%d", kind, order.ID),
+		OrderID:       order.ID,
+		UserID:        order.UserID,
+		Kind:          kind,
+		Currency:      order.Currency,
+		AmountMinor:   order.AmountMinor,
+		CreditMicro:   credit,
+		ProviderKey:   order.ProviderKey,
+		PaymentMethod: order.PaymentMethod,
+		OccurredAt:    occurredAt.UTC(),
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "event_key"}},
+		DoNothing: true,
+	}).Create(&entry).Error
 }
 
 func (s *PaymentService) ExpirePending(ctx context.Context) error {

@@ -22,7 +22,7 @@ func paymentTestService(t *testing.T) (*PaymentService, *gorm.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.PaymentLedgerEntry{}); err != nil {
 		t.Fatal(err)
 	}
 	return NewPaymentService(db, &config.Config{Site: config.SiteConfig{Name: "DengDeng", PublicURL: "https://pay.example.test"}}), db
@@ -62,6 +62,11 @@ func TestPaymentConfirmIsIdempotent(t *testing.T) {
 	db.Model(&model.PaymentAuditLog{}).Where("order_id = ?", order.ID).Count(&audits)
 	if audits != 1 {
 		t.Fatalf("audit records=%d, want 1", audits)
+	}
+	var ledgerEntries int64
+	db.Model(&model.PaymentLedgerEntry{}).Where("order_id = ? AND kind = ?", order.ID, model.PaymentLedgerIncome).Count(&ledgerEntries)
+	if ledgerEntries != 1 {
+		t.Fatalf("ledger entries=%d, want 1", ledgerEntries)
 	}
 }
 

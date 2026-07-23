@@ -3,6 +3,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -51,7 +52,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
-		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.BackupRecord{},
+		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.PaymentLedgerEntry{}, &model.BackupRecord{},
 		&model.ImageStorageConfig{}, &model.ImageTask{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
@@ -82,6 +83,9 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		Update("reasoning_effort", "low").Error; err != nil {
 		return nil, fmt.Errorf("migrate legacy reasoning effort: %w", err)
 	}
+	if err := backfillPaymentLedger(db); err != nil {
+		return nil, fmt.Errorf("backfill payment ledger: %w", err)
+	}
 	// Every pre-multi-group key starts with its existing group selected. This is
 	// idempotent, so it also repairs a partially completed deployment safely.
 	var legacyKeyGroups []model.APIKeyGroup
@@ -100,6 +104,86 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("normalize usage timestamps: %w", err)
 	}
 	return db, nil
+}
+
+// backfillPaymentLedger makes the ledger complete on the first upgraded boot.
+// EventKey is unique, so this is safe after an interrupted migration and costs
+// only one paged pass over orders that reached a financial terminal state.
+func backfillPaymentLedger(db *gorm.DB) error {
+	const migrationKey = "migration.payment_ledger_v1"
+	var marker model.Setting
+	if err := db.Where("key = ?", migrationKey).First(&marker).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	const pageSize = 500
+	var lastID int64
+	for {
+		var orders []model.PaymentOrder
+		if err := db.Where("id > ? AND (completed_at IS NOT NULL OR refunded_at IS NOT NULL OR status IN ?)", lastID, []string{model.PaymentStatusCompleted, model.PaymentStatusRefunded}).
+			Order("id ASC").Limit(pageSize).Find(&orders).Error; err != nil {
+			return err
+		}
+		if len(orders) == 0 {
+			break
+		}
+		entries := make([]model.PaymentLedgerEntry, 0, len(orders)*2)
+		for _, order := range orders {
+			if order.CompletedAt != nil || order.Status == model.PaymentStatusCompleted || order.Status == model.PaymentStatusRefunded {
+				occurredAt := order.CreatedAt.UTC()
+				if order.PaidAt != nil {
+					occurredAt = order.PaidAt.UTC()
+				}
+				if order.CompletedAt != nil {
+					occurredAt = order.CompletedAt.UTC()
+				}
+				entries = append(entries, model.PaymentLedgerEntry{
+					EventKey:      fmt.Sprintf("%s:%d", model.PaymentLedgerIncome, order.ID),
+					OrderID:       order.ID,
+					UserID:        order.UserID,
+					Kind:          model.PaymentLedgerIncome,
+					Currency:      order.Currency,
+					AmountMinor:   order.AmountMinor,
+					CreditMicro:   order.CreditMicro,
+					ProviderKey:   order.ProviderKey,
+					PaymentMethod: order.PaymentMethod,
+					OccurredAt:    occurredAt,
+				})
+			}
+			if order.RefundedAt != nil || order.Status == model.PaymentStatusRefunded {
+				occurredAt := order.UpdatedAt.UTC()
+				if order.RefundedAt != nil {
+					occurredAt = order.RefundedAt.UTC()
+				} else if occurredAt.IsZero() {
+					occurredAt = order.CreatedAt.UTC()
+				}
+				credit := order.RefundedMicro
+				if credit <= 0 {
+					credit = order.CreditMicro
+				}
+				entries = append(entries, model.PaymentLedgerEntry{
+					EventKey:      fmt.Sprintf("%s:%d", model.PaymentLedgerExpense, order.ID),
+					OrderID:       order.ID,
+					UserID:        order.UserID,
+					Kind:          model.PaymentLedgerExpense,
+					Currency:      order.Currency,
+					AmountMinor:   order.AmountMinor,
+					CreditMicro:   credit,
+					ProviderKey:   order.ProviderKey,
+					PaymentMethod: order.PaymentMethod,
+					OccurredAt:    occurredAt,
+				})
+			}
+			lastID = order.ID
+		}
+		if len(entries) > 0 {
+			if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.Setting{Key: migrationKey, Value: "done"}).Error
 }
 
 const usageUTCMigrationKey = "migration.usage_utc_v1"

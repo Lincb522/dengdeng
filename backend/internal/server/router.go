@@ -226,6 +226,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.PUT("/payment/providers/:id", adminPaymentH.UpdateProvider)
 			admin.DELETE("/payment/providers/:id", adminPaymentH.DeleteProvider)
 			admin.GET("/payment/orders", adminPaymentH.ListOrders)
+			admin.GET("/payment/ledger", adminPaymentH.ListLedger)
 			admin.POST("/payment/orders/:id/refund", adminPaymentH.ProcessRefund)
 			admin.POST("/payment/orders/:id/refund/query", adminPaymentH.FinalizeRefund)
 		}
