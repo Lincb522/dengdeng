@@ -6,7 +6,6 @@ package service
 // storing or replaying the OAuth credentials that may coexist in that file.
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/ed25519"
@@ -19,17 +18,30 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"dengdeng/internal/model"
 
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/nacl/box"
+	"gorm.io/gorm"
 )
 
 const (
-	OpenAIAgentIdentityAuthBaseURL = "https://auth.openai.com/api/accounts"
+	OpenAIAgentIdentityAuthBaseURL          = "https://auth.openai.com/api/accounts"
+	openAIAgentTaskRegistrationTimeout      = 30 * time.Second
+	openAIAgentTaskRegistrationResponseSize = 64 << 10
 )
+
+var openAIAgentIdentityAuthBaseURL = OpenAIAgentIdentityAuthBaseURL
+
+var openAIAgentIdentityTaskLocks sync.Map
+
+// AgentIdentityClientFactory builds the account-scoped HTTP client used for
+// task registration. Keeping the factory here lets gateway traffic and quota
+// refreshes share one task lifecycle while still honoring per-account proxies.
+type AgentIdentityClientFactory func(*model.UpstreamAccount) (*http.Client, error)
 
 // AgentIdentityRecord is the durable, token-free authentication record stored
 // in UpstreamAccount.Extra. The private key remains encrypted at rest by the
@@ -63,6 +75,17 @@ func IsOpenAIAgentIdentity(account *model.UpstreamAccount) bool {
 	extra := account.DecodeExtra()
 	mode, _ := extra["auth_mode"].(string)
 	return strings.EqualFold(strings.TrimSpace(mode), "agentIdentity")
+}
+
+// IsChatGPTAccountFedRAMP reports whether Codex must address the FedRAMP
+// account boundary. The flag is carried by Agent Identity auth.json files and
+// must be applied to every ChatGPT backend request, not only retained as
+// import metadata.
+func IsChatGPTAccountFedRAMP(account *model.UpstreamAccount) bool {
+	if account == nil || account.Platform != model.PlatformOpenAI {
+		return false
+	}
+	return extraBool(account.DecodeExtra(), "chatgpt_account_is_fedramp")
 }
 
 func AgentIdentityRecordFromAccount(account *model.UpstreamAccount) (AgentIdentityRecord, error) {
@@ -117,7 +140,7 @@ func ValidateAgentIdentityRecord(record AgentIdentityRecord) error {
 
 func RegisterOpenAIAgentTask(ctx context.Context, client *http.Client, record AgentIdentityRecord) (string, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: openAIAgentTaskRegistrationTimeout}
 	}
 	privateKey, err := parseAgentIdentityPrivateKey(record.AgentPrivateKey)
 	if err != nil {
@@ -132,10 +155,26 @@ func RegisterOpenAIAgentTask(ctx context.Context, client *http.Client, record Ag
 		"timestamp": timestamp,
 		"signature": base64.StdEncoding.EncodeToString(signature),
 	})
+	url := strings.TrimRight(strings.TrimSpace(openAIAgentIdentityAuthBaseURL), "/") + "/v1/agent/" + record.AgentRuntimeID + "/task/register"
+	requestContext, cancel := context.WithTimeout(ctx, openAIAgentTaskRegistrationTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestContext, http.MethodPost, url, strings.NewReader(string(body)))
+	if err != nil {
+		return "", errors.New("failed to build agent task registration request")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", errors.New("agent task registration request failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("agent task registration returned status %d", resp.StatusCode)
+	}
 	var response agentTaskRegisterResponse
-	url := OpenAIAgentIdentityAuthBaseURL + "/v1/agent/" + record.AgentRuntimeID + "/task/register"
-	if err := doAgentIdentityRegistration(ctx, client, http.MethodPost, url, body, "", false, &response); err != nil {
-		return "", err
+	if err := json.NewDecoder(io.LimitReader(resp.Body, openAIAgentTaskRegistrationResponseSize)).Decode(&response); err != nil {
+		return "", errors.New("agent identity registration response is invalid")
 	}
 	if taskID := strings.TrimSpace(firstNonEmptyString(response.TaskID, response.TaskIDCamel)); taskID != "" {
 		return taskID, nil
@@ -145,6 +184,78 @@ func RegisterOpenAIAgentTask(ctx context.Context, client *http.Client, record Ag
 		return "", errors.New("agent task registration omitted task id")
 	}
 	return decryptAgentTaskID(privateKey, encrypted)
+}
+
+// EnsureOpenAIAgentIdentityTask returns a usable identity record and registers
+// a task only when one is absent or the caller observed a task-specific 401.
+// The package-level per-account lock is intentionally shared by the gateway,
+// quota refresher and admin probes so concurrent paths cannot rotate the same
+// runtime repeatedly.
+func EnsureOpenAIAgentIdentityTask(
+	ctx context.Context,
+	db *gorm.DB,
+	clientFactory AgentIdentityClientFactory,
+	account *model.UpstreamAccount,
+	expectedTaskID string,
+) (AgentIdentityRecord, error) {
+	if !IsOpenAIAgentIdentity(account) {
+		return AgentIdentityRecord{}, errors.New("account is not OpenAI Agent Identity")
+	}
+	lock := &sync.Mutex{}
+	if account.ID > 0 {
+		actual, _ := openAIAgentIdentityTaskLocks.LoadOrStore(account.ID, lock)
+		shared, ok := actual.(*sync.Mutex)
+		if !ok {
+			return AgentIdentityRecord{}, errors.New("agent identity task lock has invalid type")
+		}
+		lock = shared
+	}
+	lock.Lock()
+	defer lock.Unlock()
+
+	if db != nil && account.ID > 0 {
+		var fresh model.UpstreamAccount
+		if err := db.Preload("Proxy").First(&fresh, account.ID).Error; err != nil {
+			return AgentIdentityRecord{}, fmt.Errorf("reload Agent Identity account: %w", err)
+		}
+		*account = fresh
+		if !IsOpenAIAgentIdentity(account) {
+			return AgentIdentityRecord{}, errors.New("agent identity credentials are unavailable")
+		}
+	}
+
+	record, err := AgentIdentityRecordFromAccount(account)
+	if err != nil {
+		return AgentIdentityRecord{}, err
+	}
+	expectedTaskID = strings.TrimSpace(expectedTaskID)
+	if record.TaskID != "" && (expectedTaskID == "" || record.TaskID != expectedTaskID) {
+		return record, nil
+	}
+
+	var client *http.Client
+	if clientFactory != nil {
+		client, err = clientFactory(account)
+		if err != nil {
+			return AgentIdentityRecord{}, err
+		}
+	}
+	taskID, err := RegisterOpenAIAgentTask(ctx, client, record)
+	if err != nil {
+		return AgentIdentityRecord{}, err
+	}
+	record.TaskID = taskID
+	extra, err := model.EncodeExtra(AgentIdentityExtra(record))
+	if err != nil {
+		return AgentIdentityRecord{}, err
+	}
+	if db != nil && account.ID > 0 {
+		if err := db.Model(&model.UpstreamAccount{}).Where("id = ?", account.ID).Update("extra", extra).Error; err != nil {
+			return AgentIdentityRecord{}, err
+		}
+	}
+	account.Extra = extra
+	return record, nil
 }
 
 func OpenAIAgentIdentityAuthorization(record AgentIdentityRecord, now time.Time) (string, error) {
@@ -193,6 +304,53 @@ func IsOpenAIAgentTaskInvalid(status int, body []byte) bool {
 	return false
 }
 
+// RedactOpenAIAgentIdentitySensitiveBody prevents upstream errors from
+// reflecting durable identity fields or a complete AgentAssertion into logs,
+// monitoring records or downstream error responses.
+func RedactOpenAIAgentIdentitySensitiveBody(account *model.UpstreamAccount, body []byte) []byte {
+	if !IsOpenAIAgentIdentity(account) || len(body) == 0 {
+		return body
+	}
+	redacted := string(body)
+	extra := account.DecodeExtra()
+	for _, key := range []string{
+		"agent_private_key",
+		"agent_runtime_id",
+		"task_id",
+		"access_token",
+		"refresh_token",
+		"id_token",
+		"api_key",
+		"session_key",
+		"cookie",
+	} {
+		if value := extraString(extra, key); value != "" {
+			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+		}
+	}
+	for _, value := range []string{string(account.AccessToken), string(account.RefreshToken), string(account.APIKey)} {
+		if value = strings.TrimSpace(value); value != "" {
+			redacted = strings.ReplaceAll(redacted, value, "[redacted]")
+		}
+	}
+	const assertionPrefix = "AgentAssertion "
+	for offset := 0; offset < len(redacted); {
+		relativeStart := strings.Index(redacted[offset:], assertionPrefix)
+		if relativeStart < 0 {
+			break
+		}
+		start := offset + relativeStart
+		valueStart := start + len(assertionPrefix)
+		end := valueStart
+		for end < len(redacted) && !strings.ContainsRune(" \t\r\n\"',}", rune(redacted[end])) {
+			end++
+		}
+		redacted = redacted[:valueStart] + "[redacted]" + redacted[end:]
+		offset = valueStart + len("[redacted]")
+	}
+	return []byte(redacted)
+}
+
 func parseAgentIdentityPrivateKey(encoded string) (ed25519.PrivateKey, error) {
 	der, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
 	if err != nil {
@@ -235,50 +393,6 @@ func decryptAgentTaskID(privateKey ed25519.PrivateKey, encoded string) (string, 
 		return "", errors.New("decrypted agent task id is empty")
 	}
 	return taskID, nil
-}
-
-func doAgentIdentityRegistration(ctx context.Context, client *http.Client, method, url string, body []byte, authorization string, fedramp bool, target any) error {
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Accept", "application/json")
-		if authorization != "" {
-			req.Header.Set("Authorization", authorization)
-		}
-		if fedramp {
-			req.Header.Set("X-OpenAI-Fedramp", "true")
-		}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		responseBody, readErr := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-		resp.Body.Close()
-		if readErr != nil {
-			lastErr = readErr
-			continue
-		}
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			if err := json.Unmarshal(responseBody, target); err != nil {
-				return errors.New("agent identity registration response is invalid")
-			}
-			return nil
-		}
-		message := strings.TrimSpace(string(responseBody))
-		if len(message) > 512 {
-			message = message[:512]
-		}
-		lastErr = fmt.Errorf("agent identity registration returned status %d: %s", resp.StatusCode, message)
-		if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode < 500 {
-			break
-		}
-	}
-	return lastErr
 }
 
 func extraString(values map[string]any, key string) string {

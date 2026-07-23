@@ -968,6 +968,15 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "invalid request")
 		return
 	}
+	existingAgentIdentity := service.IsOpenAIAgentIdentity(&acc)
+	if req.AuthType == model.AuthAgentIdentity && !existingAgentIdentity {
+		util.Fail(c, http.StatusBadRequest, "use the JSON import endpoint to convert an account to Agent Identity")
+		return
+	}
+	if existingAgentIdentity && req.AuthType != "" && req.AuthType != model.AuthAgentIdentity {
+		util.Fail(c, http.StatusBadRequest, "import or create a separate credential to replace an Agent Identity account")
+		return
+	}
 	updates := map[string]any{"base_url": strings.TrimSpace(req.BaseURL), "quota_url": strings.TrimSpace(req.QuotaURL)}
 	if req.Name != "" {
 		updates["name"] = req.Name
@@ -1116,16 +1125,20 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			p.Extra = service.AgentIdentityExtra(record)
 			p.AccountID = record.AccountID
 			p.Email = record.Email
-			identityKey := record.AccountID + "\x00" + record.ChatGPTUserID
+			// A new runtime replaces the old runtime for the same ChatGPT
+			// account. The user id is shared across Team workspaces and the
+			// runtime id changes on re-registration, so neither is a safe
+			// deduplication key.
+			identityKey := record.AccountID
 			if _, duplicate := seenAgentIdentities[identityKey]; duplicate {
-				skipped = append(skipped, gin.H{"name": p.Name, "reason": "duplicate Agent Identity for the same account and user"})
+				skipped = append(skipped, gin.H{"name": p.Name, "reason": "duplicate Agent Identity for the same ChatGPT account"})
 				continue
 			}
 			seenAgentIdentities[identityKey] = struct{}{}
 		}
 		extra, _ := model.EncodeExtra(p.Extra)
 		if p.AuthType == model.AuthAgentIdentity {
-			existing, findErr := h.findAgentIdentityImportTarget(group.ID, p.AccountID, stringMapValue(p.Extra, "chatgpt_user_id"))
+			existing, findErr := h.findAgentIdentityImportTarget(group.ID, p.AccountID)
 			if findErr != nil && findErr != gorm.ErrRecordNotFound {
 				skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 				continue
@@ -1285,33 +1298,24 @@ func (h *AdminHandler) findOAuthImportTarget(groupID int64, platform, accountID 
 	return &existing, nil
 }
 
-// findAgentIdentityImportTarget mirrors Sub2API's Team-aware identity match:
-// a runtime is replaced only when the ChatGPT account and member both match.
-// A legacy account without chatgpt_user_id may be upgraded once and backfilled.
-func (h *AdminHandler) findAgentIdentityImportTarget(groupID int64, accountID, userID string) (*model.UpstreamAccount, error) {
+// findAgentIdentityImportTarget mirrors Sub2API's Agent Identity key: one
+// durable runtime per ChatGPT account. Re-importing the same account rotates
+// the runtime/private key in place; different Team accounts remain isolated
+// even when they belong to the same user.
+func (h *AdminHandler) findAgentIdentityImportTarget(groupID int64, accountID string) (*model.UpstreamAccount, error) {
 	accountID = strings.TrimSpace(accountID)
-	userID = strings.TrimSpace(userID)
 	if accountID == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
-	var candidates []model.UpstreamAccount
-	if err := h.db.Where("group_id = ? AND platform = ? AND account_id = ?", groupID, model.PlatformOpenAI, accountID).Order("id ASC").Find(&candidates).Error; err != nil {
+	var existing model.UpstreamAccount
+	err := h.db.Where(
+		"group_id = ? AND platform = ? AND account_id = ?",
+		groupID, model.PlatformOpenAI, accountID,
+	).Order("id ASC").First(&existing).Error
+	if err != nil {
 		return nil, err
 	}
-	var legacy *model.UpstreamAccount
-	for index := range candidates {
-		storedUserID := stringMapValue(candidates[index].DecodeExtra(), "chatgpt_user_id")
-		if storedUserID == userID {
-			return &candidates[index], nil
-		}
-		if storedUserID == "" && legacy == nil {
-			legacy = &candidates[index]
-		}
-	}
-	if legacy != nil {
-		return legacy, nil
-	}
-	return nil, gorm.ErrRecordNotFound
+	return &existing, nil
 }
 
 func stringMapValue(values map[string]any, key string) string {

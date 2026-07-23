@@ -20,11 +20,15 @@
 
 - Agent Identity 按最新 Sub2API 收敛为 Codex `auth.json` 导入，不再在管理端接收 Access Token 或 Web Session；导入后只保留 Runtime、Ed25519 私钥和账户身份。
 - 同时兼容 `auth_mode=agentIdentity` 和 Codex 托管模式生成的 `auth_mode=chatgpt + agent_identity`，并支持单对象、JSON 数组和 JSONL 批量导入。
-- Agent Identity 按 ChatGPT Account ID 与 User ID 去重：同一 Team 成员更新现有 Runtime，不同 Team 或成员独立保存；单个文件仍可应用账号名称、独立代理、优先级与并发上限。
+- Agent Identity 按最新版 Sub2API 改为只用 ChatGPT Account ID 去重：同一 Team 重新生成 Runtime 时原位轮换，不同 Team 即使属于同一用户也保持隔离。
 - 缺少 `task_id` 时由首次请求自动补注册；导入文件中并存的 OAuth Token、Refresh Token 和 ID Token 不会写入数据库。
 - 导入时忽略 Agent Identity JSON 中残留的 OAuth `expires_at`，不会再把仍可签名的账号误判为过期并跳过。
 - OpenAI Responses、Chat Completions、生图和账号额度查询统一使用动态 `AgentAssertion`；`task_id` 失效时自动重建一次并加密回写。
-- 账号健康检查将 Agent Identity 视为订阅通道，不再错误使用 API Key 的 `/v1/models` 探针。
+- 网关、额度刷新和账号探针共用账号级 task 锁；并发请求会在锁内重新读取已回写的 `task_id`，不会重复注册或相互覆盖。
+- task 注册遇到结果不确定的网络/服务端错误不再盲目重试；只有上游明确返回 task 失效 401 时才按旧 task 精确轮换一次。
+- Agent Identity 上游错误会清除 Runtime、Task、私钥与完整 `AgentAssertion` 后再写入日志或返回客户端。
+- 账号健康检查会用签名后的额度请求验证 Agent Identity，而不是只检查 ChatGPT 域名能否连通，也不会再使用 OAuth 过期时间判定。
+- 企业 FedRAMP 身份会在对话、Responses、生图与额度请求中实际发送 `x-openai-fedramp`，不再只保存导入标记。
 
 ### 全凭证上游额度
 

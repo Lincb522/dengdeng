@@ -934,15 +934,16 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               <div class="flex gap-2">
                 <button
                   type="button"
-                  class="flex-1 rounded-lg border px-3 py-2 text-sm transition"
+                  class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
                   :class="form.auth_type === 'api_key' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
+                  :disabled="editing?.auth_type === 'agent_identity'"
                   @click="form.auth_type = 'api_key'"
                 >API Key</button>
                 <button
                   type="button"
                   class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
                   :class="form.auth_type === 'oauth' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
-                  :disabled="!oauthAvailable"
+                  :disabled="!oauthAvailable || editing?.auth_type === 'agent_identity'"
                   :title="oauthAvailable ? '' : 'Gemini 暂不支持 OAuth 自动续期'"
                   @click="form.auth_type = 'oauth'"
                 >OAuth</button>
@@ -950,8 +951,8 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 					type="button"
 					class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
 					:class="form.auth_type === 'agent_identity' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
-					:disabled="!agentIdentityAvailable"
-					title="仅 OpenAI 分组支持"
+					:disabled="!agentIdentityAvailable || (!!editing && editing.auth_type !== 'agent_identity')"
+					:title="editing && editing.auth_type !== 'agent_identity' ? '请通过 Agent Identity JSON 导入转换凭证' : '仅 OpenAI 分组支持'"
 					@click="form.auth_type = 'agent_identity'"
 				>Agent Identity</button>
               </div>
@@ -1025,12 +1026,16 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 				<template v-else>
 					<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
 						<p class="text-sm font-medium text-slate-200">Codex Agent Identity auth.json</p>
-						<p class="mt-1 text-xs leading-5 text-slate-500">直接导入 Codex 已生成的身份文件，不在站内录入 Access Token 或 Web Session。</p>
+						<p class="mt-1 text-xs leading-5 text-slate-500">导入 Codex CLI 已生成的身份文件。普通 OAuth Token、Web Session 和 CPA OAuth 文件不是 Agent Identity。</p>
+						<details class="mt-2 text-xs text-slate-500">
+							<summary class="cursor-pointer font-medium text-slate-300">获取方式</summary>
+							<p class="mt-2 leading-5">使用 Codex Access Token 执行 <code class="font-mono text-slate-300">codex login --with-access-token</code>，并将凭据存储设为 <code class="font-mono text-slate-300">file</code>，随后导入 <code class="font-mono text-slate-300">~/.codex/auth.json</code>。</p>
+						</details>
 					</div>
 					<div>
 						<label class="label">Agent Identity auth.json</label>
-						<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"chatgpt","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
-						<p class="mt-1 text-xs text-slate-500">支持单个对象、JSON 数组和每行一个对象；缺少 task_id 时会在首次请求前自动注册。</p>
+						<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
+						<p class="mt-1 text-xs text-slate-500">支持单个对象、JSON 数组和 JSONL；不会保存同文件中的 OAuth Token。缺少 task_id 时会在首次请求前注册。</p>
 					</div>
 				</template>
 			</template>

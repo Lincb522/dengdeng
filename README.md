@@ -37,6 +37,7 @@
 
 - [部署手册](docs/DEPLOYMENT.md)：Docker、二进制、Nginx、备份和回滚
 - [架构说明](docs/ARCHITECTURE.md)：请求如何经过网关、调度器和结算模块
+- [Agent Identity](docs/AGENT_IDENTITY.md)：身份文件、Task 注册、请求签名与失效恢复
 - [更新记录](CHANGELOG.md)：重要功能、兼容性修复和升级说明
 - [开发说明](CONTRIBUTING.md)：本地环境、测试和提交要求
 - [安全说明](SECURITY.md)：凭据边界、上线检查和漏洞反馈
@@ -78,7 +79,7 @@ go build -o dengdeng ./cmd/server
 3. 在「模型配置」确认对外模型名、上游模型名和定价。
 4. 用户在「API 密钥」创建 `dd-` 密钥时可同时选择多个分组；请求会按模型平台自动路由，同平台分组不可用时自动切换。之后即可将 Base URL 和密钥填入 SDK 或 CLI。
 
-浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI Agent Identity 按 Sub2API 的方式直接导入 Codex `auth.json`，支持单对象、数组和 JSONL；系统只保存加密的 Runtime 私钥与账户身份，不接收或保留 Access Token、Refresh Token、ID Token 和 Web Session。生产环境需要先在上游登记 OAuth 回调地址，再填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
+浏览器 OAuth 直连目前用于 Claude 和 OpenAI。OpenAI Agent Identity 与普通 OAuth 是两套凭证：按 Sub2API 的现行方式直接导入 Codex 已生成的 `auth.json`，支持单对象、数组和 JSONL；系统只保存加密的 Runtime 私钥与账户身份，不接收或保留 Access Token、Refresh Token、ID Token 和 Web Session。使用 Codex Access Token 时，将 `cli_auth_credentials_store` 设为 `file`，执行 `codex login --with-access-token` 后导入 `~/.codex/auth.json`。CPA 的 Codex 登录文件仍属于 OAuth/PAT，不能直接当成 Agent Identity。生产环境的浏览器 OAuth 仍需先登记回调地址并填写对应的 `OAUTH_*` 配置；完整说明见 [部署手册](docs/DEPLOYMENT.md)。
 
 所有上游账号都有统一额度视图。OAuth / Agent Identity 显示订阅窗口；API Key 会查询所接第三方中转的密钥余额与额度，自动兼容 DengDeng、Sub2API、New API 和 One API，也可为非标准中转填写同域额度查询地址。真实请求返回的请求与 Token 限额会持续同步；上游没有余额接口时才回退显示密钥可用状态和本站实测消耗。
 

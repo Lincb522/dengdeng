@@ -19,7 +19,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestImportAgentIdentityUpdatesSameMemberAndSeparatesTeams(t *testing.T) {
+func TestImportAgentIdentityMergesSameAccountAndSeparatesTeams(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	if err := appcrypto.Init("", "agent-identity-import-test"); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestImportAgentIdentityUpdatesSameMemberAndSeparatesTeams(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.Data.Imported != 2 || response.Data.Updated != 1 || response.Data.Skipped != 0 {
+	if response.Data.Imported != 1 || response.Data.Updated != 1 || response.Data.Skipped != 1 {
 		t.Fatalf("unexpected import result: %s", recorder.Body.String())
 	}
 
@@ -95,8 +95,8 @@ func TestImportAgentIdentityUpdatesSameMemberAndSeparatesTeams(t *testing.T) {
 	if err := db.Order("id ASC").Find(&accounts).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(accounts) != 3 {
-		t.Fatalf("got %d accounts, want 3", len(accounts))
+	if len(accounts) != 2 {
+		t.Fatalf("got %d accounts, want 2", len(accounts))
 	}
 	updated := accounts[0]
 	if updated.ID != existing.ID || updated.AuthType != model.AuthAgentIdentity {
@@ -110,7 +110,7 @@ func TestImportAgentIdentityUpdatesSameMemberAndSeparatesTeams(t *testing.T) {
 	}
 }
 
-func TestImportAgentIdentitySkipsDuplicateMemberInSamePayload(t *testing.T) {
+func TestImportAgentIdentitySkipsDuplicateAccountInSamePayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	if err := appcrypto.Init("", "agent-identity-duplicate-test"); err != nil {
 		t.Fatal(err)

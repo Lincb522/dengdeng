@@ -4,8 +4,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"dengdeng/internal/model"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestOpenAIOAuthResponsesURL(t *testing.T) {
@@ -32,6 +37,43 @@ func TestApplyOpenAIOAuthIdentityHeaders(t *testing.T) {
 	}
 	if got := headers.Get("User-Agent"); got != openAIOAuthUserAgent {
 		t.Fatalf("User-Agent = %q", got)
+	}
+}
+
+func TestOpenAIOAuthRequestAppliesAgentIdentityFedRAMPHeader(t *testing.T) {
+	var received http.Header
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Header.Clone()
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	extra, err := model.EncodeExtra(map[string]any{"chatgpt_account_is_fedramp": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	account := &model.UpstreamAccount{
+		Platform:  model.PlatformOpenAI,
+		AuthType:  model.AuthAgentIdentity,
+		BaseURL:   upstream.URL + "/v1/responses",
+		AccountID: "account-fedramp",
+		Extra:     extra,
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	gateway := &Gateway{client: upstream.Client()}
+	response, err := gateway.doOpenAIOAuthRequest(c, account, "AgentAssertion test", []byte(`{}`), "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if got := received.Get("x-openai-fedramp"); got != "true" {
+		t.Fatalf("x-openai-fedramp = %q", got)
+	}
+	if got := received.Get("chatgpt-account-id"); got != account.AccountID {
+		t.Fatalf("chatgpt-account-id = %q", got)
 	}
 }
 
