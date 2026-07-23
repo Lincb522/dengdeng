@@ -35,6 +35,9 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// OpenAI
 	r.POST("/v1/chat/completions", g.handleOpenAIChat)
 	r.POST("/v1/responses", g.handleOpenAIResponses)
+	r.POST("/v1/responses/compact", g.handleOpenAIResponsesCompact)
+	r.POST("/v1/responses/input_tokens", g.handleOpenAIInputTokens)
+	r.GET("/backend-api/codex/models", g.handleCodexModelsManifest)
 	r.POST("/v1/images/generations", g.handleOpenAIImageGeneration)
 	r.POST("/v1/images/generations/async", g.handleOpenAIImageGenerationAsync)
 	r.GET("/v1/images/tasks/:task_id", g.handleOpenAIImageTask)
@@ -210,11 +213,40 @@ func (g *Gateway) handleAnthropicCountTokens(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with Anthropic Messages")
 		return
 	}
-	// OpenAI has no equivalent of Anthropic's token-count endpoint. Claude
-	// Code calls it before Messages requests, so return a conservative local
-	// estimate for bridged OpenAI/Codex and Grok groups instead of rejecting setup.
-	if ak.Group.Platform == model.PlatformOpenAI || ak.Group.Platform == model.PlatformGrok {
+	// Grok has no compatible token-count endpoint, so keep its conservative
+	// local estimate. OpenAI exposes /responses/input_tokens; using it here
+	// keeps Claude Code's count in sync with the selected upstream tokenizer.
+	if ak.Group.Platform == model.PlatformGrok {
 		c.JSON(http.StatusOK, gin.H{"input_tokens": estimateBridgeTokens(body)})
+		return
+	}
+	if ak.Group.Platform == model.PlatformOpenAI {
+		converted, modelName, _, err := anthropicMessagesToOpenAIResponses(body)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		resolved, err := g.resolveModel(model.PlatformOpenAI, modelName)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		converted["model"] = resolved.UpstreamModel
+		for _, field := range []string{"stream", "store", "max_output_tokens", "temperature", "top_p"} {
+			delete(converted, field)
+		}
+		encoded, err := json.Marshal(converted)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, "convert Anthropic token count request failed")
+			return
+		}
+		g.relay(c, ak, relayRequest{
+			Platform: model.PlatformOpenAI,
+			Path:     "/v1/responses/input_tokens",
+			Model:    modelName,
+			Body:     encoded,
+			Billable: false,
+		})
 		return
 	}
 	g.relay(c, ak, relayRequest{
@@ -361,6 +393,111 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 		Effort:   effort,
 		Body:     body,
 		Billable: true,
+	})
+}
+
+// handleOpenAIResponsesCompact implements Codex remote compaction as its own
+// unary Responses endpoint. Compact requests are deliberately kept separate
+// from normal streaming Responses requests because the ChatGPT upstream uses a
+// different URL and rejects request-scoped fields such as stream and store.
+func (g *Gateway) handleOpenAIResponsesCompact(c *gin.Context) {
+	ak, ok := g.authenticate(c)
+	if !ok {
+		return
+	}
+	body, err := readBody(c)
+	if err != nil {
+		writeReadBodyError(c, err)
+		return
+	}
+	fields := peekJSON(body)
+	if fields == nil {
+		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI) {
+		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI group compatible with Responses compact")
+		return
+	}
+	modelName, _, body, ok := g.rewriteJSONModel(c, model.PlatformOpenAI, fields, body, "")
+	if !ok {
+		return
+	}
+	body, effort := applyOpenAIReasoningPolicy(fields, body, ak.Key.ReasoningEffort, ak.Group, openAIReasoningResponses)
+	body, err = normalizeOpenAICompactRequest(body)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid OpenAI compact request")
+		return
+	}
+	g.relay(c, ak, relayRequest{
+		Platform: model.PlatformOpenAI,
+		Path:     "/v1/responses/compact",
+		Model:    modelName,
+		Effort:   effort,
+		Body:     body,
+		Billable: true,
+	})
+}
+
+// handleOpenAIInputTokens exposes the native OpenAI token-count endpoint for
+// clients that already speak Responses. It is operational only and never
+// consumes balance or request quota.
+func (g *Gateway) handleOpenAIInputTokens(c *gin.Context) {
+	ak, ok := g.authenticate(c)
+	if !ok {
+		return
+	}
+	body, err := readBody(c)
+	if err != nil {
+		writeReadBodyError(c, err)
+		return
+	}
+	fields := peekJSON(body)
+	if fields == nil {
+		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI) {
+		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI group compatible with input token counting")
+		return
+	}
+	modelName, _, body, ok := g.rewriteJSONModel(c, model.PlatformOpenAI, fields, body, "")
+	if !ok {
+		return
+	}
+	body, err = normalizeOpenAIInputTokensRequest(body)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid OpenAI input token request")
+		return
+	}
+	g.relay(c, ak, relayRequest{
+		Platform: model.PlatformOpenAI,
+		Path:     "/v1/responses/input_tokens",
+		Model:    modelName,
+		Body:     body,
+		Billable: false,
+	})
+}
+
+// handleCodexModelsManifest keeps the live ChatGPT/Codex model manifest
+// separate from /v1/models. The latter intentionally remains DengDeng's stable
+// public catalogue, while this route serves Codex clients that need the
+// selected upstream account's full capability metadata.
+func (g *Gateway) handleCodexModelsManifest(c *gin.Context) {
+	ak, ok := g.authenticate(c)
+	if !ok {
+		return
+	}
+	if !ak.selectGroup(model.PlatformOpenAI) {
+		util.Fail(c, http.StatusNotFound, "Codex models manifest is only available for OpenAI groups")
+		return
+	}
+	g.relay(c, ak, relayRequest{
+		Platform: model.PlatformOpenAI,
+		Path:     "/backend-api/codex/models",
+		Billable: false,
 	})
 }
 

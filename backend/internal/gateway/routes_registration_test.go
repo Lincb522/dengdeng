@@ -14,6 +14,9 @@ func TestRegisterIncludesLegacyAnthropicDoubleV1Routes(t *testing.T) {
 	want := map[string]bool{
 		"POST /v1/v1/messages":              false,
 		"POST /v1/v1/messages/count_tokens": false,
+		"POST /v1/responses/compact":        false,
+		"POST /v1/responses/input_tokens":   false,
+		"GET /backend-api/codex/models":     false,
 	}
 	for _, route := range router.Routes() {
 		key := route.Method + " " + route.Path

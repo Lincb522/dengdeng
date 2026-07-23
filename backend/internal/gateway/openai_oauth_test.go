@@ -25,6 +25,33 @@ func TestOpenAIOAuthResponsesURL(t *testing.T) {
 	}
 }
 
+func TestOpenAIOAuthCompactURL(t *testing.T) {
+	tests := map[string]string{
+		"":                                       defaultOpenAIOAuthResponses + "/compact",
+		"https://relay.example":                  "https://relay.example/backend-api/codex/responses/compact",
+		"https://relay.example/custom/responses": "https://relay.example/custom/responses/compact",
+		"https://relay.example/custom/responses/compact": "https://relay.example/custom/responses/compact",
+	}
+	for base, want := range tests {
+		if got := openAIOAuthCompactURL(base); got != want {
+			t.Fatalf("compact URL for %q = %q, want %q", base, got, want)
+		}
+	}
+}
+
+func TestOpenAIOAuthModelsURL(t *testing.T) {
+	tests := map[string]string{
+		"":                      defaultOpenAIOAuthModels + "?client_version=0.144.1",
+		"https://relay.example": "https://relay.example/backend-api/codex/models?client_version=0.144.1",
+		"https://relay.example/backend-api/codex/responses": "https://relay.example/backend-api/codex/models?client_version=0.144.1",
+	}
+	for base, want := range tests {
+		if got := openAIOAuthModelsURL(base, "0.144.1"); got != want {
+			t.Fatalf("models URL for %q = %q, want %q", base, got, want)
+		}
+	}
+}
+
 func TestApplyOpenAIOAuthIdentityHeaders(t *testing.T) {
 	headers := make(http.Header)
 	applyOpenAIOAuthIdentityHeaders(headers)
@@ -74,6 +101,85 @@ func TestOpenAIOAuthRequestAppliesAgentIdentityFedRAMPHeader(t *testing.T) {
 	}
 	if got := received.Get("chatgpt-account-id"); got != account.AccountID {
 		t.Fatalf("chatgpt-account-id = %q", got)
+	}
+}
+
+func TestOpenAIOAuthCompactRequestUsesUnaryEndpoint(t *testing.T) {
+	var received *http.Request
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"cmp_1","object":"response.compaction"}`))
+	}))
+	defer upstream.Close()
+
+	account := &model.UpstreamAccount{
+		Platform: model.PlatformOpenAI,
+		AuthType: model.AuthAgentIdentity,
+		BaseURL:  upstream.URL + "/backend-api/codex/responses",
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses/compact", nil)
+	gateway := &Gateway{client: upstream.Client()}
+	response, err := gateway.doOpenAIOAuthEndpointRequest(c, account, "AgentAssertion test", []byte(`{}`), "session", oauthCompactEndpoint())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if received == nil {
+		t.Fatal("upstream request was not received")
+	}
+	if got := received.URL.Path; got != "/backend-api/codex/responses/compact" {
+		t.Fatalf("path = %q", got)
+	}
+	if got := received.Header.Get("Accept"); got != "application/json" {
+		t.Fatalf("Accept = %q", got)
+	}
+	if got := received.Header.Get("session_id"); got != "session" {
+		t.Fatalf("session_id = %q", got)
+	}
+}
+
+func TestOpenAIOAuthModelsRequestUsesGETAndCacheHeaders(t *testing.T) {
+	var received *http.Request
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		received = r.Clone(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("ETag", `"manifest-1"`)
+		_, _ = w.Write([]byte(`{"models":[]}`))
+	}))
+	defer upstream.Close()
+
+	account := &model.UpstreamAccount{
+		Platform: model.PlatformOpenAI,
+		AuthType: model.AuthAgentIdentity,
+		BaseURL:  upstream.URL + "/backend-api/codex/responses",
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/backend-api/codex/models?client_version=0.150.0", nil)
+	c.Request.Header.Set("If-None-Match", `"manifest-0"`)
+	gateway := &Gateway{client: upstream.Client()}
+	response, err := gateway.doOpenAIOAuthEndpointRequest(c, account, "AgentAssertion test", nil, "", oauthModelsEndpoint("0.150.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if received == nil {
+		t.Fatal("upstream request was not received")
+	}
+	if received.Method != http.MethodGet || received.URL.Path != "/backend-api/codex/models" {
+		t.Fatalf("request = %s %s", received.Method, received.URL.Path)
+	}
+	if got := received.URL.Query().Get("client_version"); got != "0.150.0" {
+		t.Fatalf("client_version = %q", got)
+	}
+	if got := received.Header.Get("Version"); got != "0.150.0" {
+		t.Fatalf("Version = %q", got)
+	}
+	if got := received.Header.Get("If-None-Match"); got != `"manifest-0"` {
+		t.Fatalf("If-None-Match = %q", got)
 	}
 }
 
@@ -174,6 +280,36 @@ func TestRequireOAuthSSERejectsEmptySuccessfulStream(t *testing.T) {
 	}
 }
 
+func TestRequireOAuthJSONRejectsHTMLSuccess(t *testing.T) {
+	upstream := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/html"}},
+		Body:       io.NopCloser(strings.NewReader("<!doctype html>challenge")),
+	}
+	response, err := requireOAuthJSON(upstream, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d", response.StatusCode)
+	}
+}
+
+func TestOAuthInputTokensUnsupportedFallsBack(t *testing.T) {
+	upstream := &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"missing_scope","message":"api.responses.write is required"}}`)),
+	}
+	if !oauthInputTokensUnsupported(upstream) {
+		t.Fatal("missing scope response should use the local token-count fallback")
+	}
+	body, err := io.ReadAll(upstream.Body)
+	if err != nil || !strings.Contains(string(body), "missing_scope") {
+		t.Fatalf("restored body = %q err=%v", body, err)
+	}
+}
+
 func TestRequireOAuthSSEConvertsPreOutputRateLimitToRetryableStatus(t *testing.T) {
 	upstream := &http.Response{
 		StatusCode: http.StatusOK,
@@ -218,6 +354,100 @@ func TestNormalizeOAuthResponsesRequest(t *testing.T) {
 	content := message["content"].([]any)
 	if content[0].(map[string]any)["type"] != "input_text" {
 		t.Fatalf("user content = %#v", content)
+	}
+}
+
+func TestNormalizeOAuthResponsesRequestWrapsObjectInput(t *testing.T) {
+	body, _, err := normalizeOAuthResponsesRequest([]byte(`{
+		"model":"gpt-5.6-sol",
+		"input":{"type":"message","role":"user","content":"hello"}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	input, ok := got["input"].([]any)
+	if !ok || len(input) != 1 {
+		t.Fatalf("input = %#v", got["input"])
+	}
+	message := input[0].(map[string]any)
+	if message["role"] != "user" {
+		t.Fatalf("message = %#v", message)
+	}
+}
+
+func TestNormalizeOAuthResponsesRequestTurnsEmptyStringIntoEmptyList(t *testing.T) {
+	body, _, err := normalizeOAuthResponsesRequest([]byte(`{"model":"gpt-5.6-sol","input":""}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	input, ok := got["input"].([]any)
+	if !ok || len(input) != 0 {
+		t.Fatalf("input = %#v", got["input"])
+	}
+}
+
+func TestNormalizeOpenAIOAuthCompactRequest(t *testing.T) {
+	body, err := normalizeOpenAIOAuthCompactRequest([]byte(`{
+		"model":"gpt-5.6-sol",
+		"input":{"type":"message","role":"user","content":"hello"},
+		"reasoning":{"effort":"max"},
+		"stream":true,
+		"store":true,
+		"prompt_cache_key":"secret",
+		"temperature":0.2
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"stream", "store", "prompt_cache_key", "temperature"} {
+		if _, exists := got[field]; exists {
+			t.Fatalf("compact retained %s: %#v", field, got)
+		}
+	}
+	if effort := got["reasoning"].(map[string]any)["effort"]; effort != "xhigh" {
+		t.Fatalf("reasoning effort = %#v", effort)
+	}
+	if input := got["input"].([]any); len(input) != 1 {
+		t.Fatalf("input = %#v", input)
+	}
+}
+
+func TestNormalizeOpenAIInputTokensRequest(t *testing.T) {
+	body, err := normalizeOpenAIInputTokensRequest([]byte(`{
+		"model":"gpt-5.6-sol",
+		"instructions":"count this",
+		"input":"hello",
+		"tools":[],
+		"stream":true,
+		"store":true,
+		"max_output_tokens":100
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"stream", "store", "max_output_tokens"} {
+		if _, exists := got[field]; exists {
+			t.Fatalf("input_tokens retained %s: %#v", field, got)
+		}
+	}
+	if input := got["input"].([]any); len(input) != 1 {
+		t.Fatalf("input = %#v", input)
 	}
 }
 

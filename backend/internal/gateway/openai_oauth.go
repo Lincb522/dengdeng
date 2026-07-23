@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -25,6 +26,8 @@ import (
 
 const (
 	defaultOpenAIOAuthResponses = "https://chatgpt.com/backend-api/codex/responses"
+	defaultOpenAIOAuthModels    = "https://chatgpt.com/backend-api/codex/models"
+	defaultOpenAIInputTokens    = "https://api.openai.com/v1/responses/input_tokens"
 
 	// OpenAI OAuth credentials are issued to the Codex client and are accepted
 	// by its dedicated ChatGPT Responses endpoint. That endpoint requires the
@@ -61,6 +64,33 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 		}
 		return bufferOAuthResponses(upstream)
 
+	case "/v1/responses/compact":
+		body, err := normalizeOpenAIOAuthCompactRequest(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		upstream, err := g.doOpenAIOAuthEndpoint(c, acc, body, req.SessionID, oauthCompactEndpoint())
+		return requireOAuthJSON(upstream, err)
+
+	case "/v1/responses/input_tokens":
+		body, err := normalizeOpenAIInputTokensRequest(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		upstream, err := g.doOpenAIOAuthEndpoint(c, acc, body, req.SessionID, oauthInputTokensEndpoint())
+		upstream, err = requireOAuthJSON(upstream, err)
+		if err == nil && oauthInputTokensUnsupported(upstream) {
+			if upstream != nil && upstream.Body != nil {
+				upstream.Body.Close()
+			}
+			return oauthInputTokensFallback(body), nil
+		}
+		return upstream, err
+
+	case "/backend-api/codex/models":
+		upstream, err := g.doOpenAIOAuthEndpoint(c, acc, nil, "", oauthModelsEndpoint(c.Query("client_version")))
+		return requireOAuthJSON(upstream, err)
+
 	case "/v1/chat/completions":
 		body, clientStream, requestedModel, err := chatCompletionsToOAuthResponses(req.Body)
 		if err != nil {
@@ -96,16 +126,68 @@ func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount,
 }
 
 func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string) (*http.Response, error) {
+	return g.doOpenAIOAuthEndpoint(c, acc, body, sessionSeed, oauthResponsesEndpoint())
+}
+
+type openAIOAuthEndpoint struct {
+	url              func(string) string
+	method           string
+	accept           string
+	sendCodexHeaders bool
+	sendSessionID    bool
+	refreshOn401     bool
+	version          string
+}
+
+func oauthResponsesEndpoint() openAIOAuthEndpoint {
+	return openAIOAuthEndpoint{
+		url: openAIOAuthResponsesURL, accept: "text/event-stream",
+		sendCodexHeaders: true, sendSessionID: true, refreshOn401: true,
+	}
+}
+
+func oauthCompactEndpoint() openAIOAuthEndpoint {
+	return openAIOAuthEndpoint{
+		url: openAIOAuthCompactURL, accept: "application/json",
+		sendCodexHeaders: true, sendSessionID: true, refreshOn401: true,
+	}
+}
+
+func oauthInputTokensEndpoint() openAIOAuthEndpoint {
+	return openAIOAuthEndpoint{
+		url: func(string) string { return defaultOpenAIInputTokens }, accept: "application/json",
+		sendCodexHeaders: true,
+	}
+}
+
+func oauthModelsEndpoint(clientVersion string) openAIOAuthEndpoint {
+	clientVersion = strings.TrimSpace(clientVersion)
+	if clientVersion == "" {
+		clientVersion = openAIOAuthVersion
+	}
+	return openAIOAuthEndpoint{
+		url: func(base string) string {
+			return openAIOAuthModelsURL(base, clientVersion)
+		},
+		method:           http.MethodGet,
+		accept:           "application/json",
+		sendCodexHeaders: true,
+		refreshOn401:     true,
+		version:          clientVersion,
+	}
+}
+
+func (g *Gateway) doOpenAIOAuthEndpoint(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string, endpoint openAIOAuthEndpoint) (*http.Response, error) {
 	if service.IsOpenAIAgentIdentity(acc) {
-		return g.doOpenAIAgentIdentity(c, acc, body, sessionSeed)
+		return g.doOpenAIAgentIdentityEndpoint(c, acc, body, sessionSeed, endpoint)
 	}
 	token, err := g.oauth.AccessToken(c.Request.Context(), acc)
 	if err != nil {
 		return nil, fmt.Errorf("oauth token: %w", err)
 	}
 	sessionID := oauthSessionHeader(sessionSeed)
-	upstream, err := g.doOpenAIOAuthRequest(c, acc, "Bearer "+token, body, sessionID)
-	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized {
+	upstream, err := g.doOpenAIOAuthEndpointRequest(c, acc, "Bearer "+token, body, sessionID, endpoint)
+	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized || !endpoint.refreshOn401 {
 		return upstream, err
 	}
 
@@ -117,16 +199,20 @@ func (g *Gateway) doOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, body
 	if err != nil {
 		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI OAuth session was rejected and could not be refreshed. Sign in again or import a fresh OAuth session."}}`), nil
 	}
-	return g.doOpenAIOAuthRequest(c, acc, "Bearer "+token, body, sessionID)
+	return g.doOpenAIOAuthEndpointRequest(c, acc, "Bearer "+token, body, sessionID, endpoint)
 }
 
 func (g *Gateway) doOpenAIAgentIdentity(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string) (*http.Response, error) {
+	return g.doOpenAIAgentIdentityEndpoint(c, acc, body, sessionSeed, oauthResponsesEndpoint())
+}
+
+func (g *Gateway) doOpenAIAgentIdentityEndpoint(c *gin.Context, acc *model.UpstreamAccount, body []byte, sessionSeed string, endpoint openAIOAuthEndpoint) (*http.Response, error) {
 	authorization, taskID, err := g.openAIAgentIdentityAuthorization(c, acc, "")
 	if err != nil {
 		return nil, err
 	}
 	sessionID := oauthSessionHeader(sessionSeed)
-	upstream, err := g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+	upstream, err := g.doOpenAIOAuthEndpointRequest(c, acc, authorization, body, sessionID, endpoint)
 	if err != nil || upstream == nil || upstream.StatusCode != http.StatusUnauthorized {
 		return upstream, err
 	}
@@ -145,7 +231,7 @@ func (g *Gateway) doOpenAIAgentIdentity(c *gin.Context, acc *model.UpstreamAccou
 	if err != nil {
 		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI Agent Identity task expired and could not be renewed."}}`), nil
 	}
-	upstream, err = g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+	upstream, err = g.doOpenAIOAuthEndpointRequest(c, acc, authorization, body, sessionID, endpoint)
 	if err != nil || upstream == nil || upstream.StatusCode < http.StatusBadRequest {
 		return upstream, err
 	}
@@ -173,16 +259,32 @@ func (g *Gateway) openAIAgentIdentityAuthorization(c *gin.Context, acc *model.Up
 }
 
 func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccount, authorization string, body []byte, sessionID string) (*http.Response, error) {
-	upReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, openAIOAuthResponsesURL(acc.BaseURL), bytes.NewReader(body))
+	return g.doOpenAIOAuthEndpointRequest(c, acc, authorization, body, sessionID, oauthResponsesEndpoint())
+}
+
+func (g *Gateway) doOpenAIOAuthEndpointRequest(c *gin.Context, acc *model.UpstreamAccount, authorization string, body []byte, sessionID string, endpoint openAIOAuthEndpoint) (*http.Response, error) {
+	if endpoint.url == nil {
+		return nil, errors.New("OpenAI OAuth endpoint URL is not configured")
+	}
+	method := endpoint.method
+	if method == "" {
+		method = http.MethodPost
+	}
+	upReq, err := http.NewRequestWithContext(c.Request.Context(), method, endpoint.url(acc.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	upReq.Header.Set("Authorization", authorization)
 	upReq.Header.Set("Content-Type", "application/json")
-	upReq.Header.Set("Accept", "text/event-stream")
+	upReq.Header.Set("Accept", endpoint.accept)
 	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
-	applyOpenAIOAuthIdentityHeaders(upReq.Header)
-	if sessionID != "" {
+	if endpoint.sendCodexHeaders {
+		applyOpenAIOAuthIdentityHeaders(upReq.Header)
+	}
+	if endpoint.version != "" {
+		upReq.Header.Set("Version", endpoint.version)
+	}
+	if endpoint.sendSessionID && sessionID != "" {
 		// The Codex CLI sends a stable session_id per conversation; its absence
 		// is a fingerprint tell. Reuse the relay's session seed so a multi-turn
 		// conversation keeps one id.
@@ -190,6 +292,9 @@ func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccoun
 	}
 	if language := c.GetHeader("Accept-Language"); language != "" {
 		upReq.Header.Set("Accept-Language", language)
+	}
+	if etag := c.GetHeader("If-None-Match"); etag != "" {
+		upReq.Header.Set("If-None-Match", etag)
 	}
 	if acc.AccountID != "" {
 		upReq.Header.Set("chatgpt-account-id", acc.AccountID)
@@ -208,6 +313,41 @@ func applyOpenAIOAuthIdentityHeaders(headers http.Header) {
 	headers.Set("Originator", openAIOAuthOriginator)
 	headers.Set("Version", openAIOAuthVersion)
 	headers.Set("User-Agent", openAIOAuthUserAgent)
+}
+
+func (g *Gateway) forwardOpenAIModelsManifest(c *gin.Context, acc *model.UpstreamAccount, req relayRequest) (*http.Response, error) {
+	if acc.AuthType == model.AuthOAuth || service.IsOpenAIAgentIdentity(acc) {
+		return g.forwardOpenAIOAuth(c, acc, req)
+	}
+	clientVersion := strings.TrimSpace(c.Query("client_version"))
+	if clientVersion == "" {
+		clientVersion = openAIOAuthVersion
+	}
+	target, err := openAIAPIKeyModelsURL(acc.BaseURL, clientVersion)
+	if err != nil {
+		return nil, err
+	}
+	upReq, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	upReq.Header.Set("Accept", "application/json")
+	applyOpenAIOAuthIdentityHeaders(upReq.Header)
+	upReq.Header.Set("Version", clientVersion)
+	if language := c.GetHeader("Accept-Language"); language != "" {
+		upReq.Header.Set("Accept-Language", language)
+	}
+	if etag := c.GetHeader("If-None-Match"); etag != "" {
+		upReq.Header.Set("If-None-Match", etag)
+	}
+	if err := g.applyCredential(c, upReq, acc, model.PlatformOpenAI); err != nil {
+		return nil, err
+	}
+	client, err := g.clientFor(acc)
+	if err != nil {
+		return nil, err
+	}
+	return requireOAuthJSON(client.Do(upReq))
 }
 
 // oauthSessionHeader returns a UUID-shaped session id. A non-empty seed yields
@@ -270,6 +410,37 @@ func requireOAuthSSE(upstream *http.Response, err error) (*http.Response, error)
 	}
 	upstream.Body.Close()
 	return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream returned a non-stream response. Verify the upstream account and that this server has authorized network access to ChatGPT."}}`), nil
+}
+
+// requireOAuthJSON validates the unary OAuth endpoints used by compact and
+// input_tokens. Without this check an edge HTML page can pass through as HTTP
+// 200 and make Codex report a misleading malformed-response error.
+func requireOAuthJSON(upstream *http.Response, err error) (*http.Response, error) {
+	if err != nil || upstream == nil || upstream.Body == nil {
+		return upstream, err
+	}
+	body, readErr := io.ReadAll(io.LimitReader(upstream.Body, maxBodyBytes+1))
+	upstream.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	if len(body) > maxBodyBytes {
+		return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream returned an oversized JSON response"}}`), nil
+	}
+	contentType := strings.ToLower(upstream.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "text/html") || bytes.HasPrefix(bytes.TrimSpace(body), []byte("<")) {
+		return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream denied this server request and returned an HTML access page. Verify that the server has authorized access to OpenAI."}}`), nil
+	}
+	if upstream.StatusCode >= http.StatusOK && upstream.StatusCode < http.StatusMultipleChoices && !json.Valid(body) {
+		return oauthJSONResponse(http.StatusBadGateway, `{"error":{"message":"OpenAI OAuth upstream returned invalid JSON"}}`), nil
+	}
+	upstream.Body = io.NopCloser(bytes.NewReader(body))
+	upstream.ContentLength = int64(len(body))
+	upstream.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	if upstream.Header.Get("Content-Type") == "" {
+		upstream.Header.Set("Content-Type", "application/json")
+	}
+	return upstream, nil
 }
 
 // preflightOAuthSSE buffers only the non-output prelude. This gives the relay
@@ -385,6 +556,72 @@ func openAIOAuthResponsesURL(base string) string {
 	return base + "/backend-api/codex/responses"
 }
 
+func openAIOAuthCompactURL(base string) string {
+	base = strings.TrimSuffix(strings.TrimSpace(base), "/")
+	if base == "" {
+		return defaultOpenAIOAuthResponses + "/compact"
+	}
+	if strings.HasSuffix(base, "/responses/compact") {
+		return base
+	}
+	if strings.HasSuffix(base, "/responses") {
+		return base + "/compact"
+	}
+	return base + "/backend-api/codex/responses/compact"
+}
+
+func openAIOAuthModelsURL(base, clientVersion string) string {
+	base = strings.TrimSuffix(strings.TrimSpace(base), "/")
+	target := defaultOpenAIOAuthModels
+	if base != "" {
+		target = base
+		if parsed, err := url.Parse(base); err == nil {
+			path := strings.TrimRight(parsed.Path, "/")
+			if index := strings.Index(path, "/backend-api/codex/"); index >= 0 {
+				path = path[:index] + "/backend-api/codex/models"
+			} else {
+				path += "/backend-api/codex/models"
+			}
+			parsed.Path = path
+			parsed.RawPath = ""
+			parsed.Fragment = ""
+			target = parsed.String()
+		}
+	}
+	parsed, err := url.Parse(target)
+	if err != nil {
+		return target
+	}
+	query := parsed.Query()
+	query.Set("client_version", strings.TrimSpace(clientVersion))
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+func openAIAPIKeyModelsURL(base, clientVersion string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		base = defaultOpenAI
+	}
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("invalid OpenAI models upstream URL")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if strings.HasSuffix(path, "/v1") {
+		path += "/models"
+	} else if !strings.HasSuffix(path, "/models") {
+		path += "/v1/models"
+	}
+	parsed.Path = path
+	parsed.RawPath = ""
+	parsed.Fragment = ""
+	query := parsed.Query()
+	query.Set("client_version", strings.TrimSpace(clientVersion))
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
 // normalizeOAuthResponsesRequest makes a public Responses request acceptable
 // to the OAuth upstream. It always requests upstream SSE; non-stream clients
 // are buffered and returned as an ordinary JSON response below.
@@ -397,12 +634,7 @@ func normalizeOAuthResponsesRequest(body []byte) ([]byte, bool, error) {
 	for _, field := range openAIOAuthUnsupportedFields {
 		delete(request, field)
 	}
-	if input, ok := request["input"].(string); ok {
-		request["input"] = []any{responseMessage("user", input)}
-	}
-	if input, ok := request["input"].([]any); ok {
-		request["input"] = normalizeOAuthInput(input)
-	}
+	normalizeOAuthRequestInput(request)
 	normalizeResponsesTools(request["tools"])
 	normalizeResponsesParallelToolCalls(request, nil)
 	normalizeResponsesInputItemIDs(request["input"])
@@ -410,6 +642,109 @@ func normalizeOAuthResponsesRequest(body []byte) ([]byte, bool, error) {
 	request["stream"] = true
 	encoded, err := json.Marshal(request)
 	return encoded, clientStream, err
+}
+
+func normalizeOAuthRequestInput(request map[string]any) {
+	switch input := request["input"].(type) {
+	case string:
+		if strings.TrimSpace(input) == "" {
+			request["input"] = []any{}
+		} else {
+			request["input"] = []any{responseMessage("user", input)}
+		}
+	case map[string]any:
+		request["input"] = normalizeOAuthInput([]any{input})
+	case []any:
+		request["input"] = normalizeOAuthInput(input)
+	}
+}
+
+var openAICompactFields = []string{
+	"model", "input", "instructions", "tools", "parallel_tool_calls",
+	"reasoning", "text", "previous_response_id",
+}
+
+func normalizeOpenAICompactRequest(body []byte) ([]byte, error) {
+	request, err := decodeJSONObject(body)
+	if err != nil {
+		return nil, err
+	}
+	compact := make(map[string]any, len(openAICompactFields))
+	for _, field := range openAICompactFields {
+		if value, exists := request[field]; exists {
+			compact[field] = value
+		}
+	}
+	normalizeOAuthRequestInput(compact)
+	normalizeResponsesTools(compact["tools"])
+	normalizeResponsesParallelToolCalls(compact, nil)
+	normalizeResponsesInputItemIDs(compact["input"])
+	return json.Marshal(compact)
+}
+
+func normalizeOpenAIOAuthCompactRequest(body []byte) ([]byte, error) {
+	normalized, err := normalizeOpenAICompactRequest(body)
+	if err != nil {
+		return nil, err
+	}
+	request, err := decodeJSONObject(normalized)
+	if err != nil {
+		return nil, err
+	}
+	modelName := strings.ToLower(strings.TrimSpace(stringValue(request["model"])))
+	reasoning, _ := request["reasoning"].(map[string]any)
+	if strings.HasPrefix(modelName, "gpt-5.6") && reasoning != nil &&
+		strings.EqualFold(strings.TrimSpace(stringValue(reasoning["effort"])), "max") {
+		reasoning["effort"] = "xhigh"
+		request["reasoning"] = reasoning
+	}
+	return json.Marshal(request)
+}
+
+func normalizeOpenAIInputTokensRequest(body []byte) ([]byte, error) {
+	request, err := decodeJSONObject(body)
+	if err != nil {
+		return nil, err
+	}
+	normalized := make(map[string]any, 6)
+	for _, field := range []string{"model", "instructions", "input", "tools", "tool_choice"} {
+		if value, exists := request[field]; exists {
+			normalized[field] = value
+		}
+	}
+	normalizeOAuthRequestInput(normalized)
+	normalizeResponsesTools(normalized["tools"])
+	normalizeResponsesInputItemIDs(normalized["input"])
+	return json.Marshal(normalized)
+}
+
+func oauthInputTokensUnsupported(upstream *http.Response) bool {
+	if upstream == nil {
+		return false
+	}
+	switch upstream.StatusCode {
+	case http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound:
+	default:
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(upstream.Body, 64<<10))
+	if err != nil {
+		return false
+	}
+	upstream.Body = io.NopCloser(bytes.NewReader(body))
+	upstream.ContentLength = int64(len(body))
+	marker := strings.ToLower(string(body))
+	return strings.Contains(marker, "missing_scope") ||
+		strings.Contains(marker, "api.responses.write") ||
+		strings.Contains(marker, "insufficient_scope") ||
+		(strings.Contains(marker, "input_tokens") &&
+			(strings.Contains(marker, "not found") || strings.Contains(marker, "not supported") || strings.Contains(marker, "unsupported")))
+}
+
+func oauthInputTokensFallback(body []byte) *http.Response {
+	estimated := estimateBridgeTokens(body)
+	encoded, _ := json.Marshal(map[string]any{"input_tokens": estimated})
+	return oauthJSONResponse(http.StatusOK, string(encoded))
 }
 
 func chatCompletionsToOAuthResponses(body []byte) ([]byte, bool, string, error) {
