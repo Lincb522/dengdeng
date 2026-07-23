@@ -223,6 +223,8 @@ func (s *PaymentService) CheckoutInfo() (CheckoutInfo, error) {
 
 type OrderResult struct {
 	ID            int64                   `json:"id"`
+	UserID        int64                   `json:"user_id"`
+	UserEmail     string                  `json:"user_email,omitempty"`
 	OutTradeNo    string                  `json:"out_trade_no"`
 	ProviderKey   string                  `json:"provider_key"`
 	PaymentMethod string                  `json:"payment_method"`
@@ -240,7 +242,10 @@ type OrderResult struct {
 }
 
 func orderResult(o model.PaymentOrder) OrderResult {
-	result := OrderResult{ID: o.ID, OutTradeNo: o.OutTradeNo, ProviderKey: o.ProviderKey, PaymentMethod: o.PaymentMethod, Status: o.Status, Currency: o.Currency, AmountMinor: o.AmountMinor, CreditMicro: o.CreditMicro, ExpiresAt: o.ExpiresAt, PaidAt: o.PaidAt, CompletedAt: o.CompletedAt, CancelledAt: o.CancelledAt, FailureReason: o.FailureReason, CreatedAt: o.CreatedAt}
+	result := OrderResult{ID: o.ID, UserID: o.UserID, OutTradeNo: o.OutTradeNo, ProviderKey: o.ProviderKey, PaymentMethod: o.PaymentMethod, Status: o.Status, Currency: o.Currency, AmountMinor: o.AmountMinor, CreditMicro: o.CreditMicro, ExpiresAt: o.ExpiresAt, PaidAt: o.PaidAt, CompletedAt: o.CompletedAt, CancelledAt: o.CancelledAt, FailureReason: o.FailureReason, CreatedAt: o.CreatedAt}
+	if o.User != nil {
+		result.UserEmail = o.User.Email
+	}
 	if o.CheckoutData != "" {
 		var checkout payment.CreateResponse
 		if json.Unmarshal([]byte(o.CheckoutData), &checkout) == nil {
@@ -430,7 +435,7 @@ func (s *PaymentService) ListOrders(limit int) ([]OrderResult, error) {
 		limit = 100
 	}
 	var orders []model.PaymentOrder
-	if err := s.db.Order("id DESC").Limit(limit).Find(&orders).Error; err != nil {
+	if err := s.db.Preload("User").Order("id DESC").Limit(limit).Find(&orders).Error; err != nil {
 		return nil, err
 	}
 	result := make([]OrderResult, len(orders))
@@ -447,7 +452,7 @@ func (s *PaymentService) ListOrders(limit int) ([]OrderResult, error) {
 // credit has been spent.
 func (s *PaymentService) ProcessRefund(ctx context.Context, id int64) (OrderResult, error) {
 	var order model.PaymentOrder
-	if err := s.db.First(&order, id).Error; err != nil {
+	if err := s.db.Preload("User").First(&order, id).Error; err != nil {
 		return OrderResult{}, ErrOrderNotFound
 	}
 	if order.Status != model.PaymentStatusRefundRequested && order.Status != model.PaymentStatusCompleted {
@@ -499,7 +504,7 @@ func (s *PaymentService) ProcessRefund(ctx context.Context, id int64) (OrderResu
 		_ = s.db.Model(&model.PaymentOrder{}).Where("id = ? AND status = ?", id, model.PaymentStatusRefunding).Update("refund_trade_no", response.RefundID).Error
 		s.audit(id, "REFUND_PENDING", "admin", "")
 	}
-	_ = s.db.First(&order, id).Error
+	_ = s.db.Preload("User").First(&order, id).Error
 	return orderResult(order), nil
 }
 
@@ -508,7 +513,7 @@ func (s *PaymentService) ProcessRefund(ctx context.Context, id int64) (OrderResu
 // here; no second debit or credit is possible.
 func (s *PaymentService) FinalizeRefund(ctx context.Context, id int64) (OrderResult, error) {
 	var order model.PaymentOrder
-	if err := s.db.First(&order, id).Error; err != nil {
+	if err := s.db.Preload("User").First(&order, id).Error; err != nil {
 		return OrderResult{}, ErrOrderNotFound
 	}
 	if order.Status != model.PaymentStatusRefunding || order.RefundTradeNo == "" {
@@ -530,7 +535,7 @@ func (s *PaymentService) FinalizeRefund(ctx context.Context, id int64) (OrderRes
 		if err := s.restoreRefundHold(order, "provider reported refund failure"); err != nil {
 			return OrderResult{}, err
 		}
-		_ = s.db.First(&order, id).Error
+		_ = s.db.Preload("User").First(&order, id).Error
 		return orderResult(order), nil
 	}
 	if result.Status == payment.StatusRefunded {
@@ -539,7 +544,7 @@ func (s *PaymentService) FinalizeRefund(ctx context.Context, id int64) (OrderRes
 			return OrderResult{}, err
 		}
 		s.audit(id, "ORDER_REFUNDED", "admin", "reconciled")
-		_ = s.db.First(&order, id).Error
+		_ = s.db.Preload("User").First(&order, id).Error
 		return orderResult(order), nil
 	}
 	return orderResult(order), nil

@@ -530,6 +530,24 @@ type UsageLog struct {
 	CacheWrite1hTokens int64 `json:"cache_write_1h_tokens"`
 	ImageCount         int64 `json:"image_count"`
 	CostMicro          int64 `json:"cost_micro"`
+	// The following fields are an immutable billing snapshot for this request.
+	// Keeping the component costs, list prices and effective multiplier on the
+	// ledger means a later pricing edit cannot rewrite the meaning of history.
+	InputCostMicro        int64   `gorm:"not null;default:0" json:"input_cost_micro"`
+	OutputCostMicro       int64   `gorm:"not null;default:0" json:"output_cost_micro"`
+	CacheReadCostMicro    int64   `gorm:"not null;default:0" json:"cache_read_cost_micro"`
+	CacheWriteCostMicro   int64   `gorm:"not null;default:0" json:"cache_write_cost_micro"`
+	ImageCostMicro        int64   `gorm:"not null;default:0" json:"image_cost_micro"`
+	RawCostMicro          int64   `gorm:"not null;default:0" json:"raw_cost_micro"`
+	EffectiveMultiplier   float64 `gorm:"not null;default:0" json:"effective_multiplier"`
+	InputUnitPrice        float64 `gorm:"not null;default:0" json:"input_unit_price"`
+	OutputUnitPrice       float64 `gorm:"not null;default:0" json:"output_unit_price"`
+	CacheReadUnitPrice    float64 `gorm:"not null;default:0" json:"cache_read_unit_price"`
+	CacheWriteUnitPrice   float64 `gorm:"not null;default:0" json:"cache_write_unit_price"`
+	CacheWrite5mUnitPrice float64 `gorm:"not null;default:0" json:"cache_write_5m_unit_price"`
+	CacheWrite1hUnitPrice float64 `gorm:"not null;default:0" json:"cache_write_1h_unit_price"`
+	ImageUnitPrice        float64 `gorm:"not null;default:0" json:"image_unit_price"`
+	ServiceTier           string  `gorm:"size:32" json:"service_tier,omitempty"`
 	// FirstTokenMs measures time from relay admission to the first response
 	// body bytes written to the client. DurationMs covers the whole request,
 	// including queueing and the complete streamed response.

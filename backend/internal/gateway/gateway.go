@@ -415,6 +415,9 @@ type relayRequest struct {
 	// (client field first, key default second, "" for model default). It
 	// selects the per-effort billing multiplier and lands in the usage log.
 	Effort string
+	// ServiceTier is the client-requested upstream service tier, when the wire
+	// protocol exposes one. It is recorded only for billing audit display.
+	ServiceTier string
 	// ResponseAdapter presents a different public wire protocol while Platform
 	// remains the real upstream protocol used for routing and accounting.
 	ResponseAdapter responseAdapter
@@ -541,6 +544,9 @@ func jsonStringPath(root map[string]any, path ...string) string {
 // relay runs the account failover loop and, on success, streams the response
 // while capturing usage for billing.
 func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
+	if req.ServiceTier == "" {
+		req.ServiceTier = requestServiceTier(req.Body)
+	}
 	routeGroups := ak.groupsForPlatform(req.Platform)
 	if len(routeGroups) == 0 {
 		util.Fail(c, http.StatusBadRequest, fmt.Sprintf("this key has no %s group", req.Platform))
@@ -756,6 +762,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				Model:        req.Model,
 				Stream:       streamed,
 				Effort:       req.Effort,
+				ServiceTier:  req.ServiceTier,
 				Usage:        usage,
 				Rates:        g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
 				FirstTokenMs: timingWriter.firstTokenMs,
@@ -807,6 +814,7 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		Model:        req.Model,
 		Stream:       false,
 		Effort:       req.Effort,
+		ServiceTier:  req.ServiceTier,
 		Rates:        billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
 		DurationMs:   time.Since(started).Milliseconds(),
 		QueueMs:      trace.QueueMs,
@@ -817,6 +825,21 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		ErrorMessage: message,
 		SkipBalance:  true,
 	})
+}
+
+func requestServiceTier(body []byte) string {
+	if len(body) == 0 || !json.Valid(body) {
+		return ""
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	tier := strings.ToLower(jsonStringPath(payload, "service_tier"))
+	if len(tier) > 32 {
+		return tier[:32]
+	}
+	return tier
 }
 
 func (g *Gateway) setRelayTimingHeaders(c *gin.Context, trace relayTrace) {

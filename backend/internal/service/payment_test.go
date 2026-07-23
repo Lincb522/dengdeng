@@ -145,3 +145,41 @@ func TestNewPaymentOrderNoFitsWxPayLimit(t *testing.T) {
 		t.Fatalf("other provider order number length=%d, want 36", len(got))
 	}
 }
+
+func TestListPaymentOrdersIncludesRechargeUser(t *testing.T) {
+	svc, db := paymentTestService(t)
+	user := model.User{Email: "order-owner@example.test", PasswordHash: "x", Role: model.RoleUser, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	order := model.PaymentOrder{
+		OutTradeNo:    "ddp_order_owner",
+		UserID:        user.ID,
+		ProviderID:    1,
+		ProviderKey:   "wxpay",
+		PaymentMethod: "wxpay",
+		Status:        model.PaymentStatusCompleted,
+		Currency:      "CNY",
+		AmountMinor:   100,
+		CreditMicro:   1_000_000,
+		ExpiresAt:     time.Now().UTC().Add(time.Hour),
+	}
+	if err := db.Create(&order).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	orders, err := svc.ListOrders(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, result := range orders {
+		if result.ID != order.ID {
+			continue
+		}
+		if result.UserID != user.ID || result.UserEmail != user.Email {
+			t.Fatalf("order user = %d %q, want %d %q", result.UserID, result.UserEmail, user.ID, user.Email)
+		}
+		return
+	}
+	t.Fatalf("order %d not returned", order.ID)
+}

@@ -32,6 +32,7 @@ type BillContext struct {
 	// Effort is recorded for auditability: the per-effort multiplier is
 	// already folded into Rates by the gateway before Record is called.
 	Effort       string
+	ServiceTier  string
 	Usage        Usage
 	Rates        RatePlan
 	FirstTokenMs int64
@@ -48,32 +49,48 @@ type BillContext struct {
 }
 
 func (s *BillingService) Record(bc BillContext) {
-	cost := s.pricing.Cost(bc.Model, bc.Usage, bc.Rates)
+	breakdown := s.pricing.Breakdown(bc.Model, bc.Usage, bc.Rates)
+	cost := breakdown.TotalMicro
 	entry := model.UsageLog{
-		RequestID:          bc.RequestID,
-		UserID:             bc.UserID,
-		APIKeyID:           bc.APIKeyID,
-		AccountID:          bc.AccountID,
-		GroupID:            bc.GroupID,
-		Model:              bc.Model,
-		Stream:             bc.Stream,
-		ReasoningEffort:    bc.Effort,
-		InputTokens:        bc.Usage.InputTokens,
-		OutputTokens:       bc.Usage.OutputTokens,
-		CacheReadTokens:    bc.Usage.CacheReadTokens,
-		CacheWriteTokens:   bc.Usage.CacheWriteTokens,
-		CacheWrite5mTokens: bc.Usage.CacheWrite5mTokens,
-		CacheWrite1hTokens: bc.Usage.CacheWrite1hTokens,
-		ImageCount:         bc.Usage.ImageCount,
-		CostMicro:          cost,
-		FirstTokenMs:       bc.FirstTokenMs,
-		DurationMs:         bc.DurationMs,
-		QueueMs:            bc.QueueMs,
-		ScheduleMs:         bc.ScheduleMs,
-		UpstreamMs:         bc.UpstreamMs,
-		AttemptCount:       bc.AttemptCount,
-		StatusCode:         bc.StatusCode,
-		ErrorMessage:       bc.ErrorMessage,
+		RequestID:             bc.RequestID,
+		UserID:                bc.UserID,
+		APIKeyID:              bc.APIKeyID,
+		AccountID:             bc.AccountID,
+		GroupID:               bc.GroupID,
+		Model:                 bc.Model,
+		Stream:                bc.Stream,
+		ReasoningEffort:       bc.Effort,
+		InputTokens:           bc.Usage.InputTokens,
+		OutputTokens:          bc.Usage.OutputTokens,
+		CacheReadTokens:       bc.Usage.CacheReadTokens,
+		CacheWriteTokens:      bc.Usage.CacheWriteTokens,
+		CacheWrite5mTokens:    bc.Usage.CacheWrite5mTokens,
+		CacheWrite1hTokens:    bc.Usage.CacheWrite1hTokens,
+		ImageCount:            bc.Usage.ImageCount,
+		CostMicro:             cost,
+		InputCostMicro:        breakdown.InputMicro,
+		OutputCostMicro:       breakdown.OutputMicro,
+		CacheReadCostMicro:    breakdown.CacheReadMicro,
+		CacheWriteCostMicro:   breakdown.CacheWriteMicro,
+		ImageCostMicro:        breakdown.ImageMicro,
+		RawCostMicro:          breakdown.RawMicro,
+		EffectiveMultiplier:   breakdown.EffectiveMultiplier,
+		InputUnitPrice:        breakdown.InputUnitPrice,
+		OutputUnitPrice:       breakdown.OutputUnitPrice,
+		CacheReadUnitPrice:    breakdown.CacheReadUnitPrice,
+		CacheWriteUnitPrice:   breakdown.CacheWriteUnitPrice,
+		CacheWrite5mUnitPrice: breakdown.CacheWrite5mPrice,
+		CacheWrite1hUnitPrice: breakdown.CacheWrite1hPrice,
+		ImageUnitPrice:        breakdown.ImageUnitPrice,
+		ServiceTier:           bc.ServiceTier,
+		FirstTokenMs:          bc.FirstTokenMs,
+		DurationMs:            bc.DurationMs,
+		QueueMs:               bc.QueueMs,
+		ScheduleMs:            bc.ScheduleMs,
+		UpstreamMs:            bc.UpstreamMs,
+		AttemptCount:          bc.AttemptCount,
+		StatusCode:            bc.StatusCode,
+		ErrorMessage:          bc.ErrorMessage,
 		// Usage windows and monitoring filters are UTC. Persisting a local-zone
 		// timestamp into SQLite makes lexical range comparisons silently exclude
 		// recent rows on non-UTC hosts.

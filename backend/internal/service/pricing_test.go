@@ -42,6 +42,21 @@ func TestPricingCostSplitsCacheTTLAndRates(t *testing.T) {
 	if got, want := pricing.Cost("claude-test", usage, rates), int64(1672); got != want {
 		t.Fatalf("Cost() = %d, want %d", got, want)
 	}
+
+	breakdown := pricing.Breakdown("claude-test", usage, rates)
+	if breakdown.TotalMicro != 1672 || breakdown.RawMicro != 549 {
+		t.Fatalf("breakdown totals = charged %d raw %d, want 1672 and 549", breakdown.TotalMicro, breakdown.RawMicro)
+	}
+	if got := breakdown.InputMicro + breakdown.OutputMicro + breakdown.CacheReadMicro + breakdown.CacheWriteMicro + breakdown.ImageMicro; got != breakdown.TotalMicro {
+		t.Fatalf("component total = %d, want %d", got, breakdown.TotalMicro)
+	}
+	if breakdown.InputUnitPrice != 2 || breakdown.OutputUnitPrice != 8 ||
+		breakdown.CacheWrite5mPrice != 2.5 || breakdown.CacheWrite1hPrice != 4 {
+		t.Fatalf("unexpected unit-price snapshot: %#v", breakdown)
+	}
+	if breakdown.EffectiveMultiplier <= 3.04 || breakdown.EffectiveMultiplier >= 3.05 {
+		t.Fatalf("effective multiplier = %f, want about 3.043", breakdown.EffectiveMultiplier)
+	}
 }
 
 func TestPricingCostFallsBackForUndividedCacheWrite(t *testing.T) {

@@ -129,12 +129,40 @@ func cacheWritePrice(p *model.ModelPrice, ttl string) float64 {
 	return p.CacheWritePrice
 }
 
+// CostBreakdown is the immutable pricing result for one usage record. All
+// component amounts and TotalMicro are charged micro-USD; RawMicro is the
+// catalogue-price total before user, group, cache and effort multipliers.
+type CostBreakdown struct {
+	TotalMicro          int64
+	RawMicro            int64
+	InputMicro          int64
+	OutputMicro         int64
+	CacheReadMicro      int64
+	CacheWriteMicro     int64
+	ImageMicro          int64
+	EffectiveMultiplier float64
+	InputUnitPrice      float64
+	OutputUnitPrice     float64
+	CacheReadUnitPrice  float64
+	CacheWriteUnitPrice float64
+	CacheWrite5mPrice   float64
+	CacheWrite1hPrice   float64
+	ImageUnitPrice      float64
+}
+
 // Cost returns micro-USD for the given usage after applying its rate plan.
 // price(USD/1Mtok) * tokens == micro-USD directly.
 func (s *PricingService) Cost(modelName string, u Usage, rates RatePlan) int64 {
+	return s.Breakdown(modelName, u, rates).TotalMicro
+}
+
+// Breakdown returns both the final charge and the values needed to explain it.
+// Integer component amounts are reconciled to TotalMicro so the UI always
+// displays a breakdown whose rows add up to the recorded user charge.
+func (s *PricingService) Breakdown(modelName string, u Usage, rates RatePlan) CostBreakdown {
 	p := s.Match(modelName)
 	if p == nil {
-		return 0
+		return CostBreakdown{}
 	}
 	rates = rates.normalize()
 
@@ -163,21 +191,71 @@ func (s *PricingService) Cost(modelName string, u Usage, rates RatePlan) int64 {
 		}
 	}
 
-	raw := (float64(inputTokens)*p.InputPrice +
-		float64(u.OutputTokens)*p.OutputPrice) * rates.Base
-	raw += float64(u.CacheReadTokens) * p.CacheReadPrice * rates.CacheRead
-	raw += float64(cacheWrite5m) * cacheWritePrice(p, "5m") * rates.CacheWrite5m
-	raw += float64(cacheWrite1h) * cacheWritePrice(p, "1h") * rates.CacheWrite1h
-	raw += float64(cacheWriteOther) * p.CacheWritePrice * rates.CacheWrite5m
+	inputRaw := float64(inputTokens) * p.InputPrice
+	outputRaw := float64(u.OutputTokens) * p.OutputPrice
+	cacheReadRaw := float64(u.CacheReadTokens) * p.CacheReadPrice
+	cacheWriteRaw := float64(cacheWrite5m)*cacheWritePrice(p, "5m") +
+		float64(cacheWrite1h)*cacheWritePrice(p, "1h") +
+		float64(cacheWriteOther)*p.CacheWritePrice
+	inputCharged := inputRaw * rates.Base
+	outputCharged := outputRaw * rates.Base
+	cacheReadCharged := cacheReadRaw * rates.CacheRead
+	cacheWriteCharged := float64(cacheWrite5m)*cacheWritePrice(p, "5m")*rates.CacheWrite5m +
+		float64(cacheWrite1h)*cacheWritePrice(p, "1h")*rates.CacheWrite1h +
+		float64(cacheWriteOther)*p.CacheWritePrice*rates.CacheWrite5m
+
+	var imageRaw, imageCharged float64
 	// A fixed per-image price is deliberately an override, rather than an
 	// addition, so operators do not charge image-token and image-unit prices
 	// for the same generated image.
 	if p.ImagePricePerImage > 0 && u.ImageCount > 0 {
-		raw += float64(u.ImageCount) * p.ImagePricePerImage * 1_000_000 * rates.Image
+		imageRaw = float64(u.ImageCount) * p.ImagePricePerImage * 1_000_000
+		imageCharged = imageRaw * rates.Image
 	} else {
-		raw += (float64(u.ImageInputTokens)*p.ImageInputPrice +
+		imageRaw = float64(u.ImageInputTokens)*p.ImageInputPrice +
 			float64(u.ImageOutputTokens)*p.ImageOutputPrice +
-			float64(u.ImageCacheReadTokens)*p.ImageCacheReadPrice) * rates.Image
+			float64(u.ImageCacheReadTokens)*p.ImageCacheReadPrice
+		imageCharged = imageRaw * rates.Image
 	}
-	return int64(raw)
+
+	raw := inputRaw + outputRaw + cacheReadRaw + cacheWriteRaw + imageRaw
+	charged := inputCharged + outputCharged + cacheReadCharged + cacheWriteCharged + imageCharged
+	result := CostBreakdown{
+		TotalMicro:          int64(charged),
+		RawMicro:            int64(raw),
+		InputMicro:          int64(inputCharged),
+		OutputMicro:         int64(outputCharged),
+		CacheReadMicro:      int64(cacheReadCharged),
+		CacheWriteMicro:     int64(cacheWriteCharged),
+		ImageMicro:          int64(imageCharged),
+		InputUnitPrice:      p.InputPrice,
+		OutputUnitPrice:     p.OutputPrice,
+		CacheReadUnitPrice:  p.CacheReadPrice,
+		CacheWriteUnitPrice: p.CacheWritePrice,
+		CacheWrite5mPrice:   cacheWritePrice(p, "5m"),
+		CacheWrite1hPrice:   cacheWritePrice(p, "1h"),
+		ImageUnitPrice:      p.ImagePricePerImage,
+	}
+	if raw > 0 {
+		result.EffectiveMultiplier = charged / raw
+	}
+	// Flooring individual positive components can lose a few micro-dollars
+	// compared with flooring their sum. Assign that harmless remainder to the
+	// first applicable component so the breakdown remains arithmetically exact.
+	remainder := result.TotalMicro - result.InputMicro - result.OutputMicro -
+		result.CacheReadMicro - result.CacheWriteMicro - result.ImageMicro
+	switch {
+	case remainder == 0:
+	case inputCharged > 0:
+		result.InputMicro += remainder
+	case outputCharged > 0:
+		result.OutputMicro += remainder
+	case cacheReadCharged > 0:
+		result.CacheReadMicro += remainder
+	case cacheWriteCharged > 0:
+		result.CacheWriteMicro += remainder
+	default:
+		result.ImageMicro += remainder
+	}
+	return result
 }

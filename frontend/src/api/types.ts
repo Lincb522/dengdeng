@@ -445,6 +445,21 @@ export interface UsageLog {
 	cache_write_1h_tokens: number
 	image_count: number
   cost_micro: number
+	input_cost_micro: number
+	output_cost_micro: number
+	cache_read_cost_micro: number
+	cache_write_cost_micro: number
+	image_cost_micro: number
+	raw_cost_micro: number
+	effective_multiplier: number
+	input_unit_price: number
+	output_unit_price: number
+	cache_read_unit_price: number
+	cache_write_unit_price: number
+	cache_write_5m_unit_price: number
+	cache_write_1h_unit_price: number
+	image_unit_price: number
+	service_tier?: string
 	first_token_ms: number
   duration_ms: number
 	queue_ms: number
@@ -680,6 +695,8 @@ export interface PaymentCheckout {
 
 export interface PaymentOrder {
   id: number
+	user_id: number
+	user_email?: string
   out_trade_no: string
   provider_key: string
   payment_method: string

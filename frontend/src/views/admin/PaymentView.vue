@@ -118,7 +118,34 @@ onMounted(load)
       <div v-else class="px-6 py-10 text-center text-sm text-slate-500">尚未配置收款渠道</div>
     </section>
 
-<section class="card overflow-hidden"><div class="flex items-center justify-between px-6 py-4"><div><h3 class="text-sm font-semibold text-slate-100">支付订单</h3><p class="mt-1 text-xs text-slate-500">退款会先冻结充值得到的余额；余额已消耗时不会放款。</p></div><button class="btn-ghost text-xs" @click="load">刷新</button></div><div v-if="orders.length" class="divide-y divide-slate-800"><div v-for="order in orders" :key="order.id" class="flex flex-wrap items-center justify-between gap-4 px-6 py-4"><div><div class="text-sm text-slate-200">{{ money(order.amount_minor, order.currency) }} <span class="ml-2 text-xs text-slate-500">→ {{ formatMoney(order.credit_micro) }}</span></div><div class="mt-1 font-mono text-[11px] text-slate-500">{{ order.out_trade_no }} · {{ order.provider_key }} · {{ new Date(order.created_at).toLocaleString() }}</div></div><div class="flex items-center gap-3"><span class="text-xs text-slate-400">{{ status(order) }}</span><button v-if="order.status === 'REFUND_REQUESTED' || order.status === 'COMPLETED'" class="btn-ghost text-xs !text-amber" @click="refund(order)">处理退款</button><button v-else-if="order.status === 'REFUNDING'" class="btn-ghost text-xs !text-amber" @click="reconcileRefund(order)">核验退款</button></div></div></div><div v-else class="px-6 py-10 text-center text-sm text-slate-500">暂无支付订单</div></section>
+    <section class="card overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4">
+        <div><h3 class="text-sm font-semibold text-slate-100">支付订单</h3><p class="mt-1 text-xs text-slate-500">每笔订单保留充值用户；退款会先冻结充值得到的余额。</p></div>
+        <button class="btn-ghost text-xs" @click="load">刷新</button>
+      </div>
+      <div v-if="orders.length" class="divide-y divide-slate-800">
+        <div v-for="order in orders" :key="order.id" class="payment-order-row">
+          <div class="payment-order-user">
+            <span>{{ (order.user_email || 'U').slice(0, 1).toUpperCase() }}</span>
+            <div><strong>{{ order.user_email || `用户 #${order.user_id}` }}</strong><small>用户 ID {{ order.user_id }}</small></div>
+          </div>
+          <div class="payment-order-amount">
+            <strong>{{ money(order.amount_minor, order.currency) }}</strong>
+            <small>到账 {{ formatMoney(order.credit_micro) }}</small>
+          </div>
+          <div class="payment-order-meta">
+            <code>{{ order.out_trade_no }}</code>
+            <small>{{ order.provider_key }} · {{ new Date(order.created_at).toLocaleString() }}</small>
+          </div>
+          <div class="payment-order-actions">
+            <span>{{ status(order) }}</span>
+            <button v-if="order.status === 'REFUND_REQUESTED' || order.status === 'COMPLETED'" class="btn-ghost text-xs !text-amber" @click="refund(order)">处理退款</button>
+            <button v-else-if="order.status === 'REFUNDING'" class="btn-ghost text-xs !text-amber" @click="reconcileRefund(order)">核验退款</button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="px-6 py-10 text-center text-sm text-slate-500">暂无支付订单</div>
+    </section>
 
     <div v-if="formOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/55 p-4" @click.self="formOpen = false"><div class="card max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6"><div class="mb-5 flex items-start justify-between"><div><h3 class="text-base font-semibold text-slate-100">{{ editingID ? '更新收款渠道' : '添加收款渠道' }}</h3><p class="mt-1 text-xs text-amber">更新渠道时需重新提交完整密钥配置，系统不会回显已保存的敏感字段。</p></div><button class="btn-ghost" @click="formOpen = false">关闭</button></div><div class="grid gap-4 sm:grid-cols-2"><label><span class="form-label">名称</span><input v-model="providerForm.name" class="input w-full" /></label><label><span class="form-label">渠道</span><select v-model="providerForm.provider_key" class="input w-full"><option value="easypay">EasyPay</option><option value="alipay">支付宝官方</option><option value="wxpay">微信支付 API v3</option><option value="stripe">Stripe</option><option value="airwallex">Airwallex</option></select></label><label><span class="form-label">币种</span><input v-model="providerForm.currency" class="input w-full" /></label><label><span class="form-label">支付方式（逗号分隔）</span><input v-model="providerForm.supported_methods" class="input w-full" placeholder="alipay,wxpay" /></label><label><span class="form-label">展示模式</span><input v-model="providerForm.payment_mode" class="input w-full" placeholder="qrcode" /></label><label><span class="form-label">优先级</span><input v-model.number="providerForm.priority" class="input num w-full" type="number" /></label></div><label class="mt-4 block"><span class="form-label">密钥配置 JSON</span><textarea v-model="providerForm.config" class="input min-h-48 w-full font-mono text-xs" spellcheck="false"></textarea><span class="mt-2 block text-xs text-slate-500">{{ providerGuide }}</span></label><div class="mt-5 flex justify-end gap-3"><button class="btn-ghost" @click="formOpen = false">取消</button><button class="btn-primary" :disabled="providerBusy" @click="saveProvider">保存渠道</button></div></div></div>
   </div>

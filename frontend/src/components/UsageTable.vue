@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { UsageLog } from '../api/types'
-import { formatMoney, formatTokens } from '../api/types'
+import { formatTokens } from '../api/types'
 import { copyText } from '../api/client'
 import { reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
+import UsageCostBreakdown from './UsageCostBreakdown.vue'
 
 defineProps<{ items: UsageLog[]; showUser?: boolean }>()
 
@@ -70,7 +71,7 @@ function formatLatency(milliseconds: number) {
 					<div v-if="l.cache_write_5m_tokens || l.cache_write_1h_tokens" class="mt-0.5 text-[10px] text-slate-600">5m {{ formatTokens(l.cache_write_5m_tokens) }} · 1h {{ formatTokens(l.cache_write_1h_tokens) }}</div>
 				</td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
-          <td class="num text-right text-xs text-amber">{{ formatMoney(l.cost_micro) }}</td>
+          <td class="num text-right text-xs text-amber"><UsageCostBreakdown :log="l" /></td>
           <td class="num whitespace-nowrap text-right text-xs text-slate-500">{{ formatLatency(l.first_token_ms) }}</td>
           <td class="num whitespace-nowrap text-right text-xs text-slate-500">
 				<div>{{ formatLatency(l.duration_ms) }}</div>
