@@ -15,7 +15,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"dengdeng/internal/model"
@@ -23,8 +22,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
-
-var openAIAgentIdentityTaskLocks sync.Map
 
 const (
 	defaultOpenAIOAuthResponses = "https://chatgpt.com/backend-api/codex/responses"
@@ -139,56 +136,37 @@ func (g *Gateway) doOpenAIAgentIdentity(c *gin.Context, acc *model.UpstreamAccou
 		return nil, readErr
 	}
 	if !service.IsOpenAIAgentTaskInvalid(upstream.StatusCode, errorBody) {
-		upstream.Body = io.NopCloser(bytes.NewReader(errorBody))
-		upstream.ContentLength = int64(len(errorBody))
+		redacted := service.RedactOpenAIAgentIdentitySensitiveBody(acc, errorBody)
+		upstream.Body = io.NopCloser(bytes.NewReader(redacted))
+		upstream.ContentLength = int64(len(redacted))
 		return upstream, nil
 	}
 	authorization, _, err = g.openAIAgentIdentityAuthorization(c, acc, taskID)
 	if err != nil {
 		return oauthJSONResponse(http.StatusUnauthorized, `{"error":{"message":"OpenAI Agent Identity task expired and could not be renewed."}}`), nil
 	}
-	return g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+	upstream, err = g.doOpenAIOAuthRequest(c, acc, authorization, body, sessionID)
+	if err != nil || upstream == nil || upstream.StatusCode < http.StatusBadRequest {
+		return upstream, err
+	}
+	errorBody, readErr = io.ReadAll(io.LimitReader(upstream.Body, 64<<10))
+	upstream.Body.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	redacted := service.RedactOpenAIAgentIdentitySensitiveBody(acc, errorBody)
+	upstream.Body = io.NopCloser(bytes.NewReader(redacted))
+	upstream.ContentLength = int64(len(redacted))
+	return upstream, nil
 }
 
 func (g *Gateway) openAIAgentIdentityAuthorization(c *gin.Context, acc *model.UpstreamAccount, expectedTaskID string) (string, string, error) {
 	if acc == nil {
 		return "", "", errors.New("agent identity account is nil")
 	}
-	lockValue, _ := openAIAgentIdentityTaskLocks.LoadOrStore(acc.ID, &sync.Mutex{})
-	lock := lockValue.(*sync.Mutex)
-	lock.Lock()
-	defer lock.Unlock()
-
-	if g.db != nil && acc.ID > 0 {
-		var fresh model.UpstreamAccount
-		if err := g.db.Preload("Proxy").First(&fresh, acc.ID).Error; err == nil {
-			*acc = fresh
-		}
-	}
-	record, err := service.AgentIdentityRecordFromAccount(acc)
+	record, err := service.EnsureOpenAIAgentIdentityTask(c.Request.Context(), g.db, g.clientFor, acc, expectedTaskID)
 	if err != nil {
 		return "", "", err
-	}
-	if record.TaskID == "" || (expectedTaskID != "" && record.TaskID == expectedTaskID) {
-		client, clientErr := g.clientFor(acc)
-		if clientErr != nil {
-			return "", "", clientErr
-		}
-		taskID, registerErr := service.RegisterOpenAIAgentTask(c.Request.Context(), client, record)
-		if registerErr != nil {
-			return "", "", registerErr
-		}
-		record.TaskID = taskID
-		extra, encodeErr := model.EncodeExtra(service.AgentIdentityExtra(record))
-		if encodeErr != nil {
-			return "", "", encodeErr
-		}
-		if g.db != nil && acc.ID > 0 {
-			if updateErr := g.db.Model(&model.UpstreamAccount{}).Where("id = ?", acc.ID).Update("extra", extra).Error; updateErr != nil {
-				return "", "", updateErr
-			}
-		}
-		acc.Extra = extra
 	}
 	authorization, err := service.OpenAIAgentIdentityAuthorization(record, time.Now())
 	return authorization, record.TaskID, err
@@ -215,6 +193,9 @@ func (g *Gateway) doOpenAIOAuthRequest(c *gin.Context, acc *model.UpstreamAccoun
 	}
 	if acc.AccountID != "" {
 		upReq.Header.Set("chatgpt-account-id", acc.AccountID)
+	}
+	if service.IsChatGPTAccountFedRAMP(acc) {
+		upReq.Header.Set("x-openai-fedramp", "true")
 	}
 	client, err := g.clientFor(acc)
 	if err != nil {

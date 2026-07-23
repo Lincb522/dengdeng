@@ -805,6 +805,9 @@ func (s *AccountQuotaService) refreshOpenAI(ctx context.Context, account *model.
 	req.Header.Set("Originator", "Codex Desktop")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "codex_cli_rs/0.144.1")
+	if IsChatGPTAccountFedRAMP(account) {
+		req.Header.Set("x-openai-fedramp", "true")
+	}
 	var payload codexUsagePayload
 	if err := doQuotaJSON(client, req, &payload); err != nil {
 		return fmt.Errorf("Codex quota: %w", err)
@@ -845,23 +848,11 @@ func (s *AccountQuotaService) refreshOpenAIAgentIdentity(ctx context.Context, ac
 	if account == nil || account.Platform != model.PlatformOpenAI {
 		return fmt.Errorf("Agent Identity is only available for OpenAI accounts")
 	}
-	client, err := s.clientFor(account)
-	if err != nil {
-		return err
-	}
-	record, err := AgentIdentityRecordFromAccount(account)
-	if err != nil {
-		return err
-	}
+	expectedTaskID := ""
 	for recovered := false; ; {
-		if record.TaskID == "" {
-			record.TaskID, err = RegisterOpenAIAgentTask(ctx, client, record)
-			if err != nil {
-				return fmt.Errorf("Agent Identity task registration failed: %w", err)
-			}
-			if err := s.persistAgentIdentityRecord(account, record); err != nil {
-				return err
-			}
+		record, err := EnsureOpenAIAgentIdentityTask(ctx, s.db, s.clientFor, account, expectedTaskID)
+		if err != nil {
+			return fmt.Errorf("Agent Identity task registration failed: %w", err)
 		}
 		authorization, authErr := OpenAIAgentIdentityAuthorization(record, time.Now())
 		if authErr != nil {
@@ -872,24 +863,20 @@ func (s *AccountQuotaService) refreshOpenAIAgentIdentity(ctx context.Context, ac
 			return nil
 		}
 		var upstreamErr *quotaHTTPError
-		if recovered || !errors.As(err, &upstreamErr) || !IsOpenAIAgentTaskInvalid(upstreamErr.StatusCode, upstreamErr.Body) {
+		if !errors.As(err, &upstreamErr) {
 			return err
 		}
+		taskInvalid := IsOpenAIAgentTaskInvalid(upstreamErr.StatusCode, upstreamErr.Body)
+		upstreamErr.Body = RedactOpenAIAgentIdentitySensitiveBody(account, upstreamErr.Body)
+		if recovered || !taskInvalid {
+			// refreshOpenAI wrapped the original error and formatted its text
+			// before redaction. Rebuild the wrapper so callers can never observe
+			// the cached pre-redaction message.
+			return fmt.Errorf("Codex quota: %w", upstreamErr)
+		}
 		recovered = true
-		record.TaskID = ""
+		expectedTaskID = record.TaskID
 	}
-}
-
-func (s *AccountQuotaService) persistAgentIdentityRecord(account *model.UpstreamAccount, record AgentIdentityRecord) error {
-	extra, err := model.EncodeExtra(AgentIdentityExtra(record))
-	if err != nil {
-		return err
-	}
-	if err := s.db.Model(&model.UpstreamAccount{}).Where("id = ?", account.ID).Update("extra", extra).Error; err != nil {
-		return err
-	}
-	account.Extra = extra
-	return nil
 }
 
 type openAISubscriptionPayload struct {

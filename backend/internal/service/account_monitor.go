@@ -18,9 +18,9 @@ import (
 )
 
 // AccountMonitor performs non-billable health checks in the background. API
-// key accounts use their provider's model-list endpoint; OAuth accounts only
-// verify token freshness plus HTTPS transport because a Codex response would
-// consume the account's subscription allowance.
+// key accounts use provider credential probes, OAuth accounts verify token
+// freshness plus HTTPS transport, and Agent Identity accounts authenticate
+// against the signed Codex usage endpoint before the transport check.
 type AccountMonitor struct {
 	db      *gorm.DB
 	cfg     *config.Config
@@ -97,7 +97,10 @@ func (m *AccountMonitor) runAll(parent context.Context) {
 			defer group.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			if m.quota != nil {
+			// Agent Identity is verified inside Probe with a forced signed
+			// refresh. Other credential types can keep the cheaper stale-aware
+			// background refresh.
+			if m.quota != nil && !IsOpenAIAgentIdentity(&account) {
 				_, _ = m.quota.RefreshIfStale(parent, account.ID)
 			}
 			_, _ = m.Probe(parent, &account)
@@ -125,10 +128,20 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 		return model.AccountProbe{State: "down", CheckedAt: checkedAt}, fmt.Errorf("invalid account")
 	}
 	probe := model.AccountProbe{AccountID: account.ID, State: "down", CheckedAt: checkedAt}
-	transportProbe := account.AuthType == model.AuthOAuth || IsOpenAIAgentIdentity(account)
+	agentIdentity := IsOpenAIAgentIdentity(account)
+	transportProbe := account.AuthType == model.AuthOAuth || agentIdentity
 	if transportProbe {
 		probe.Mode = "transport"
-		if account.AuthType == model.AuthOAuth && m.oauth != nil {
+		if agentIdentity && m.quota != nil {
+			authContext, cancel := context.WithTimeout(parent, m.runtimePolicy().ProbeTimeout())
+			snapshot, err := m.quota.RefreshAccount(authContext, account.ID)
+			cancel()
+			if err != nil || snapshot.State == "error" {
+				probe.State = "expired"
+				probe.ErrorMessage = "Agent Identity authentication failed; import a fresh auth.json"
+				return m.persistProbe(probe)
+			}
+		} else if account.AuthType == model.AuthOAuth && m.oauth != nil {
 			refreshCtx, cancel := context.WithTimeout(parent, m.runtimePolicy().ProbeTimeout())
 			_, err := m.oauth.AccessToken(refreshCtx, account)
 			cancel()
@@ -137,7 +150,7 @@ func (m *AccountMonitor) Probe(parent context.Context, account *model.UpstreamAc
 				probe.ErrorMessage = "OAuth credential refresh failed; re-authorize this account"
 				return m.persistProbe(probe)
 			}
-		} else if account.ExpiresAt != nil && !account.ExpiresAt.After(checkedAt) {
+		} else if account.AuthType == model.AuthOAuth && account.ExpiresAt != nil && !account.ExpiresAt.After(checkedAt) {
 			probe.State = "expired"
 			probe.ErrorMessage = "OAuth access token expired"
 			return m.persistProbe(probe)
@@ -286,6 +299,12 @@ func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 }
 
 func applyProbeCredential(req *http.Request, account *model.UpstreamAccount) {
+	if IsOpenAIAgentIdentity(account) {
+		// Authentication was already verified by the signed quota request.
+		// This follow-up HEAD checks only the configured origin and must not send
+		// an empty API-key Bearer credential.
+		return
+	}
 	if account.AuthType == model.AuthOAuth {
 		req.Header.Set("Authorization", "Bearer "+string(account.AccessToken))
 		if account.AccountID != "" {
