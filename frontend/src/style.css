@@ -37,6 +37,9 @@
   --accent: #c98a20;
   --accent-soft: #f8e6bb;
   --shadow: rgba(117, 81, 36, 0.09);
+	--contact-banner-height: 2.625rem;
+	--contact-banner-bg: #30261e;
+	--contact-banner-text: #fffaf1;
 }
 
 :root[data-theme='dark'] {
@@ -74,6 +77,8 @@
 	--accent: #dda748;
 	--accent-soft: #4a3820;
 	--shadow: rgba(0, 0, 0, .32);
+	--contact-banner-bg: #28231e;
+	--contact-banner-text: #f8f3ec;
 }
 
 body {
@@ -86,6 +91,107 @@ body {
 }
 
 #app { min-height: 100vh; }
+
+.app-frame { display: flex; min-height: 100dvh; flex-direction: column; }
+.app-route { min-height: 0; flex: 1; }
+
+.contact-banner {
+	position: sticky;
+	top: 0;
+	z-index: 50;
+	height: var(--contact-banner-height);
+	flex: 0 0 var(--contact-banner-height);
+	background: var(--contact-banner-bg);
+	color: var(--contact-banner-text);
+}
+.contact-banner__inner {
+	display: flex;
+	width: min(76rem, 100%);
+	height: 100%;
+	align-items: center;
+	gap: .58rem;
+	margin: 0 auto;
+	padding: 0 1rem;
+}
+.contact-banner__icon { display: grid; width: 1.7rem; height: 1.7rem; flex: 0 0 auto; place-items: center; border-radius: .48rem; background: rgba(255,255,255,.1); color: #efc77d; }
+.contact-banner__icon svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
+.contact-banner__copy { display: flex; min-width: 0; align-items: baseline; gap: .55rem; }
+.contact-banner__copy span { color: rgba(255,250,241,.76); font-size: .7rem; font-weight: 720; white-space: nowrap; }
+.contact-banner__copy strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; font-weight: 820; letter-spacing: .015em; white-space: nowrap; }
+.contact-banner__actions { display: flex; align-items: center; gap: .38rem; margin-left: auto; }
+.contact-banner__actions button { min-height: 1.85rem; border-radius: .48rem; font-size: .68rem; font-weight: 800; transition: background .18s ease, color .18s ease, border-color .18s ease; }
+.contact-banner__copy-button { display: inline-flex; align-items: center; gap: .32rem; padding: 0 .62rem; color: rgba(255,250,241,.82); }
+.contact-banner__copy-button:hover { background: rgba(255,255,255,.1); color: var(--contact-banner-text); }
+.contact-banner__copy-button svg { width: .86rem; height: .86rem; fill: currentColor; }
+.contact-banner__open { border: 1px solid rgba(239,199,125,.5); padding: 0 .72rem; color: #f7d99e; }
+.contact-banner__open:hover { border-color: #efc77d; background: rgba(239,199,125,.12); color: #fff1d4; }
+.contact-banner button:focus-visible { outline: 2px solid #efc77d; outline-offset: 2px; }
+
+.contact-dialog {
+	width: min(25rem, calc(100% - 2rem));
+	padding: 0;
+	overflow: hidden;
+	border: 1px solid var(--line);
+	border-radius: 14px;
+	background: var(--surface);
+	color: var(--ink);
+	box-shadow: 0 6px 8px rgba(48,38,30,.2);
+}
+.contact-dialog::backdrop { background: rgba(27,23,18,.48); }
+.contact-dialog__head { display: flex; align-items: center; gap: .78rem; padding: 1rem 1rem .9rem; border-bottom: 1px solid var(--line); }
+.contact-dialog__mark { display: grid; width: 2.25rem; height: 2.25rem; flex: 0 0 auto; place-items: center; border-radius: .68rem; background: var(--accent-soft); color: #70440b; }
+.contact-dialog__mark svg { width: 1.15rem; height: 1.15rem; fill: currentColor; }
+.contact-dialog__head h2 { font-size: 1rem; font-weight: 820; letter-spacing: -.015em; }
+.contact-dialog__head p { margin-top: .12rem; color: var(--ink-soft); font-size: .72rem; }
+.contact-dialog__close { display: grid; width: 2rem; height: 2rem; margin-left: auto; place-items: center; border-radius: .5rem; color: var(--ink-soft); }
+.contact-dialog__close:hover { background: var(--surface-muted); color: var(--ink); }
+.contact-dialog__close svg { width: .92rem; height: .92rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.8; }
+.contact-dialog__number { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1rem; padding: .85rem .9rem; border: 1px solid var(--line); border-radius: .68rem; background: var(--surface-muted); }
+.contact-dialog__number span { color: var(--ink-soft); font-size: .72rem; font-weight: 720; }
+.contact-dialog__number strong { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1rem; font-weight: 850; letter-spacing: .025em; white-space: nowrap; }
+.contact-dialog__actions { display: grid; grid-template-columns: 1fr 1fr; gap: .55rem; padding: 0 1rem 1rem; }
+.contact-dialog__actions > * { display: inline-flex; min-height: 2.55rem; align-items: center; justify-content: center; border-radius: .62rem; font-size: .78rem; font-weight: 800; }
+.contact-dialog__copy { border: 1px solid var(--line); color: var(--ink); }
+.contact-dialog__copy:hover { border-color: var(--accent); background: var(--surface-muted); }
+.contact-dialog__open-qq { background: var(--ink); color: var(--surface); }
+.contact-dialog__open-qq:hover { background: color-mix(in srgb, var(--ink) 90%, var(--accent)); }
+.contact-dialog button:focus-visible, .contact-dialog a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app-route > .home-shell,
+.app-route > .public-models-shell,
+.app-route > .login-shell,
+.app-route > .legal-shell,
+.app-route > .image-studio,
+.app-route > .app-shell,
+.app-route .console-shell { min-height: calc(100dvh - var(--contact-banner-height)); }
+.app-route .side-rail { height: calc(100dvh - var(--contact-banner-height) - 1rem); }
+.app-route .workspace { min-height: calc(100dvh - var(--contact-banner-height) - 1.15rem); }
+
+:root[data-theme='dark'] .contact-dialog__mark { color: #f5d59d; }
+
+@media (max-width: 900px) {
+	.app-route .side-rail {
+		inset: calc(var(--contact-banner-height) + .45rem) auto .45rem .45rem;
+		height: auto;
+	}
+	.app-route .workspace { min-height: calc(100dvh - var(--contact-banner-height) - .9rem); }
+}
+
+@media (max-width: 460px) {
+	.contact-banner__inner { gap: .42rem; padding: 0 .62rem; }
+	.contact-banner__icon { width: 1.55rem; height: 1.55rem; }
+	.contact-banner__copy { gap: 0; }
+	.contact-banner__copy span { display: none; }
+	.contact-banner__copy-button { width: 1.85rem; padding: 0; justify-content: center; }
+	.contact-banner__copy-button span { display: none; }
+	.contact-banner__open { padding: 0 .62rem; }
+	.app-route .login-frame,
+	.app-route .login-panel { min-height: calc(100dvh - var(--contact-banner-height)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.contact-banner__actions button { transition: none; }
+}
 
 .home-shell {
 	position: relative;
