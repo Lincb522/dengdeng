@@ -900,6 +900,9 @@ func retryableUpstream(status int, body []byte) bool {
 
 // forward builds and executes the upstream request for one account.
 func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayRequest) (*http.Response, error) {
+	if req.Platform == model.PlatformOpenAI && req.Path == "/backend-api/codex/models" {
+		return g.forwardOpenAIModelsManifest(c, acc, req)
+	}
 	// An OpenAI OAuth credential is a ChatGPT/Codex subscription credential,
 	// not an API Platform key. It has a separate Responses-shaped upstream and
 	// needs protocol adaptation before it can serve the public OpenAI APIs.
