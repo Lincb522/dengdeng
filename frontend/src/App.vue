@@ -2,6 +2,7 @@
 import { onMounted } from 'vue'
 import { useAuth } from './stores/auth'
 import ToastHost from './components/ToastHost.vue'
+import ContactBanner from './components/ContactBanner.vue'
 import { useTheme } from './stores/theme'
 
 const auth = useAuth()
@@ -13,6 +14,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <RouterView />
+  <div class="app-frame">
+    <ContactBanner />
+    <div class="app-route">
+      <RouterView />
+    </div>
+  </div>
   <ToastHost />
 </template>
