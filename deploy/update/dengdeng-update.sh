@@ -37,6 +37,7 @@ fi
 REQUEST_FILE="$STATE_DIRECTORY/request.json"
 STATUS_FILE="$STATE_DIRECTORY/status.json"
 CHANGELOG_FILE="$STATE_DIRECTORY/changelog.json"
+HISTORY_FILE="$STATE_DIRECTORY/history.json"
 LOCK_FILE="$STATE_DIRECTORY/update.lock"
 CURRENT_COMMIT_FILE="$RELEASE_DIRECTORY/CURRENT_COMMIT"
 CURRENT_VERSION_FILE="$RELEASE_DIRECTORY/CURRENT_VERSION"
@@ -209,6 +210,97 @@ PY
   chown dengdeng:dengdeng "$CHANGELOG_FILE"
 }
 
+append_release_history() {
+  export DD_UPDATE_HISTORY_FILE="$HISTORY_FILE" DD_UPDATE_CHANGELOG_FILE="$CHANGELOG_FILE"
+  export DD_UPDATE_CURRENT_VERSION="$CURRENT_VERSION" DD_UPDATE_CURRENT_COMMIT="$CURRENT_COMMIT"
+  export DD_UPDATE_PREVIOUS_COMMIT="$PREVIOUS_COMMIT" DD_UPDATE_ACTION="$ACTION" DD_UPDATE_MESSAGE="$MESSAGE"
+  export DD_UPDATE_REQUESTED_BY="$REQUESTED_BY" DD_UPDATE_FINISHED_AT="$FINISHED_AT"
+  python3 <<'PY'
+import json, os, pathlib
+
+history_path = pathlib.Path(os.environ["DD_UPDATE_HISTORY_FILE"])
+changelog_path = pathlib.Path(os.environ["DD_UPDATE_CHANGELOG_FILE"])
+try:
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(history, list):
+        history = []
+except (OSError, ValueError, TypeError):
+    history = []
+try:
+    changes = json.loads(changelog_path.read_text(encoding="utf-8"))
+    if not isinstance(changes, list):
+        changes = []
+except (OSError, ValueError, TypeError):
+    changes = []
+
+release = {
+    "version": os.environ["DD_UPDATE_CURRENT_VERSION"],
+    "commit": os.environ["DD_UPDATE_CURRENT_COMMIT"],
+    "previous_commit": os.environ["DD_UPDATE_PREVIOUS_COMMIT"],
+    "action": os.environ["DD_UPDATE_ACTION"],
+    "message": os.environ["DD_UPDATE_MESSAGE"],
+    "requested_by": os.environ["DD_UPDATE_REQUESTED_BY"],
+    "finished_at": os.environ["DD_UPDATE_FINISHED_AT"],
+    "changes": changes,
+}
+history = [item for item in history if not (
+    isinstance(item, dict)
+    and item.get("commit") == release["commit"]
+    and item.get("finished_at") == release["finished_at"]
+)]
+history.insert(0, release)
+history = history[:50]
+temporary = history_path.with_suffix(".tmp")
+temporary.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+temporary.chmod(0o640)
+os.replace(temporary, history_path)
+PY
+  chown dengdeng:dengdeng "$HISTORY_FILE"
+}
+
+seed_release_history() {
+  [[ -r "$STATUS_FILE" ]] || return 0
+  export DD_UPDATE_STATUS_FILE="$STATUS_FILE" DD_UPDATE_HISTORY_FILE="$HISTORY_FILE"
+  python3 <<'PY'
+import json, os, pathlib
+
+status_path = pathlib.Path(os.environ["DD_UPDATE_STATUS_FILE"])
+history_path = pathlib.Path(os.environ["DD_UPDATE_HISTORY_FILE"])
+try:
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+except (OSError, ValueError, TypeError):
+    raise SystemExit(0)
+if status.get("status") != "succeeded" or status.get("action") not in ("apply", "rollback"):
+    raise SystemExit(0)
+if not status.get("current_commit") or not status.get("finished_at"):
+    raise SystemExit(0)
+try:
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    if not isinstance(history, list):
+        history = []
+except (OSError, ValueError, TypeError):
+    history = []
+release = {
+    "version": status.get("current_version", ""),
+    "commit": status["current_commit"],
+    "previous_commit": status.get("previous_commit", ""),
+    "action": status["action"],
+    "message": status.get("message", ""),
+    "requested_by": status.get("requested_by", ""),
+    "finished_at": status["finished_at"],
+    "changes": status.get("changes") if isinstance(status.get("changes"), list) else [],
+}
+if not any(isinstance(item, dict) and item.get("commit") == release["commit"] and item.get("finished_at") == release["finished_at"] for item in history):
+    history.insert(0, release)
+history = history[:50]
+temporary = history_path.with_suffix(".tmp")
+temporary.write_text(json.dumps(history, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+temporary.chmod(0o640)
+os.replace(temporary, history_path)
+PY
+  [[ ! -e "$HISTORY_FILE" ]] || chown dengdeng:dengdeng "$HISTORY_FILE"
+}
+
 set_stage() {
   STAGE="$1"
   MESSAGE="$2"
@@ -347,6 +439,7 @@ apply_release() {
   MESSAGE="新版本已上线并通过健康检查"
   FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   write_state
+  append_release_history
 }
 
 rollback_release() {
@@ -381,6 +474,7 @@ rollback_release() {
   MESSAGE="已恢复上一版本并通过健康检查"
   FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   write_state
+  append_release_history
 }
 
 [[ -r "$REQUEST_FILE" ]]
@@ -389,6 +483,7 @@ REQUESTED_BY="$(json_field requested_by)"
 REQUESTED_AT="$(json_field requested_at)"
 [[ "$ACTION" == "check" || "$ACTION" == "apply" || "$ACTION" == "rollback" ]]
 load_markers
+seed_release_history
 printf '[]\n' > "$CHANGELOG_FILE"
 chmod 0640 "$CHANGELOG_FILE"
 chown dengdeng:dengdeng "$CHANGELOG_FILE"

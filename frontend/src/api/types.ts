@@ -183,6 +183,18 @@ export interface UpdateStatus {
 	started_at: string
 	finished_at: string
 	changes: UpdateChange[]
+	history?: UpdateRelease[]
+}
+
+export interface UpdateRelease {
+	version: string
+	commit: string
+	previous_commit?: string
+	action: 'apply' | 'rollback' | string
+	message: string
+	requested_by?: string
+	finished_at: string
+	changes: UpdateChange[]
 }
 
 export interface UpdateActionResponse {

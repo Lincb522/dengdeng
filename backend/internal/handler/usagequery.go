@@ -235,11 +235,11 @@ func decorateUsage(db *gorm.DB, logs []model.UsageLog) {
 		groupIDs[l.GroupID] = true
 		accountIDs[l.AccountID] = true
 	}
-	users := map[int64]string{}
+	users := map[int64]model.User{}
 	var us []model.User
 	db.Where("id IN ?", keys(userIDs)).Find(&us)
 	for _, u := range us {
-		users[u.ID] = u.Email
+		users[u.ID] = u
 	}
 	keyNames := map[int64]string{}
 	var ks []model.APIKey
@@ -264,7 +264,8 @@ func decorateUsage(db *gorm.DB, logs []model.UsageLog) {
 		accountPlatforms[account.ID] = account.Platform
 	}
 	for i := range logs {
-		logs[i].UserEmail = users[logs[i].UserID]
+		user := users[logs[i].UserID]
+		logs[i].UserEmail = user.Email
 		logs[i].KeyName = keyNames[logs[i].APIKeyID]
 		logs[i].GroupName = groupNames[logs[i].GroupID]
 		logs[i].AccountName = accountNames[logs[i].AccountID]
@@ -272,7 +273,29 @@ func decorateUsage(db *gorm.DB, logs []model.UsageLog) {
 		if logs[i].Platform == "" {
 			logs[i].Platform = groupPlatforms[logs[i].GroupID]
 		}
+		logs[i].BillingMode = resolvedBillingMode(logs[i], user.Role)
 	}
+}
+
+// resolvedBillingMode keeps pre-snapshot ledger rows understandable without
+// labelling them as a vague "history" bucket. The old schema cannot recover a
+// consumed request/day entitlement; it can still identify administrator calls,
+// failed calls and successful user usage, which gets the balance-mode fallback.
+func resolvedBillingMode(entry model.UsageLog, userRole string) string {
+	switch entry.BillingMode {
+	case "usage", "request", "day", "admin", "none":
+		return entry.BillingMode
+	}
+	if entry.StatusCode < 200 || entry.StatusCode >= 400 {
+		return "none"
+	}
+	if userRole == model.RoleAdmin {
+		return "admin"
+	}
+	if entry.CostMicro > 0 || entry.InputTokens > 0 || entry.OutputTokens > 0 || entry.CacheReadTokens > 0 || entry.CacheWriteTokens > 0 || entry.ImageCount > 0 {
+		return "usage"
+	}
+	return "none"
 }
 
 func keys(m map[int64]bool) []int64 {

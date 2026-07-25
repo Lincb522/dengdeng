@@ -40,6 +40,32 @@ func TestQueryUsageFiltersByRequestID(t *testing.T) {
 	}
 }
 
+func TestQueryUsageUserScopeOverridesRequestedUser(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.APIKey{}, &model.Group{}, &model.UpstreamAccount{}, &model.UsageLog{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	logs := []model.UsageLog{
+		{RequestID: "ddr_mine", UserID: 1, StatusCode: 200, CreatedAt: now},
+		{RequestID: "ddr_other_user", UserID: 2, StatusCode: 200, CreatedAt: now},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+	userID := int64(1)
+	items, total, err := queryUsage(db, usageQuery{Page: 1, Size: 20, Sort: "created_at", Order: "desc", UserID: 2}, &userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].RequestID != "ddr_mine" {
+		t.Fatalf("user scope leaked another user's usage: total=%d items=%#v", total, items)
+	}
+}
+
 func TestDecorateUsageIncludesUpstreamPlatform(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -67,6 +93,28 @@ func TestDecorateUsageIncludesUpstreamPlatform(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Platform != model.PlatformAnthropic {
 		t.Fatalf("platform decoration = %#v, want anthropic", items)
+	}
+}
+
+func TestResolvedBillingModeBackfillsLegacyRows(t *testing.T) {
+	tests := []struct {
+		name string
+		log  model.UsageLog
+		role string
+		want string
+	}{
+		{name: "keeps request snapshot", log: model.UsageLog{BillingMode: "request"}, role: model.RoleUser, want: "request"},
+		{name: "failed request", log: model.UsageLog{StatusCode: 503}, role: model.RoleUser, want: "none"},
+		{name: "admin success", log: model.UsageLog{StatusCode: 200, InputTokens: 10}, role: model.RoleAdmin, want: "admin"},
+		{name: "paid user success", log: model.UsageLog{StatusCode: 200, CostMicro: 100}, role: model.RoleUser, want: "usage"},
+		{name: "zero usage success", log: model.UsageLog{StatusCode: 200}, role: model.RoleUser, want: "none"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := resolvedBillingMode(test.log, test.role); got != test.want {
+				t.Fatalf("resolvedBillingMode() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

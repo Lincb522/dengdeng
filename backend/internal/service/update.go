@@ -23,24 +23,25 @@ var (
 )
 
 type UpdateStatus struct {
-	Enabled         bool           `json:"enabled"`
-	Repository      string         `json:"repository"`
-	Branch          string         `json:"branch"`
-	Status          string         `json:"status"` // idle | queued | running | succeeded | failed
-	Action          string         `json:"action"` // check | apply | rollback
-	Stage           string         `json:"stage"`
-	Message         string         `json:"message"`
-	CurrentVersion  string         `json:"current_version"`
-	CurrentCommit   string         `json:"current_commit"`
-	TargetCommit    string         `json:"target_commit"`
-	PreviousCommit  string         `json:"previous_commit"`
-	UpdateAvailable bool           `json:"update_available"`
-	CanRollback     bool           `json:"can_rollback"`
-	RequestedBy     string         `json:"requested_by"`
-	RequestedAt     string         `json:"requested_at"`
-	StartedAt       string         `json:"started_at"`
-	FinishedAt      string         `json:"finished_at"`
-	Changes         []UpdateChange `json:"changes"`
+	Enabled         bool            `json:"enabled"`
+	Repository      string          `json:"repository"`
+	Branch          string          `json:"branch"`
+	Status          string          `json:"status"` // idle | queued | running | succeeded | failed
+	Action          string          `json:"action"` // check | apply | rollback
+	Stage           string          `json:"stage"`
+	Message         string          `json:"message"`
+	CurrentVersion  string          `json:"current_version"`
+	CurrentCommit   string          `json:"current_commit"`
+	TargetCommit    string          `json:"target_commit"`
+	PreviousCommit  string          `json:"previous_commit"`
+	UpdateAvailable bool            `json:"update_available"`
+	CanRollback     bool            `json:"can_rollback"`
+	RequestedBy     string          `json:"requested_by"`
+	RequestedAt     string          `json:"requested_at"`
+	StartedAt       string          `json:"started_at"`
+	FinishedAt      string          `json:"finished_at"`
+	Changes         []UpdateChange  `json:"changes"`
+	History         []UpdateRelease `json:"history,omitempty"`
 }
 
 type UpdateChange struct {
@@ -48,6 +49,20 @@ type UpdateChange struct {
 	Title       string   `json:"title"`
 	CommittedAt string   `json:"committed_at"`
 	Details     []string `json:"details,omitempty"`
+}
+
+// UpdateRelease is one completed deployment or rollback. Unlike Changes,
+// which describes the currently checked range, releases remain available
+// after later update checks overwrite status.json.
+type UpdateRelease struct {
+	Version        string         `json:"version"`
+	Commit         string         `json:"commit"`
+	PreviousCommit string         `json:"previous_commit,omitempty"`
+	Action         string         `json:"action"`
+	Message        string         `json:"message"`
+	RequestedBy    string         `json:"requested_by,omitempty"`
+	FinishedAt     string         `json:"finished_at"`
+	Changes        []UpdateChange `json:"changes"`
 }
 
 type updateRequest struct {
@@ -96,6 +111,9 @@ func (s *UpdateService) stateDirectory() string {
 }
 
 func (s *UpdateService) statusPath() string { return filepath.Join(s.stateDirectory(), "status.json") }
+func (s *UpdateService) historyPath() string {
+	return filepath.Join(s.stateDirectory(), "history.json")
+}
 func (s *UpdateService) requestPath() string {
 	return filepath.Join(s.stateDirectory(), "request.json")
 }
@@ -150,7 +168,56 @@ func (s *UpdateService) Status() (UpdateStatus, error) {
 	if persisted.Changes == nil {
 		persisted.Changes = []UpdateChange{}
 	}
+	history, historyErr := s.releaseHistory(persisted)
+	if historyErr != nil {
+		return status, historyErr
+	}
+	persisted.History = history
 	return persisted, nil
+}
+
+func (s *UpdateService) releaseHistory(current UpdateStatus) ([]UpdateRelease, error) {
+	history := []UpdateRelease{}
+	data, err := os.ReadFile(s.historyPath())
+	if err == nil {
+		if err := json.Unmarshal(data, &history); err != nil {
+			return nil, fmt.Errorf("decode update history: %w", err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read update history: %w", err)
+	}
+	if history == nil {
+		history = []UpdateRelease{}
+	}
+
+	// The currently deployed release is also exposed when an older updater has
+	// not created history.json yet. This makes the history page useful during a
+	// rolling upgrade and avoids losing the release that installs this feature.
+	if current.Status == "succeeded" && (current.Action == "apply" || current.Action == "rollback") && current.CurrentCommit != "" && current.FinishedAt != "" {
+		found := false
+		for _, release := range history {
+			if release.Commit == current.CurrentCommit && release.FinishedAt == current.FinishedAt {
+				found = true
+				break
+			}
+		}
+		if !found {
+			history = append([]UpdateRelease{{
+				Version: current.CurrentVersion, Commit: current.CurrentCommit, PreviousCommit: current.PreviousCommit,
+				Action: current.Action, Message: current.Message, RequestedBy: current.RequestedBy,
+				FinishedAt: current.FinishedAt, Changes: current.Changes,
+			}}, history...)
+		}
+	}
+	if len(history) > 50 {
+		history = history[:50]
+	}
+	for i := range history {
+		if history[i].Changes == nil {
+			history[i].Changes = []UpdateChange{}
+		}
+	}
+	return history, nil
 }
 
 func (s *UpdateService) Request(ctx context.Context, action, requestedBy string) (UpdateStatus, error) {

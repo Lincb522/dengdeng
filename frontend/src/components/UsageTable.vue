@@ -84,22 +84,12 @@ async function copyRequestID(id: string) {
 }
 
 function endpointLabel(path?: string) {
-	const normalized = (path || '').replace(/\?.*$/, '')
-	if (!normalized) return '—'
-	const labels: Record<string, string> = {
-		'/v1/responses': 'Responses',
-		'/v1/chat/completions': 'Chat',
-		'/v1/messages': 'Messages',
-		'/v1/images/generations': 'Images',
-	}
-	if (labels[normalized]) return labels[normalized]
-	if (/generatecontent$/i.test(normalized)) return 'GenerateContent'
-	const parts = normalized.split('/').filter(Boolean)
-	return parts.slice(-2).join('/') || normalized
+	const normalized = (path || '').replace(/\?.*$/, '').trim()
+	return normalized || '—'
 }
 
 function billingModeLabel(mode?: string) {
-	return ({ usage: '按量', request: '按次', day: '按日', admin: '管理端', none: '未计费' } as Record<string, string>)[mode || ''] || '历史'
+	return ({ usage: '按量', request: '按次', day: '按日', admin: '管理端', none: '未计费' } as Record<string, string>)[mode || ''] || '未记录'
 }
 </script>
 
@@ -138,7 +128,7 @@ function billingModeLabel(mode?: string) {
 			<td><UsageTokenDetail :log="l" /></td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
           <td class="num text-right text-xs text-amber"><UsageCostBreakdown :log="l" /></td>
-			<td><span class="usage-billing-mode" :class="`is-${l.billing_mode || 'legacy'}`">{{ billingModeLabel(l.billing_mode) }}</span></td>
+			<td><span class="usage-billing-mode" :class="`is-${l.billing_mode || 'unknown'}`">{{ billingModeLabel(l.billing_mode) }}</span></td>
 			<td><UsageLatencyDetail :log="l" /></td>
           <td>
             <span :class="l.status_code < 400 ? 'tag-green' : 'tag-red'" :title="l.error_message">{{ l.status_code }}</span>

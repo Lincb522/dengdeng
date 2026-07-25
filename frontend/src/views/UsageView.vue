@@ -49,8 +49,8 @@ async function downloadCSV() {
   <div>
     <div class="console-page-head">
       <div>
-        <h1>用量明细</h1>
-        <p class="mt-1 text-sm text-slate-500">每次调用的 token 与费用记录</p>
+        <h1>我的用量明细</h1>
+        <p class="mt-1 text-sm text-slate-500">仅显示当前账号产生的调用、Token 与费用记录</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <input v-model="modelFilter" class="input !w-52" placeholder="按模型名筛选" @keyup.enter="search" />

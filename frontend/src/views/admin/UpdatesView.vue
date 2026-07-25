@@ -11,8 +11,10 @@ let pollTimer: number | undefined
 const busy = computed(() => requesting.value || status.value?.status === 'queued' || status.value?.status === 'running')
 const repositoryURL = computed(() => status.value?.repository?.replace(/\.git$/, '') || '')
 const changes = computed(() => Array.isArray(status.value?.changes) ? status.value!.changes : [])
+const releaseHistory = computed(() => Array.isArray(status.value?.history) ? status.value!.history : [])
 const shortCommit = (value?: string) => !value || value === 'unknown' ? '未记录' : value.slice(0, 12)
 const dateTime = (value?: string) => value ? new Date(value).toLocaleString() : '—'
+const releaseAction = (action?: string) => action === 'rollback' ? '回滚' : '发布'
 
 const stages = [
   { id: 'fetching', label: '同步仓库' },
@@ -160,6 +162,43 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-8" /></svg>
           <span>无需更新</span>
         </div>
+      </section>
+
+      <section class="update-history" aria-labelledby="update-history-title">
+        <div class="update-history-head">
+          <div>
+            <h2 id="update-history-title">历史版本</h2>
+            <p>保留最近 50 次发布与回滚记录，展开可查看当次完整变更。</p>
+          </div>
+          <span>{{ releaseHistory.length }} 个版本</span>
+        </div>
+        <div v-if="releaseHistory.length" class="update-history-list">
+          <details v-for="release in releaseHistory" :key="`${release.commit}-${release.finished_at}`" class="update-history-release">
+            <summary>
+              <span class="update-history-action" :class="{ 'is-rollback': release.action === 'rollback' }">{{ releaseAction(release.action) }}</span>
+              <strong>{{ release.version || shortCommit(release.commit) }}</strong>
+              <code :title="release.commit">{{ shortCommit(release.commit) }}</code>
+              <time>{{ dateTime(release.finished_at) }}</time>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+            </summary>
+            <div class="update-history-body">
+              <p>{{ release.message || '版本已完成切换' }}</p>
+              <ol v-if="release.changes?.length">
+                <li v-for="change in release.changes" :key="change.commit">
+                  <div>
+                    <a :href="`${repositoryURL}/commit/${change.commit}`" target="_blank" rel="noreferrer">{{ change.title }}</a>
+                    <ul v-if="change.details?.length">
+                      <li v-for="detail in change.details" :key="detail">{{ detail }}</li>
+                    </ul>
+                  </div>
+                  <code>{{ shortCommit(change.commit) }}</code>
+                </li>
+              </ol>
+              <div v-else class="update-history-empty">该版本没有单独的提交明细</div>
+            </div>
+          </details>
+        </div>
+        <div v-else class="update-history-empty">尚未记录历史发布；下一次发布后会自动保留。</div>
       </section>
 
       <section class="update-details">
