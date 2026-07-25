@@ -1208,7 +1208,14 @@ body {
   .model-card-action { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: .85rem; color: #8c5c13; font-size: .72rem; font-weight: 800; }
   .model-card-action span { font-size: 1rem; transition: transform .16s ease; }
   .model-card-action:hover span { transform: translateX(3px); }
-  .key-table { min-width: 74rem; }
+  .key-table { width: 100%; min-width: 74rem; table-layout: auto; }
+  .key-table .key-col-name { width: 7%; }
+  .key-table .key-col-secret { width: 14%; }
+  .key-table .key-col-groups { width: 22%; }
+  .key-table .key-col-quota { width: 18%; }
+  .key-table .key-col-status { width: 7%; }
+  .key-table .key-col-used { width: 13%; }
+  .key-table .key-col-actions { width: 19%; }
   .key-table td { white-space: nowrap; }
   .key-group-tags { display: flex; min-width: 11rem; flex-wrap: nowrap; gap: .3rem; }
   .key-group-tags > * { flex: 0 0 auto; white-space: nowrap; }
@@ -2183,6 +2190,7 @@ body {
 		max-width: 100% !important;
 		table-layout: auto !important;
 	}
+	.workspace-main .key-table colgroup { display: none; }
 	.workspace-main .table-base thead {
 		position: absolute !important;
 		width: 1px !important;
