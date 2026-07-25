@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"dengdeng/internal/model"
 
@@ -91,12 +92,14 @@ func (r *IPGeoResolver) resolve(ip string) ipGeoResult {
 	var previous model.UsageLog
 	if err := r.db.Select("ip_country", "ip_region", "ip_city", "ip_location", "ip_isp").
 		Where("client_ip = ? AND ip_location <> ''", ip).Order("id DESC").First(&previous).Error; err == nil {
-		result := ipGeoResult{Country: previous.IPCountry, Region: previous.IPRegion, City: previous.IPCity, Location: previous.IPLocation, ISP: previous.IPISP}
-		r.cache.Store(ip, result)
-		return result
+		if containsHan(previous.IPLocation) {
+			result := ipGeoResult{Country: previous.IPCountry, Region: previous.IPRegion, City: previous.IPCity, Location: previous.IPLocation, ISP: previous.IPISP}
+			r.cache.Store(ip, result)
+			return result
+		}
 	}
 
-	req, err := http.NewRequest(http.MethodGet, "https://ipwho.is/"+ip, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://ipwho.is/"+ip+"?lang=zh-CN", nil)
 	if err != nil {
 		return ipGeoResult{}
 	}
@@ -131,6 +134,15 @@ func (r *IPGeoResolver) resolve(ip string) ipGeoResult {
 	result := ipGeoResult{Country: payload.Country, Region: payload.Region, City: payload.City, Location: strings.Join(parts, " · "), ISP: payload.Connection.ISP}
 	r.cache.Store(ip, result)
 	return result
+}
+
+func containsHan(value string) bool {
+	for _, current := range value {
+		if unicode.Is(unicode.Han, current) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeClientIP(raw string) string {
