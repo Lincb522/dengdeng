@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strconv"
@@ -210,18 +211,39 @@ type opsAccountHealth struct {
 	ProbeError    string     `json:"probe_error,omitempty"`
 }
 
-// opsSystemMetrics intentionally reports only process and database-pool facts
-// the service can know reliably. Host CPU/RAM require a node agent and should
-// not be fabricated from container limits.
+// opsSystemMetrics combines the latest durable host sample with immediate
+// process and database-pool facts. Linux host values are collected from procfs
+// and statfs by OpsCollector; unsupported platforms simply leave them at zero.
 type opsSystemMetrics struct {
-	UptimeSeconds     int64  `json:"uptime_seconds"`
-	Goroutines        int    `json:"goroutines"`
-	MemoryAllocBytes  uint64 `json:"memory_alloc_bytes"`
-	HeapInUseBytes    uint64 `json:"heap_in_use_bytes"`
-	DBOpenConnections int    `json:"db_open_connections"`
-	DBInUse           int    `json:"db_in_use"`
-	DBIdle            int    `json:"db_idle"`
-	DBWaitCount       int64  `json:"db_wait_count"`
+	Hostname             string    `json:"hostname"`
+	OS                   string    `json:"os"`
+	Arch                 string    `json:"arch"`
+	SampledAt            time.Time `json:"sampled_at"`
+	UptimeSeconds        int64     `json:"uptime_seconds"`
+	HostUptimeSeconds    int64     `json:"host_uptime_seconds"`
+	CPUCores             int       `json:"cpu_cores"`
+	CPUPercent           float64   `json:"cpu_percent"`
+	ProcessCPUPercent    float64   `json:"process_cpu_percent"`
+	Load1                float64   `json:"load_1"`
+	Load5                float64   `json:"load_5"`
+	Load15               float64   `json:"load_15"`
+	MemoryUsedBytes      uint64    `json:"memory_used_bytes"`
+	MemoryTotalBytes     uint64    `json:"memory_total_bytes"`
+	MemoryPercent        float64   `json:"memory_percent"`
+	ProcessRSSBytes      uint64    `json:"process_rss_bytes"`
+	DiskUsedBytes        uint64    `json:"disk_used_bytes"`
+	DiskTotalBytes       uint64    `json:"disk_total_bytes"`
+	DiskPercent          float64   `json:"disk_percent"`
+	NetworkRXBytesPerSec float64   `json:"network_rx_bytes_per_sec"`
+	NetworkTXBytesPerSec float64   `json:"network_tx_bytes_per_sec"`
+	Goroutines           int       `json:"goroutines"`
+	MemoryAllocBytes     uint64    `json:"memory_alloc_bytes"`
+	HeapInUseBytes       uint64    `json:"heap_in_use_bytes"`
+	DBOK                 bool      `json:"db_ok"`
+	DBOpenConnections    int       `json:"db_open_connections"`
+	DBInUse              int       `json:"db_in_use"`
+	DBIdle               int       `json:"db_idle"`
+	DBWaitCount          int64     `json:"db_wait_count"`
 }
 
 type opsSnapshot struct {
@@ -499,7 +521,7 @@ func (h *AdminHandler) buildOpsSnapshot(filter opsFilter) (opsSnapshot, error) {
 	return opsSnapshot{
 		GeneratedAt: time.Now().UTC(), Range: filter.Range, Start: filter.Start, End: filter.End, Platform: filter.Platform, GroupID: filter.GroupID,
 		Overview: overview, Trend: trend, TopModels: sortedOpsRanks(modelRanks), TopGroups: sortedOpsRanks(groupRanks), TopUsers: sortedOpsRanks(userRanks), TopAccounts: sortedOpsRanks(accountRanks),
-		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(), Scheduler: h.schedulerDiagnostics(filter),
+		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(latestOpsSystemMetric(systemHistory)), Scheduler: h.schedulerDiagnostics(filter),
 		LatencyHistogram: latencyHistogram, TTFTHistogram: ttftHistogram, ErrorTrend: errorTrend, StatusDistribution: statusDistribution, SystemHistory: systemHistory, JobHeartbeats: jobHeartbeats, QueryMode: func() string {
 			if filter.End.Sub(filter.Start) > 48*time.Hour {
 				return "preagg+raw"
@@ -653,14 +675,41 @@ func opsLoad(current, capacity int) float64 {
 	return math.Round(float64(current)/float64(capacity)*10000) / 100
 }
 
-func (h *AdminHandler) opsSystemMetrics() opsSystemMetrics {
+func latestOpsSystemMetric(history []model.OpsSystemMetric) *model.OpsSystemMetric {
+	if len(history) == 0 {
+		return nil
+	}
+	return &history[len(history)-1]
+}
+
+func (h *AdminHandler) opsSystemMetrics(latest *model.OpsSystemMetric) opsSystemMetrics {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
+	hostname, _ := os.Hostname()
 	metrics := opsSystemMetrics{
+		Hostname:         hostname,
+		OS:               runtime.GOOS,
+		Arch:             runtime.GOARCH,
+		SampledAt:        time.Now().UTC(),
 		UptimeSeconds:    int64(time.Since(opsProcessStartedAt).Seconds()),
+		CPUCores:         runtime.NumCPU(),
 		Goroutines:       runtime.NumGoroutine(),
 		MemoryAllocBytes: memory.Alloc,
 		HeapInUseBytes:   memory.HeapInuse,
+		DBOK:             true,
+	}
+	if latest != nil {
+		metrics.SampledAt = latest.BucketAt
+		metrics.HostUptimeSeconds = latest.HostUptimeSeconds
+		metrics.CPUCores = latest.CPUCores
+		metrics.CPUPercent = latest.CPUPercent
+		metrics.ProcessCPUPercent = latest.ProcessCPUPercent
+		metrics.Load1, metrics.Load5, metrics.Load15 = latest.Load1, latest.Load5, latest.Load15
+		metrics.MemoryUsedBytes, metrics.MemoryTotalBytes, metrics.MemoryPercent = latest.MemoryUsedBytes, latest.MemoryTotalBytes, latest.MemoryPercent
+		metrics.ProcessRSSBytes = latest.ProcessRSSBytes
+		metrics.DiskUsedBytes, metrics.DiskTotalBytes, metrics.DiskPercent = latest.DiskUsedBytes, latest.DiskTotalBytes, latest.DiskPercent
+		metrics.NetworkRXBytesPerSec, metrics.NetworkTXBytesPerSec = latest.NetworkRXBytesPerSec, latest.NetworkTXBytesPerSec
+		metrics.DBOK = latest.DBOK
 	}
 	if sqlDB, err := h.db.DB(); err == nil {
 		stats := sqlDB.Stats()
@@ -668,6 +717,8 @@ func (h *AdminHandler) opsSystemMetrics() opsSystemMetrics {
 		metrics.DBInUse = stats.InUse
 		metrics.DBIdle = stats.Idle
 		metrics.DBWaitCount = stats.WaitCount
+	} else {
+		metrics.DBOK = false
 	}
 	return metrics
 }

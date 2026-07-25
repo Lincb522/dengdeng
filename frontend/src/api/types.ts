@@ -701,7 +701,27 @@ export interface OpsAccountHealth {
 }
 
 export interface OpsSystemMetrics {
+	hostname: string
+	os: string
+	arch: string
+	sampled_at: string
   uptime_seconds: number
+	host_uptime_seconds: number
+	cpu_cores: number
+	cpu_percent: number
+	process_cpu_percent: number
+	load_1: number
+	load_5: number
+	load_15: number
+	memory_used_bytes: number
+	memory_total_bytes: number
+	memory_percent: number
+	process_rss_bytes: number
+	disk_used_bytes: number
+	disk_total_bytes: number
+	disk_percent: number
+	network_rx_bytes_per_sec: number
+	network_tx_bytes_per_sec: number
   goroutines: number
   memory_alloc_bytes: number
   heap_in_use_bytes: number
@@ -740,9 +760,21 @@ export interface OpsSystemMetric {
 	ttft_avg_ms: number
 	ttft_max_ms: number
 	cpu_percent: number
+	process_cpu_percent: number
+	cpu_cores: number
+	load_1: number
+	load_5: number
+	load_15: number
+	host_uptime_seconds: number
 	memory_used_bytes: number
 	memory_total_bytes: number
 	memory_percent: number
+	process_rss_bytes: number
+	disk_used_bytes: number
+	disk_total_bytes: number
+	disk_percent: number
+	network_rx_bytes_per_sec: number
+	network_tx_bytes_per_sec: number
 	db_ok: boolean
 	db_open_connections: number
 	db_in_use: number

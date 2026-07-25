@@ -5,6 +5,7 @@ import type { Group, OpsAccountHealth, OpsErrorLog, OpsRank, OpsSnapshot } from 
 import { formatMoney, formatTokens, PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
 import OpsTrendChart from '../../components/OpsTrendChart.vue'
+import ServerMonitorPanel from '../../components/ServerMonitorPanel.vue'
 
 const snapshot = ref<OpsSnapshot | null>(null)
 const errors = ref<OpsErrorLog[]>([])
@@ -270,6 +271,8 @@ onBeforeUnmount(() => {
         </dl>
       </section>
 
+		<ServerMonitorPanel v-if="snapshot?.system" :system="snapshot.system" :history="snapshot.system_history" />
+
       <section class="ops-realtime-grid" aria-label="实时流量">
         <article class="card ops-realtime-card">
           <div class="ops-section-title"><div><h3>实时流量</h3><p>已完成请求按最近 1 分钟统计；进行中的流式请求单独计数。</p></div><span class="ops-live-indicator"><i></i> 实时</span></div>
@@ -352,7 +355,7 @@ onBeforeUnmount(() => {
 
 		<section class="ops-observability-grid" aria-label="错误分析">
 			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>错误状态分布</h3><p>业务限流与上游失败分开统计。</p></div></div><div class="ops-status-list"><div v-for="item in snapshot?.status_distribution" :key="item.status_code"><span :class="item.status_code >= 500 ? 'tag-red' : 'tag-amber'">HTTP {{ item.status_code }}</span><i><b :style="{ width: barWidth(snapshot?.status_distribution.map((row) => row.count) || [], item.count) }"></b></i><strong>{{ item.count }}</strong><small v-if="item.business_limited">限流 {{ item.business_limited }}</small></div><div v-if="!snapshot?.status_distribution.length" class="ops-empty">当前周期没有错误</div></div></article>
-			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>系统资源</h3><p>分钟采集，数据库与后台任务单独保留心跳。</p></div></div><div class="ops-resource-grid"><div><span>CPU</span><strong>{{ percent(snapshot?.system_history.at(-1)?.cpu_percent || 0) }}</strong></div><div><span>内存</span><strong>{{ percent(snapshot?.system_history.at(-1)?.memory_percent || 0) }}</strong></div><div><span>DB</span><strong :class="snapshot?.system_history.at(-1)?.db_ok === false ? 'text-signal-red' : 'text-signal-green'">{{ snapshot?.system_history.at(-1)?.db_ok === false ? '异常' : '正常' }}</strong></div><div><span>队列</span><strong>{{ snapshot?.system_history.at(-1)?.queue_depth || 0 }}</strong></div></div><div class="ops-job-list"><div v-for="job in snapshot?.job_heartbeats" :key="job.job_name"><span>{{ job.job_name }}</span><strong :class="job.last_error ? 'text-signal-red' : 'text-signal-green'">{{ job.last_error ? '失败' : '正常' }}</strong><small>{{ job.last_success_at ? new Date(job.last_success_at).toLocaleString() : '尚未成功' }}</small></div></div></article>
+			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>后台任务</h3><p>采集、备份与维护任务的最近心跳。</p></div></div><div class="ops-job-list"><div v-for="job in snapshot?.job_heartbeats" :key="job.job_name"><span>{{ job.job_name }}</span><strong :class="job.last_error ? 'text-signal-red' : 'text-signal-green'">{{ job.last_error ? '失败' : '正常' }}</strong><small>{{ job.last_success_at ? new Date(job.last_success_at).toLocaleString() : '尚未成功' }}</small></div><div v-if="!snapshot?.job_heartbeats.length" class="ops-job-empty">暂无任务心跳</div></div></article>
 		</section>
 
       <p v-if="snapshot?.sample_truncated" class="ops-sample-note">明细样本已超过 50,000 条；总请求、费用和成功率仍为完整统计，趋势与排行按最近样本计算。</p>

@@ -130,7 +130,11 @@ type ProxyConfig struct {
 
 func Default() *Config {
 	return &Config{
-		Server:   ServerConfig{Host: "0.0.0.0", Port: 9100, Mode: "release", ForwardedClientIPHeaders: []string{"X-Forwarded-For", "X-Real-IP"}},
+		Server: ServerConfig{
+			Host: "0.0.0.0", Port: 9100, Mode: "release",
+			TrustedProxies:           []string{"127.0.0.1", "::1"},
+			ForwardedClientIPHeaders: []string{"X-Forwarded-For", "X-Real-IP"},
+		},
 		Database: DatabaseConfig{Driver: "sqlite", Path: "data/dengdeng.db", Host: "localhost", Port: 5432, User: "dengdeng", DBName: "dengdeng", SSLMode: "disable"},
 		JWT:      JWTConfig{ExpireHour: 72},
 		Admin:    AdminConfig{Email: "admin@dengdeng.local", Password: ""},

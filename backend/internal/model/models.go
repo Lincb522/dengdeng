@@ -734,10 +734,22 @@ type OpsSystemMetric struct {
 	TTFTP99Ms            int64     `gorm:"column:ttft_p99_ms;not null;default:0" json:"ttft_p99_ms"`
 	TTFTAvgMs            float64   `gorm:"not null;default:0" json:"ttft_avg_ms"`
 	TTFTMaxMs            int64     `gorm:"not null;default:0" json:"ttft_max_ms"`
-	CPUPercent           float64   `gorm:"not null;default:0" json:"cpu_percent"`
+	CPUPercent           float64   `gorm:"column:cpu_percent;not null;default:0" json:"cpu_percent"`
+	ProcessCPUPercent    float64   `gorm:"column:process_cpu_percent;not null;default:0" json:"process_cpu_percent"`
+	CPUCores             int       `gorm:"column:cpu_cores;not null;default:0" json:"cpu_cores"`
+	Load1                float64   `gorm:"column:load_1;not null;default:0" json:"load_1"`
+	Load5                float64   `gorm:"column:load_5;not null;default:0" json:"load_5"`
+	Load15               float64   `gorm:"column:load_15;not null;default:0" json:"load_15"`
+	HostUptimeSeconds    int64     `gorm:"column:host_uptime_seconds;not null;default:0" json:"host_uptime_seconds"`
 	MemoryUsedBytes      uint64    `gorm:"not null;default:0" json:"memory_used_bytes"`
 	MemoryTotalBytes     uint64    `gorm:"not null;default:0" json:"memory_total_bytes"`
 	MemoryPercent        float64   `gorm:"not null;default:0" json:"memory_percent"`
+	ProcessRSSBytes      uint64    `gorm:"column:process_rss_bytes;not null;default:0" json:"process_rss_bytes"`
+	DiskUsedBytes        uint64    `gorm:"column:disk_used_bytes;not null;default:0" json:"disk_used_bytes"`
+	DiskTotalBytes       uint64    `gorm:"column:disk_total_bytes;not null;default:0" json:"disk_total_bytes"`
+	DiskPercent          float64   `gorm:"column:disk_percent;not null;default:0" json:"disk_percent"`
+	NetworkRXBytesPerSec float64   `gorm:"column:network_rx_bytes_per_sec;not null;default:0" json:"network_rx_bytes_per_sec"`
+	NetworkTXBytesPerSec float64   `gorm:"column:network_tx_bytes_per_sec;not null;default:0" json:"network_tx_bytes_per_sec"`
 	DBOK                 bool      `gorm:"column:db_ok;not null;default:true" json:"db_ok"`
 	DBOpenConnections    int       `gorm:"not null;default:0" json:"db_open_connections"`
 	DBInUse              int       `gorm:"not null;default:0" json:"db_in_use"`

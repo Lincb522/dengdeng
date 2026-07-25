@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"dengdeng/internal/model"
@@ -20,14 +21,18 @@ import (
 const opsCollectorJobName = "ops_metrics_collector"
 
 type OpsCollector struct {
-	db      *gorm.DB
-	runtime *RuntimeMetrics
-	alerts  *AlertService
-	stop    chan struct{}
-	once    sync.Once
-	cpuMu   sync.Mutex
-	lastCPU uint64
-	lastAt  time.Time
+	db               *gorm.DB
+	runtime          *RuntimeMetrics
+	alerts           *AlertService
+	stop             chan struct{}
+	once             sync.Once
+	resourceMu       sync.Mutex
+	lastProcessCPU   uint64
+	lastHostCPUIdle  uint64
+	lastHostCPUTotal uint64
+	lastNetworkRX    uint64
+	lastNetworkTX    uint64
+	lastResourceAt   time.Time
 }
 
 func NewOpsCollector(db *gorm.DB, runtimeMetrics *RuntimeMetrics, alerts *AlertService) *OpsCollector {
@@ -67,7 +72,9 @@ func (c *OpsCollector) collect() {
 				"success_count", "error_count", "business_limited_count", "upstream_429_count", "upstream_529_count", "upstream_other_errors",
 				"token_consumed", "switch_count", "qps", "tps", "duration_p50_ms", "duration_p90_ms", "duration_p95_ms", "duration_p99_ms",
 				"duration_avg_ms", "duration_max_ms", "ttft_p50_ms", "ttft_p90_ms", "ttft_p95_ms", "ttft_p99_ms", "ttft_avg_ms", "ttft_max_ms",
-				"cpu_percent", "memory_used_bytes", "memory_total_bytes", "memory_percent", "db_ok", "db_open_connections", "db_in_use", "db_idle",
+				"cpu_percent", "process_cpu_percent", "cpu_cores", "load_1", "load_5", "load_15", "host_uptime_seconds",
+				"memory_used_bytes", "memory_total_bytes", "memory_percent", "process_rss_bytes", "disk_used_bytes", "disk_total_bytes", "disk_percent",
+				"network_rx_bytes_per_sec", "network_tx_bytes_per_sec", "db_ok", "db_open_connections", "db_in_use", "db_idle",
 				"db_wait_count", "goroutines", "in_flight", "queue_depth", "created_at",
 			}),
 		}).Create(&metric).Error
@@ -161,7 +168,7 @@ func (c *OpsCollector) collectMinute(start, end time.Time) (model.OpsSystemMetri
 	if len(ttfts) > 0 {
 		metric.TTFTAvgMs, metric.TTFTMaxMs = float64(ttftTotal)/float64(len(ttfts)), ttfts[len(ttfts)-1]
 	}
-	metric.CPUPercent, metric.MemoryUsedBytes, metric.MemoryTotalBytes, metric.MemoryPercent = c.systemResourceStats()
+	c.collectSystemResources(&metric)
 	metric.Goroutines = runtime.NumGoroutine()
 	if sqlDB, dbErr := c.db.DB(); dbErr == nil {
 		if pingErr := sqlDB.Ping(); pingErr != nil {
@@ -256,23 +263,178 @@ func opsPercentile(values []int64, quantile float64) int64 {
 	return values[index]
 }
 
-func (c *OpsCollector) systemResourceStats() (cpuPercent float64, used, total uint64, memoryPercent float64) {
-	used, total = linuxMemory()
-	if total > 0 {
-		memoryPercent = float64(used) / float64(total) * 100
+func (c *OpsCollector) collectSystemResources(metric *model.OpsSystemMetric) {
+	if metric == nil {
+		return
 	}
-	ticks := processCPUTicks()
+	metric.CPUCores = runtime.NumCPU()
+	metric.MemoryUsedBytes, metric.MemoryTotalBytes = linuxMemory()
+	if metric.MemoryTotalBytes > 0 {
+		metric.MemoryPercent = percentOf(metric.MemoryUsedBytes, metric.MemoryTotalBytes)
+	}
+	metric.ProcessRSSBytes = processRSSBytes()
+	metric.Load1, metric.Load5, metric.Load15 = linuxLoadAverage()
+	metric.HostUptimeSeconds = linuxUptimeSeconds()
+	metric.DiskUsedBytes, metric.DiskTotalBytes = diskUsage("/var/lib/dengdeng")
+	if metric.DiskTotalBytes == 0 {
+		metric.DiskUsedBytes, metric.DiskTotalBytes = diskUsage("/")
+	}
+	if metric.DiskTotalBytes > 0 {
+		metric.DiskPercent = percentOf(metric.DiskUsedBytes, metric.DiskTotalBytes)
+	}
+
 	now := time.Now()
-	c.cpuMu.Lock()
-	if c.lastCPU > 0 && ticks >= c.lastCPU && !c.lastAt.IsZero() {
-		seconds := now.Sub(c.lastAt).Seconds()
+	processTicks := processCPUTicks()
+	hostIdle, hostTotal := linuxCPUTicks()
+	networkRX, networkTX := linuxNetworkBytes()
+	c.resourceMu.Lock()
+	if c.lastHostCPUTotal > 0 {
+		metric.CPUPercent = hostCPUPercent(c.lastHostCPUIdle, c.lastHostCPUTotal, hostIdle, hostTotal)
+	}
+	if !c.lastResourceAt.IsZero() {
+		seconds := now.Sub(c.lastResourceAt).Seconds()
 		if seconds > 0 {
-			cpuPercent = float64(ticks-c.lastCPU) / 100 / seconds / float64(max(runtime.NumCPU(), 1)) * 100
+			if processTicks >= c.lastProcessCPU {
+				metric.ProcessCPUPercent = float64(processTicks-c.lastProcessCPU) / 100 / seconds / float64(max(runtime.NumCPU(), 1)) * 100
+			}
+			if networkRX >= c.lastNetworkRX {
+				metric.NetworkRXBytesPerSec = float64(networkRX-c.lastNetworkRX) / seconds
+			}
+			if networkTX >= c.lastNetworkTX {
+				metric.NetworkTXBytesPerSec = float64(networkTX-c.lastNetworkTX) / seconds
+			}
 		}
 	}
-	c.lastCPU, c.lastAt = ticks, now
-	c.cpuMu.Unlock()
+	c.lastProcessCPU, c.lastHostCPUIdle, c.lastHostCPUTotal = processTicks, hostIdle, hostTotal
+	c.lastNetworkRX, c.lastNetworkTX, c.lastResourceAt = networkRX, networkTX, now
+	c.resourceMu.Unlock()
+}
+
+func percentOf(used, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(used) / float64(total) * 100
+}
+
+func hostCPUPercent(previousIdle, previousTotal, idle, total uint64) float64 {
+	if total <= previousTotal || idle < previousIdle {
+		return 0
+	}
+	totalDelta, idleDelta := total-previousTotal, idle-previousIdle
+	if totalDelta == 0 || idleDelta > totalDelta {
+		return 0
+	}
+	return float64(totalDelta-idleDelta) / float64(totalDelta) * 100
+}
+
+func linuxCPUTicks() (idle, total uint64) {
+	file, err := os.Open("/proc/stat")
+	if err != nil {
+		return 0, 0
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		return 0, 0
+	}
+	fields := strings.Fields(scanner.Text())
+	if len(fields) < 5 || fields[0] != "cpu" {
+		return 0, 0
+	}
+	values := make([]uint64, 0, len(fields)-1)
+	for _, field := range fields[1:] {
+		value, _ := strconv.ParseUint(field, 10, 64)
+		values = append(values, value)
+		total += value
+	}
+	idle = values[3]
+	if len(values) > 4 {
+		idle += values[4]
+	}
+	return idle, total
+}
+
+func linuxLoadAverage() (one, five, fifteen float64) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, 0, 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return 0, 0, 0
+	}
+	one, _ = strconv.ParseFloat(fields[0], 64)
+	five, _ = strconv.ParseFloat(fields[1], 64)
+	fifteen, _ = strconv.ParseFloat(fields[2], 64)
 	return
+}
+
+func linuxUptimeSeconds() int64 {
+	data, err := os.ReadFile("/proc/uptime")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0
+	}
+	seconds, _ := strconv.ParseFloat(fields[0], 64)
+	return int64(seconds)
+}
+
+func processRSSBytes() uint64 {
+	data, err := os.ReadFile("/proc/self/statm")
+	if err != nil {
+		return 0
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) < 2 {
+		return 0
+	}
+	pages, _ := strconv.ParseUint(fields[1], 10, 64)
+	return pages * uint64(os.Getpagesize())
+}
+
+func diskUsage(path string) (used, total uint64) {
+	var stats syscall.Statfs_t
+	if err := syscall.Statfs(path, &stats); err != nil {
+		return 0, 0
+	}
+	total = stats.Blocks * uint64(stats.Bsize)
+	available := stats.Bavail * uint64(stats.Bsize)
+	if total >= available {
+		used = total - available
+	}
+	return used, total
+}
+
+func linuxNetworkBytes() (received, transmitted uint64) {
+	file, err := os.Open("/proc/net/dev")
+	if err != nil {
+		return 0, 0
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		separator := strings.IndexByte(line, ':')
+		if separator < 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[:separator])
+		if name == "lo" {
+			continue
+		}
+		fields := strings.Fields(line[separator+1:])
+		if len(fields) < 9 {
+			continue
+		}
+		rx, _ := strconv.ParseUint(fields[0], 10, 64)
+		tx, _ := strconv.ParseUint(fields[8], 10, 64)
+		received, transmitted = received+rx, transmitted+tx
+	}
+	return received, transmitted
 }
 
 func linuxMemory() (used, total uint64) {
