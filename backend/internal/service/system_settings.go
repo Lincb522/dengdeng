@@ -54,19 +54,27 @@ type SystemSettings struct {
 	// RegistrationEmailSuffixes is an optional tenant-style allow-list. An
 	// empty list permits all valid email domains; a non-empty list accepts the
 	// listed domains and their subdomains only.
-	RegistrationEmailSuffixes []string               `json:"registration_email_suffixes"`
-	InitBalanceMicro          int64                  `json:"init_balance_micro"`
-	LoginAgreement            LoginAgreementSettings `json:"login_agreement"`
-	TrustedProxies            []string               `json:"trusted_proxies"`
-	ForwardedClientIPHeaders  []string               `json:"forwarded_client_ip_headers"`
+	RegistrationEmailSuffixes []string                  `json:"registration_email_suffixes"`
+	InitBalanceMicro          int64                     `json:"init_balance_micro"`
+	LoginAgreement            LoginAgreementSettings    `json:"login_agreement"`
+	TrustedProxies            []string                  `json:"trusted_proxies"`
+	ForwardedClientIPHeaders  []string                  `json:"forwarded_client_ip_headers"`
+	SiteCustomization         SiteCustomizationSettings `json:"site_customization"`
+	Features                  FeatureSwitchSettings     `json:"features"`
+	Security                  SecurityPolicySettings    `json:"security"`
+	UserDefaults              UserDefaultSettings       `json:"user_defaults"`
+	Notifications             NotificationSettings      `json:"notifications"`
+	Email                     EmailRuntimeSettings      `json:"email"`
+	AuthProviders             AuthProviderSettings      `json:"auth_providers"`
 }
 
 type AdminSystemSettings struct {
 	SystemSettings
-	SitePublicURL  string `json:"site_public_url"`
-	SMTPConfigured bool   `json:"smtp_configured"`
-	SMTPFromName   string `json:"smtp_from_name"`
-	SMTPFrom       string `json:"smtp_from"`
+	SitePublicURL    string          `json:"site_public_url"`
+	SMTPConfigured   bool            `json:"smtp_configured"`
+	SMTPFromName     string          `json:"smtp_from_name"`
+	SMTPFrom         string          `json:"smtp_from"`
+	SecretConfigured map[string]bool `json:"secret_configured"`
 }
 
 type SystemSettingsService struct {
@@ -77,6 +85,11 @@ type SystemSettingsService struct {
 func NewSystemSettingsService(db *gorm.DB, cfg *config.Config) *SystemSettingsService {
 	return &SystemSettingsService{db: db, cfg: cfg}
 }
+
+// Defaults exposes the same compatibility baseline used when no persisted
+// settings row exists. It is primarily useful for isolated handlers/tests
+// whose minimal schema predates the settings table.
+func (s *SystemSettingsService) Defaults() SystemSettings { return s.defaults() }
 
 func defaultLegalDocuments() []LegalDocument {
 	return []LegalDocument{
@@ -171,6 +184,28 @@ func (s *SystemSettingsService) defaults() SystemSettings {
 			forwardedHeaders = append([]string(nil), s.cfg.Server.ForwardedClientIPHeaders...)
 		}
 	}
+	siteCustomization, features, security, userDefaults, notifications, email, authProviders := defaultExtendedSystemSettings()
+	if s.cfg != nil {
+		if value := strings.TrimSpace(s.cfg.SMTP.Host); value != "" {
+			email.Host = value
+		}
+		if s.cfg.SMTP.Port > 0 {
+			email.Port = s.cfg.SMTP.Port
+		}
+		if value := strings.TrimSpace(s.cfg.SMTP.User); value != "" {
+			email.Username = value
+		}
+		if value := strings.TrimSpace(s.cfg.SMTP.FromName); value != "" {
+			email.FromName = value
+		}
+		if value := strings.TrimSpace(s.cfg.SMTP.From); value != "" {
+			email.From = value
+		}
+		if s.cfg.SMTP.Host != "" {
+			email.UseTLS = s.cfg.SMTP.Secure
+		}
+	}
+	userDefaults.BalanceMicro = initBalance
 	return SystemSettings{
 		SiteName:                 name,
 		SiteSubtitle:             "统一管理模型接入与用量",
@@ -179,6 +214,13 @@ func (s *SystemSettingsService) defaults() SystemSettings {
 		InitBalanceMicro:         initBalance,
 		TrustedProxies:           trustedProxies,
 		ForwardedClientIPHeaders: forwardedHeaders,
+		SiteCustomization:        siteCustomization,
+		Features:                 features,
+		Security:                 security,
+		UserDefaults:             userDefaults,
+		Notifications:            notifications,
+		Email:                    email,
+		AuthProviders:            authProviders,
 		LoginAgreement: LoginAgreementSettings{
 			Enabled: true, Mode: "modal", UpdatedAt: "2026-07-16", Documents: defaultLegalDocuments(),
 		},
@@ -274,6 +316,10 @@ func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, 
 		return SystemSettings{}, errors.New("between 1 and 8 forwarded client IP headers are required")
 	}
 	next.ForwardedClientIPHeaders = headers
+	next.Security.ForwardedIPHeaders = append([]string(nil), headers...)
+	if err := normalizeExtendedSystemSettings(&next); err != nil {
+		return SystemSettings{}, err
+	}
 
 	a := &next.LoginAgreement
 	if a.Mode != "checkbox" {
@@ -349,20 +395,95 @@ func (s *SystemSettingsService) Get() (SystemSettings, error) {
 }
 
 func (s *SystemSettingsService) Update(next SystemSettings) (SystemSettings, error) {
+	return s.UpdateAll(next, SystemSecretUpdate{})
+}
+
+// UpdateAll persists public settings and encrypted secrets in one transaction,
+// so a failed secret write can never leave the visible settings half-applied.
+func (s *SystemSettingsService) UpdateAll(next SystemSettings, secrets SystemSecretUpdate) (SystemSettings, error) {
 	next, err := s.normalize(next)
 	if err != nil {
 		return SystemSettings{}, err
+	}
+	secretWillBeConfigured := func(secretName string) bool {
+		configured := strings.TrimSpace(secrets.Values[secretName]) != ""
+		for _, name := range secrets.Clear {
+			if name == secretName {
+				return false
+			}
+		}
+		if !configured {
+			current, secretErr := s.Secret(secretName)
+			configured = secretErr == nil && strings.TrimSpace(current) != ""
+		}
+		return configured
+	}
+	if next.Security.TurnstileEnabled {
+		if !secretWillBeConfigured(SecretTurnstile) {
+			return SystemSettings{}, errors.New("Turnstile secret is required when Turnstile is enabled")
+		}
+	}
+	providers := []struct {
+		name, secret string
+		config       OAuthProviderSettings
+	}{
+		{"LinuxDO", SecretLinuxDOOAuth, next.AuthProviders.LinuxDO}, {"DingTalk", SecretDingTalkOAuth, next.AuthProviders.DingTalk},
+		{"WeChat", SecretWeChatOAuth, next.AuthProviders.WeChat}, {"OIDC", SecretOIDCOAuth, next.AuthProviders.OIDC},
+		{"GitHub", SecretGitHubOAuth, next.AuthProviders.GitHub}, {"Google", SecretGoogleOAuth, next.AuthProviders.Google},
+	}
+	for _, provider := range providers {
+		if !provider.config.Enabled {
+			continue
+		}
+		if provider.config.ClientID == "" || !secretWillBeConfigured(provider.secret) {
+			return SystemSettings{}, fmt.Errorf("%s OAuth client ID and secret are required", provider.name)
+		}
+		if provider.config.RedirectURL == "" && (s.cfg == nil || strings.TrimSpace(s.cfg.Site.PublicURL) == "") {
+			return SystemSettings{}, fmt.Errorf("%s OAuth redirect URL is required when the public site URL is empty", provider.name)
+		}
+		if provider.config.AuthorizeURL == "" || provider.config.TokenURL == "" || provider.config.UserInfoURL == "" {
+			if provider.config.DiscoveryURL == "" && provider.config.IssuerURL == "" {
+				return SystemSettings{}, fmt.Errorf("%s OAuth endpoints or discovery URL are required", provider.name)
+			}
+		}
+	}
+	{
+		uniqueIDs := map[int64]struct{}{}
+		for _, item := range next.UserDefaults.DefaultSubscriptions {
+			uniqueIDs[item.GroupID] = struct{}{}
+		}
+		for _, source := range next.UserDefaults.AuthSourceDefaults {
+			for _, item := range source.DefaultSubscriptions {
+				uniqueIDs[item.GroupID] = struct{}{}
+			}
+		}
+		ids := make([]int64, 0, len(uniqueIDs))
+		for id := range uniqueIDs {
+			ids = append(ids, id)
+		}
+		if len(ids) > 0 {
+			var count int64
+			if err := s.db.Model(&model.Group{}).Where("id IN ?", ids).Count(&count).Error; err != nil {
+				return SystemSettings{}, err
+			}
+			if count != int64(len(ids)) {
+				return SystemSettings{}, errors.New("one or more default subscription groups do not exist")
+			}
+		}
 	}
 	raw, err := json.Marshal(next)
 	if err != nil {
 		return SystemSettings{}, err
 	}
-	if len(raw) > 96_000 {
+	if len(raw) > 256_000 {
 		return SystemSettings{}, errors.New("system settings are too large")
 	}
 	record := model.Setting{Key: systemSettingsKey, Value: string(raw)}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+		if err := s.updateSecretsTx(tx, secrets); err != nil {
 			return err
 		}
 		if !next.KeyMultiGroupEnabled {
@@ -402,12 +523,12 @@ func (s *SystemSettingsService) AdminView() (AdminSystemSettings, error) {
 	if err != nil {
 		return AdminSystemSettings{}, err
 	}
-	view := AdminSystemSettings{SystemSettings: settings}
+	view := AdminSystemSettings{SystemSettings: settings, SecretConfigured: s.SecretConfigured()}
+	view.SMTPConfigured = settings.Email.Host != "" && settings.Email.Port > 0 && settings.Email.Username != "" && view.SecretConfigured[SecretSMTPPassword]
+	view.SMTPFromName = settings.Email.FromName
+	view.SMTPFrom = settings.Email.From
 	if s.cfg != nil {
 		view.SitePublicURL = s.cfg.Site.PublicURL
-		view.SMTPConfigured = s.cfg.SMTP.Host != "" && s.cfg.SMTP.Port > 0 && s.cfg.SMTP.User != "" && s.cfg.SMTP.Pass != ""
-		view.SMTPFromName = s.cfg.SMTP.FromName
-		view.SMTPFrom = s.cfg.SMTP.From
 	}
 	return view, nil
 }

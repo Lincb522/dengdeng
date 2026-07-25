@@ -49,7 +49,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	if err := db.AutoMigrate(
-		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
+		&model.User{}, &model.UserOAuthIdentity{}, &model.UserOAuthFlow{}, &model.UserProviderDefaultGrant{}, &model.UserPlatformQuota{}, &model.UserGroupSubscription{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
 		&model.OpsSystemMetric{}, &model.OpsMetricAggregate{}, &model.OpsErrorLog{}, &model.OpsJobHeartbeat{}, &model.OpsAlertSilence{}, &model.OpsSystemLog{},

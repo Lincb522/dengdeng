@@ -8,15 +8,17 @@ import { useToast } from '../../stores/toast'
 import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
 import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
+import { useAuth } from '../../stores/auth'
 
 const toast = useToast()
+const auth = useAuth()
 
 const accounts = ref<UpstreamAccount[]>([])
 const groups = ref<Group[]>([])
 const proxies = ref<Proxy[]>([])
 const totalAccounts = ref(0)
 const page = ref(1)
-const pageSize = 24
+const pageSize = computed(() => auth.siteCustomization.table_default_page_size || 24)
 const filterGroup = ref<number | 0>(0)
 const showForm = ref(false)
 const editing = ref<UpstreamAccount | null>(null)
@@ -55,7 +57,7 @@ type AccountPage = { items: UpstreamAccount[]; total: number; page: number; size
 function accountParams() {
   const query = new URLSearchParams({
     page: String(page.value),
-    size: String(pageSize),
+		size: String(pageSize.value),
     sort: sortBy.value,
     order: sortDirection.value,
   })

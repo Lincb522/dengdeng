@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { api, getToken, withToast } from '../../api/client'
 import { localizedApiError } from '../../api/errors'
 import type { Group, UsageLog } from '../../api/types'
 import UsageTable from '../../components/UsageTable.vue'
 import Pagination from '../../components/Pagination.vue'
+import { useAuth } from '../../stores/auth'
 
 const route = useRoute()
+const auth = useAuth()
 const items = ref<UsageLog[]>([])
 const groups = ref<Group[]>([])
 const total = ref(0)
 const page = ref(1)
-const size = 30
+const size = computed(() => auth.siteCustomization.table_default_page_size || 30)
 const loading = ref(false)
 const expanded = ref(false)
 const filters = ref({
@@ -32,7 +34,7 @@ const filters = ref({
 })
 
 function params() {
-  const query = new URLSearchParams({ page: String(page.value), size: String(size), sort: filters.value.sort, order: filters.value.order })
+	const query = new URLSearchParams({ page: String(page.value), size: String(size.value), sort: filters.value.sort, order: filters.value.order })
   for (const [key, value] of Object.entries(filters.value)) {
     if (!value || key === 'sort' || key === 'order') continue
     if (key === 'start' || key === 'end') {

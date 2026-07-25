@@ -36,6 +36,130 @@ export interface PublicSettings {
 	key_multi_group_enabled: boolean
 	registration_verification: boolean
 	login_agreement: LoginAgreement
+	site_customization?: Pick<SiteCustomizationSettings, 'logo_url' | 'contact_info' | 'docs_url' | 'home_content' | 'backend_mode_enabled' | 'hide_ccs_import_button' | 'table_default_page_size' | 'table_page_size_options' | 'custom_menu_items' | 'custom_endpoints'>
+	features?: Pick<FeatureSwitchSettings, 'model_plaza_enabled' | 'referral_enabled' | 'allow_user_view_error_requests'>
+	security?: Pick<SecurityPolicySettings, 'password_reset_enabled' | 'totp_enabled' | 'turnstile_enabled' | 'turnstile_site_key'>
+	oauth_providers?: Array<{ id: string; name: string }>
+}
+
+export interface SiteCustomizationSettings {
+	logo_url: string
+	contact_info: string
+	docs_url: string
+	home_content: string
+	backend_mode_enabled: boolean
+	hide_ccs_import_button: boolean
+	table_default_page_size: number
+	table_page_size_options: number[]
+	custom_menu_items: Array<{ id: string; name: string; url: string; icon_svg: string; visibility: 'user' | 'admin' | 'all' }>
+	custom_endpoints: Array<{ id: string; name: string; url: string; description: string }>
+}
+
+export interface FeatureSwitchSettings {
+	channel_monitor_enabled: boolean
+	channel_monitor_interval_seconds: number
+	model_plaza_enabled: boolean
+	risk_control_enabled: boolean
+	risk_control_action: 'block' | 'log'
+	risk_control_blocked_phrases: string[]
+	referral_enabled: boolean
+	allow_user_view_error_requests: boolean
+}
+
+export interface SecurityPolicySettings {
+	email_verification_enabled: boolean
+	password_reset_enabled: boolean
+	totp_enabled: boolean
+	session_binding_enabled: boolean
+	step_up_enabled: boolean
+	audit_log_retention_days: number
+	turnstile_enabled: boolean
+	turnstile_site_key: string
+	trust_forwarded_ip: boolean
+	forwarded_ip_headers: string[]
+}
+
+export interface PlatformQuotaSetting {
+	daily_micro: number
+	weekly_micro: number
+	monthly_micro: number
+}
+
+export interface DefaultSubscriptionSetting {
+	group_id: number
+	validity_days: number
+}
+
+export interface AuthSourceDefault {
+	enabled: boolean
+	require_email: boolean
+	grant_on_signup: boolean
+	grant_on_first_bind: boolean
+	balance_micro: number
+	concurrency: number
+	rpm_limit: number
+	default_subscriptions: DefaultSubscriptionSetting[]
+	platform_quotas: Record<string, PlatformQuotaSetting>
+}
+
+export interface UserDefaultSettings {
+	balance_micro: number
+	concurrency: number
+	rpm_limit: number
+	default_subscriptions: DefaultSubscriptionSetting[]
+	platform_quotas: Record<string, PlatformQuotaSetting>
+	auth_source_defaults: Record<string, AuthSourceDefault>
+}
+
+export interface NotificationSettings {
+	balance_low_enabled: boolean
+	balance_low_threshold_micro: number
+	balance_low_recharge_url: string
+	subscription_expiry_enabled: boolean
+	account_quota_enabled: boolean
+	account_quota_emails: string[]
+}
+
+export interface EmailRuntimeSettings {
+	host: string
+	port: number
+	username: string
+	from_name: string
+	from: string
+	use_tls: boolean
+}
+
+export interface OAuthProviderSettings {
+	enabled: boolean
+	provider_name: string
+	client_id: string
+	issuer_url: string
+	discovery_url: string
+	authorize_url: string
+	token_url: string
+	userinfo_url: string
+	jwks_url: string
+	scopes: string
+	redirect_url: string
+	frontend_redirect_url: string
+	token_auth_method: string
+	use_pkce: boolean
+	validate_id_token: boolean
+	require_verified_email: boolean
+	allowed_signing_algs: string
+	clock_skew_seconds: number
+	email_path: string
+	id_path: string
+	username_path: string
+}
+
+export interface AuthProviderSettings {
+	linuxdo: OAuthProviderSettings
+	dingtalk: OAuthProviderSettings
+	wechat: OAuthProviderSettings
+	oidc: OAuthProviderSettings
+	github: OAuthProviderSettings
+	google: OAuthProviderSettings
 }
 
 export interface SystemSettings {
@@ -48,6 +172,14 @@ export interface SystemSettings {
 	trusted_proxies: string[]
 	forwarded_client_ip_headers: string[]
 	login_agreement: Omit<LoginAgreement, 'revision'>
+	site_customization: SiteCustomizationSettings
+	features: FeatureSwitchSettings
+	security: SecurityPolicySettings
+	user_defaults: UserDefaultSettings
+	notifications: NotificationSettings
+	email: EmailRuntimeSettings
+	auth_providers: AuthProviderSettings
+	secret_configured?: Record<string, boolean>
 	site_public_url?: string
 	smtp_configured?: boolean
 	smtp_from_name?: string
@@ -58,6 +190,7 @@ export interface GatewayRuntimePolicy {
 	max_attempts: number
 	unauthorized_cooldown_seconds: number
 	rate_limit_cooldown_seconds: number
+	overload_cooldown_seconds: number
 	upstream_failure_cooldown_seconds: number
 	network_failure_cooldown_seconds: number
 	probe_interval_seconds: number
@@ -68,6 +201,22 @@ export interface GatewayRuntimePolicy {
 	concurrency_queue_depth: number
 	// 按思考强度的计费倍率，键为 OpenAI 官方档位（none…xhigh）。
 	reasoning_effort_multipliers: Record<string, number>
+	fingerprint_unification: boolean
+	metadata_passthrough: boolean
+	claude_oauth_system_prompt_injection: boolean
+	claude_oauth_system_prompt: string
+	anthropic_cache_ttl_1h_injection: boolean
+	rewrite_message_cache_control: boolean
+	openai_codex_user_agent: string
+	claude_client_gate_enabled: boolean
+	min_claude_code_version: string
+	max_claude_code_version: string
+	codex_client_gate_enabled: boolean
+	min_codex_version: string
+	max_codex_version: string
+	codex_client_blacklist: string[]
+	codex_client_whitelist: string[]
+	codex_allow_app_server_clients: boolean
 }
 
 export interface AuditLog {

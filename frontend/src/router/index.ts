@@ -7,6 +7,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'home', component: () => import('../views/HomeView.vue') },
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
+		{ path: '/auth/:provider/callback', name: 'oauth-callback', component: () => import('../views/LoginView.vue') },
     { path: '/models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
     { path: '/legal/:documentId', name: 'legal', component: () => import('../views/LegalView.vue') },
     { path: '/studio', name: 'studio', component: () => import('../views/ImageStudioView.vue') },
@@ -51,7 +52,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-  if (to.name === 'home' || to.name === 'login' || to.name === 'models' || to.name === 'legal' || to.name === 'studio') return true
+	if (to.name === 'home' || to.name === 'login' || to.name === 'oauth-callback' || to.name === 'models' || to.name === 'legal' || to.name === 'studio') return true
   if (!getToken()) return { name: 'login' }
 
   const auth = useAuth()

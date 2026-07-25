@@ -4,6 +4,7 @@ package gateway
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -52,12 +53,14 @@ type Gateway struct {
 	oauth        *oauth.Manager
 	runtime      *service.RuntimeMetrics
 	policy       *service.RuntimePolicyService
+	settings     *service.SystemSettingsService
 	imageStorage *service.ImageStorageService
 	quota        *service.AccountQuotaService
 	concurrency  *service.ClientConcurrencyLimiter
 	client       *http.Client
 	proxyClients sync.Map // map[proxy-id:updated-at]*http.Client
 	keyWindows   sync.Map // map[api-key-id]*keyRPMWindow
+	userWindows  sync.Map // map[user-id]*keyRPMWindow
 }
 
 type keyRPMWindow struct {
@@ -71,6 +74,10 @@ type keyRPMWindow struct {
 // configured account and are never operator-mutable here.
 func (g *Gateway) SetRuntimePolicy(policy *service.RuntimePolicyService) {
 	g.policy = policy
+}
+
+func (g *Gateway) SetSystemSettings(settings *service.SystemSettingsService) {
+	g.settings = settings
 }
 
 func (g *Gateway) SetImageStorageService(storage *service.ImageStorageService) {
@@ -330,6 +337,11 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 		util.Fail(c, http.StatusForbidden, "user disabled")
 		return nil, false
 	}
+	if options.consumeRPM && !g.consumeUserRPM(user) {
+		c.Header("Retry-After", "60")
+		util.Fail(c, http.StatusTooManyRequests, "user rate limit reached")
+		return nil, false
+	}
 	accessActive := user.AccessExpiresAt != nil && user.AccessExpiresAt.After(time.Now())
 	if options.enforceUsageLimits && user.Role != model.RoleAdmin && !accessActive && user.RemainingRequests <= 0 && user.BalanceMicro <= 0 {
 		failInsufficientQuota(c, "insufficient balance")
@@ -403,6 +415,73 @@ func (g *Gateway) consumeKeyRPM(key model.APIKey) bool {
 	}
 	window.count++
 	return true
+}
+
+func (g *Gateway) consumeUserRPM(user model.User) bool {
+	if user.RPMLimit <= 0 {
+		return true
+	}
+	value, _ := g.userWindows.LoadOrStore(user.ID, &keyRPMWindow{})
+	window := value.(*keyRPMWindow)
+	currentMinute := time.Now().Truncate(time.Minute)
+	window.mu.Lock()
+	defer window.mu.Unlock()
+	if window.start.Before(currentMinute) {
+		window.start, window.count = currentMinute, 0
+	}
+	if int64(window.count) >= user.RPMLimit {
+		return false
+	}
+	window.count++
+	return true
+}
+
+func (g *Gateway) platformQuotaAllowed(userID int64, platform string) (bool, string, error) {
+	if !g.db.Migrator().HasTable(&model.UserPlatformQuota{}) {
+		return true, "", nil
+	}
+	var quota model.UserPlatformQuota
+	err := g.db.Where("user_id = ? AND platform = ?", userID, strings.ToLower(strings.TrimSpace(platform))).First(&quota).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return true, "", nil
+	}
+	if err != nil {
+		return false, "", err
+	}
+	now := time.Now().UTC()
+	origin := quota.CreatedAt.UTC()
+	if origin.IsZero() {
+		origin = now
+	}
+	windowStart := func(duration time.Duration) time.Time {
+		elapsed := now.Sub(origin)
+		if elapsed <= 0 {
+			return origin
+		}
+		return origin.Add(time.Duration(int64(elapsed/duration)) * duration)
+	}
+	dayStart, weekStart, monthStart := windowStart(24*time.Hour), windowStart(7*24*time.Hour), windowStart(30*24*time.Hour)
+	windows := []struct {
+		name  string
+		start time.Time
+		limit int64
+	}{{"daily", dayStart, quota.DailyMicro}, {"weekly", weekStart, quota.WeeklyMicro}, {"monthly", monthStart, quota.MonthlyMicro}}
+	for _, window := range windows {
+		if window.limit <= 0 {
+			continue
+		}
+		var used int64
+		if err := g.db.Model(&model.UsageLog{}).
+			Joins("JOIN groups quota_groups ON quota_groups.id = usage_logs.group_id").
+			Where("usage_logs.user_id = ? AND quota_groups.platform = ? AND usage_logs.created_at >= ?", userID, platform, window.start).
+			Select("COALESCE(SUM(usage_logs.cost_micro), 0)").Scan(&used).Error; err != nil {
+			return false, "", err
+		}
+		if used >= window.limit {
+			return false, window.name, nil
+		}
+	}
+	return true, "", nil
 }
 
 // reserveRequestQuota atomically reserves one request entitlement. Reserving
@@ -561,8 +640,43 @@ func jsonStringPath(root map[string]any, path ...string) string {
 // relay runs the account failover loop and, on success, streams the response
 // while capturing usage for billing.
 func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
+	runtimePolicy := service.DefaultGatewayRuntimePolicy()
+	if g.policy != nil {
+		runtimePolicy = g.policy.Current()
+	}
+	if err := enforceClientPolicy(c.Request.Header, req.Platform, runtimePolicy); err != nil {
+		util.Fail(c, http.StatusForbidden, err.Error())
+		return
+	}
+	if g.settings != nil && len(req.Body) > 0 {
+		if settings, err := g.settings.Get(); err == nil && settings.Features.RiskControlEnabled {
+			lowerBody := strings.ToLower(string(req.Body))
+			for _, phrase := range settings.Features.RiskControlBlockedPhrases {
+				if phrase == "" || !strings.Contains(lowerBody, phrase) {
+					continue
+				}
+				log.Printf("[risk-control] request_id=%s user_id=%d key_id=%d action=%s phrase_hash=%x", middleware.RequestIDFromContext(c), ak.User.ID, ak.Key.ID, settings.Features.RiskControlAction, sha256.Sum256([]byte(phrase)))
+				if settings.Features.RiskControlAction == "block" {
+					util.Fail(c, http.StatusForbidden, "request blocked by content policy")
+					return
+				}
+				break
+			}
+		}
+	}
 	if req.ServiceTier == "" {
 		req.ServiceTier = requestServiceTier(req.Body)
+	}
+	if req.Billable && ak.User.Role != model.RoleAdmin && g.db.Migrator().HasTable(&model.UserGroupSubscription{}) {
+		allowed, window, err := g.platformQuotaAllowed(ak.User.ID, req.Platform)
+		if err != nil {
+			util.Fail(c, http.StatusInternalServerError, "check platform quota failed")
+			return
+		}
+		if !allowed {
+			failInsufficientQuota(c, fmt.Sprintf("%s platform quota reached", window))
+			return
+		}
 	}
 	routeGroups := ak.groupsForPlatform(req.Platform)
 	if len(routeGroups) == 0 {
@@ -585,14 +699,38 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		}
 		routeGroups = []model.Group{routeGroup}
 	}
+	if req.Billable && ak.User.Role != model.RoleAdmin {
+		groupIDs := make([]int64, 0, len(routeGroups))
+		for _, group := range routeGroups {
+			groupIDs = append(groupIDs, group.ID)
+		}
+		var subscribedIDs []int64
+		if err := g.db.Model(&model.UserGroupSubscription{}).
+			Where("user_id = ? AND group_id IN ? AND expires_at > ?", ak.User.ID, groupIDs, time.Now().UTC()).
+			Pluck("group_id", &subscribedIDs).Error; err != nil {
+			util.Fail(c, http.StatusInternalServerError, "check group subscription failed")
+			return
+		}
+		if len(subscribedIDs) > 0 {
+			allowed := make(map[int64]struct{}, len(subscribedIDs))
+			for _, id := range subscribedIDs {
+				allowed[id] = struct{}{}
+			}
+			subscribed := make([]model.Group, 0, len(subscribedIDs))
+			for _, group := range routeGroups {
+				if _, ok := allowed[group.ID]; ok {
+					subscribed = append(subscribed, group)
+				}
+			}
+			routeGroups = subscribed
+			routeGroup = routeGroups[0]
+			ak.AccessActive = true
+		}
+	}
 	activeRequest := g.runtime.Begin(req.Platform, routeGroup.ID, ak.User.ID)
 	defer activeRequest.Finish()
 	start := time.Now()
 	trace := relayTrace{}
-	runtimePolicy := service.DefaultGatewayRuntimePolicy()
-	if g.policy != nil {
-		runtimePolicy = g.policy.Current()
-	}
 	concurrencyWait := time.Duration(runtimePolicy.ConcurrencyWaitMilliseconds) * time.Millisecond
 	activeRequest.SetWaiting(true)
 	lease, waited, err := g.concurrency.Acquire(
@@ -1009,8 +1147,20 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 	// accepts it and the traffic matches the official CLI. API-key accounts are
 	// left untouched.
 	outboundBody := req.Body
+	policy := service.DefaultGatewayRuntimePolicy()
+	if g.policy != nil {
+		policy = g.policy.Current()
+	}
 	if req.Platform == model.PlatformAnthropic && acc.AuthType == model.AuthOAuth && req.Path == "/v1/messages" {
-		outboundBody = injectClaudeCodeSystemPrompt(outboundBody)
+		if policy.ClaudeOAuthSystemPromptInjection {
+			outboundBody = injectClaudeCodeSystemPromptWithText(outboundBody, policy.ClaudeOAuthSystemPrompt)
+		}
+		if policy.RewriteMessageCacheControl {
+			outboundBody = rewriteAnthropicMessageCacheControl(outboundBody)
+		}
+		if policy.AnthropicCacheTTL1hInjection {
+			outboundBody = injectAnthropicCacheTTL1h(outboundBody)
+		}
 	}
 
 	upReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, base+req.Path, bytes.NewReader(outboundBody))
@@ -1098,7 +1248,20 @@ func (g *Gateway) applyCredential(c *gin.Context, upReq *http.Request, acc *mode
 			for _, flag := range strings.Split(anthropicOAuthBeta, ",") {
 				upReq.Header.Set("anthropic-beta", mergeBeta(upReq.Header.Get("anthropic-beta"), flag))
 			}
-			applyAnthropicOAuthIdentityHeaders(upReq.Header)
+			unifyFingerprint := true
+			if g.policy != nil {
+				unifyFingerprint = g.policy.Current().FingerprintUnification
+			}
+			if unifyFingerprint {
+				applyAnthropicOAuthIdentityHeaders(upReq.Header)
+			} else {
+				upReq.Header.Set("User-Agent", c.Request.UserAgent())
+				for name, values := range c.Request.Header {
+					if strings.HasPrefix(strings.ToLower(name), "x-stainless-") {
+						upReq.Header[name] = append([]string(nil), values...)
+					}
+				}
+			}
 		case model.PlatformOpenAI:
 			if acc.AccountID != "" {
 				upReq.Header.Set("chatgpt-account-id", acc.AccountID)

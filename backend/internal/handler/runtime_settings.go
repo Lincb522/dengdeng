@@ -29,7 +29,7 @@ func NewRuntimeSettingsHandler(db *gorm.DB, policy *service.RuntimePolicyService
 func (h *RuntimeSettingsHandler) Get(c *gin.Context) { util.OK(c, h.policy.Current()) }
 
 func (h *RuntimeSettingsHandler) Update(c *gin.Context) {
-	var req service.GatewayRuntimePolicy
+	req := h.policy.Current()
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.Fail(c, http.StatusBadRequest, "invalid runtime policy")
 		return

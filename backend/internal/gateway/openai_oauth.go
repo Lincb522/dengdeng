@@ -51,7 +51,11 @@ var openAIOAuthUnsupportedFields = []string{
 func (g *Gateway) forwardOpenAIOAuth(c *gin.Context, acc *model.UpstreamAccount, req relayRequest) (*http.Response, error) {
 	switch req.Path {
 	case "/v1/responses":
-		body, clientStream, err := normalizeOAuthResponsesRequest(req.Body)
+		metadataPassthrough := false
+		if g.policy != nil {
+			metadataPassthrough = g.policy.Current().MetadataPassthrough
+		}
+		body, clientStream, err := normalizeOAuthResponsesRequestWithMetadata(req.Body, metadataPassthrough)
 		if err != nil {
 			return nil, err
 		}
@@ -279,7 +283,19 @@ func (g *Gateway) doOpenAIOAuthEndpointRequest(c *gin.Context, acc *model.Upstre
 	upReq.Header.Set("Accept", endpoint.accept)
 	upReq.Header.Set("OpenAI-Beta", "responses=experimental")
 	if endpoint.sendCodexHeaders {
-		applyOpenAIOAuthIdentityHeaders(upReq.Header)
+		policy := service.DefaultGatewayRuntimePolicy()
+		if g.policy != nil {
+			policy = g.policy.Current()
+		}
+		if policy.FingerprintUnification {
+			applyOpenAIOAuthIdentityHeadersWithUA(upReq.Header, policy.OpenAICodexUserAgent)
+		} else {
+			for _, name := range []string{"Originator", "Version", "User-Agent"} {
+				if value := c.GetHeader(name); value != "" {
+					upReq.Header.Set(name, value)
+				}
+			}
+		}
 	}
 	if endpoint.version != "" {
 		upReq.Header.Set("Version", endpoint.version)
@@ -310,9 +326,16 @@ func (g *Gateway) doOpenAIOAuthEndpointRequest(c *gin.Context, acc *model.Upstre
 }
 
 func applyOpenAIOAuthIdentityHeaders(headers http.Header) {
+	applyOpenAIOAuthIdentityHeadersWithUA(headers, openAIOAuthUserAgent)
+}
+
+func applyOpenAIOAuthIdentityHeadersWithUA(headers http.Header, userAgent string) {
 	headers.Set("Originator", openAIOAuthOriginator)
 	headers.Set("Version", openAIOAuthVersion)
-	headers.Set("User-Agent", openAIOAuthUserAgent)
+	if strings.TrimSpace(userAgent) == "" {
+		userAgent = openAIOAuthUserAgent
+	}
+	headers.Set("User-Agent", userAgent)
 }
 
 func (g *Gateway) forwardOpenAIModelsManifest(c *gin.Context, acc *model.UpstreamAccount, req relayRequest) (*http.Response, error) {
@@ -332,7 +355,11 @@ func (g *Gateway) forwardOpenAIModelsManifest(c *gin.Context, acc *model.Upstrea
 		return nil, err
 	}
 	upReq.Header.Set("Accept", "application/json")
-	applyOpenAIOAuthIdentityHeaders(upReq.Header)
+	policy := service.DefaultGatewayRuntimePolicy()
+	if g.policy != nil {
+		policy = g.policy.Current()
+	}
+	applyOpenAIOAuthIdentityHeadersWithUA(upReq.Header, policy.OpenAICodexUserAgent)
 	upReq.Header.Set("Version", clientVersion)
 	if language := c.GetHeader("Accept-Language"); language != "" {
 		upReq.Header.Set("Accept-Language", language)
@@ -626,12 +653,19 @@ func openAIAPIKeyModelsURL(base, clientVersion string) (string, error) {
 // to the OAuth upstream. It always requests upstream SSE; non-stream clients
 // are buffered and returned as an ordinary JSON response below.
 func normalizeOAuthResponsesRequest(body []byte) ([]byte, bool, error) {
+	return normalizeOAuthResponsesRequestWithMetadata(body, false)
+}
+
+func normalizeOAuthResponsesRequestWithMetadata(body []byte, metadataPassthrough bool) ([]byte, bool, error) {
 	request, err := decodeJSONObject(body)
 	if err != nil {
 		return nil, false, err
 	}
 	clientStream := boolValue(request["stream"])
 	for _, field := range openAIOAuthUnsupportedFields {
+		if metadataPassthrough && field == "metadata" {
+			continue
+		}
 		delete(request, field)
 	}
 	normalizeOAuthRequestInput(request)

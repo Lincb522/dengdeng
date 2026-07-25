@@ -61,6 +61,30 @@ func TestAccountMonitorProbeAPIKeyPersistsHealthyResult(t *testing.T) {
 	}
 }
 
+func TestAccountMonitorFeatureSwitchStopsManualTrigger(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:account-monitor-switch-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Setting{}, &model.AccountProbe{}); err != nil {
+		t.Fatal(err)
+	}
+	settingsService := NewSystemSettingsService(db, &config.Config{Site: config.SiteConfig{Name: "DengDeng", AllowRegister: true}})
+	settings, err := settingsService.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Features.ChannelMonitorEnabled = false
+	if _, err := settingsService.Update(settings); err != nil {
+		t.Fatal(err)
+	}
+	monitor := NewAccountMonitor(db, nil)
+	monitor.SetSystemSettings(settingsService)
+	if monitor.Trigger() {
+		t.Fatal("disabled channel monitor unexpectedly started")
+	}
+}
+
 func TestAccountMonitorExpiredOAuthDoesNotCallUpstream(t *testing.T) {
 	db := newMonitorTestDB(t)
 	called := false

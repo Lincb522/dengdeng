@@ -3,8 +3,10 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 	"dengdeng/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -17,7 +19,7 @@ const (
 )
 
 // JWTAuth validates the bearer token and loads the current user.
-func JWTAuth(db *gorm.DB, secret string) gin.HandlerFunc {
+func JWTAuth(db *gorm.DB, secret string, settings *service.SystemSettingsService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
@@ -43,7 +45,14 @@ func JWTAuth(db *gorm.DB, secret string) gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if claims.Fingerprint != "" && claims.Fingerprint != util.SessionFingerprint(secret, c.Request.UserAgent()) {
+		bindSession := false
+		if settings != nil {
+			if current, settingsErr := settings.Get(); settingsErr == nil {
+				bindSession = current.Security.SessionBindingEnabled
+			}
+		}
+		fingerprint := util.SessionFingerprint(secret, c.ClientIP()+"\x00"+c.Request.UserAgent())
+		if bindSession && (claims.Fingerprint == "" || claims.Fingerprint != fingerprint) {
 			util.Fail(c, http.StatusUnauthorized, "session device changed, please sign in again")
 			c.Abort()
 			return
@@ -70,6 +79,32 @@ func AdminOnly() gin.HandlerFunc {
 		claims := CurrentClaims(c)
 		if user.TOTPEnabled && (claims == nil || !claims.MFA) {
 			util.Fail(c, http.StatusUnauthorized, "TOTP verification is required for administrator actions")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func RequireStepUp(settings *service.SystemSettingsService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if settings == nil {
+			c.Next()
+			return
+		}
+		current, err := settings.Get()
+		if err != nil {
+			util.Fail(c, http.StatusInternalServerError, "load step-up policy failed")
+			c.Abort()
+			return
+		}
+		if !current.Security.StepUpEnabled {
+			c.Next()
+			return
+		}
+		claims := CurrentClaims(c)
+		if claims == nil || !claims.MFA || claims.IssuedAt == nil || time.Since(claims.IssuedAt.Time) > 15*time.Minute {
+			util.Fail(c, http.StatusForbidden, "recent two-factor verification is required")
 			c.Abort()
 			return
 		}

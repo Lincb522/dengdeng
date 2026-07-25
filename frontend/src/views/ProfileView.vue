@@ -62,6 +62,11 @@ async function disableTOTP() {
   totpPassword.value = totpCode.value = ''
   await auth.fetchMe()
 }
+
+async function verifySensitiveActions() {
+	const result = await withToast(() => api.post<{ token: string }>('/api/user/step-up', { password: totpPassword.value, code: totpCode.value }), '敏感操作验证已生效 15 分钟')
+	if (result?.token) setToken(result.token)
+}
 </script>
 
 <template>
@@ -116,7 +121,7 @@ async function disableTOTP() {
       </div>
     </div>
 
-		<div class="card p-6">
+		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled" class="card p-6">
 			<div class="mb-4 flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-sm font-semibold text-slate-200">验证器</h3>
@@ -144,7 +149,7 @@ async function disableTOTP() {
 			</div>
 			<div v-else class="mt-4">
 				<button v-if="!auth.user?.totp_enabled" class="btn-primary" :disabled="totpBusy || !totpPassword" @click="setupTOTP">生成绑定信息</button>
-				<button v-else class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button>
+				<div v-else class="flex flex-wrap gap-2"><button class="btn-primary" :disabled="!totpPassword || totpCode.length !== 6" @click="verifySensitiveActions">验证敏感操作</button><button class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button></div>
 			</div>
 		</div>
   </div>

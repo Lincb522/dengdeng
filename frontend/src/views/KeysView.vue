@@ -11,6 +11,7 @@ import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
 const toast = useToast()
 const auth = useAuth()
 const keyMultiGroupEnabled = computed(() => auth.keyMultiGroupEnabled)
+const customEndpoints = computed(() => auth.siteCustomization.custom_endpoints || [])
 const keys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const showCreate = ref(false)
@@ -422,6 +423,17 @@ function onSetupSecretForgot() {
     </div>
 
     <!-- 创建弹窗 -->
+	<section v-if="customEndpoints.length" class="card mt-6 p-5">
+		<h2 class="text-sm font-semibold text-slate-200">其他端点</h2>
+		<div class="mt-3 grid gap-2 sm:grid-cols-2">
+			<article v-for="endpoint in customEndpoints" :key="endpoint.id" class="rounded-lg border border-slate-800 p-3">
+				<div class="flex items-center justify-between gap-3"><strong class="text-xs text-slate-200">{{ endpoint.name }}</strong><button type="button" class="btn-ghost !px-2 !py-1 text-[11px]" @click="copyText(endpoint.url)">复制</button></div>
+				<code class="mt-2 block overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-amber" :title="endpoint.url">{{ endpoint.url }}</code>
+				<p v-if="endpoint.description" class="mt-2 text-xs text-slate-500">{{ endpoint.description }}</p>
+			</article>
+		</div>
+	</section>
+
     <Teleport to="body">
       <div v-if="showCreate" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="closeCreate">
         <div class="card max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto p-6">

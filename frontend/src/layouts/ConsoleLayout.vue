@@ -50,6 +50,16 @@ const adminNavGroups = [
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const balance = computed(() => formatMoney(auth.user?.balance_micro ?? 0))
 const initials = computed(() => (auth.user?.email || 'D').trim().slice(0, 1).toUpperCase())
+const visibleUserNav = computed(() => userNav.filter((item) => {
+	if (item.to === '/models') return auth.features.model_plaza_enabled
+	if (item.to === '/referrals') return auth.features.referral_enabled
+	return true
+}))
+const customMenuItems = computed(() => (auth.siteCustomization.custom_menu_items || []).filter((item) => {
+	if (item.visibility === 'admin') return isAdmin.value
+	if (item.visibility === 'user') return !isAdmin.value
+	return true
+}))
 
 watch(
   () => route.fullPath,
@@ -109,11 +119,15 @@ function isActive(to: string) {
         <nav class="rail-nav" aria-label="主导航">
           <section class="rail-nav-group">
             <p class="rail-section">工作区</p>
-            <RouterLink v-for="item in userNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
+			<RouterLink v-for="item in visibleUserNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
               <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
               <span>{{ item.label }}</span>
               <i class="rail-link-mark"></i>
             </RouterLink>
+			<a v-for="item in customMenuItems" :key="item.id" :href="item.url" class="rail-link" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined">
+				<span class="rail-link-icon"><svg viewBox="0 0 24 24"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg></span>
+				<span>{{ item.name }}</span><i class="rail-link-mark"></i>
+			</a>
           </section>
 
           <template v-if="isAdmin">

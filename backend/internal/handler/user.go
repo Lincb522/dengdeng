@@ -19,20 +19,57 @@ import (
 )
 
 type UserHandler struct {
-	db  *gorm.DB
-	cfg *config.Config
+	db       *gorm.DB
+	cfg      *config.Config
+	settings *service.SystemSettingsService
 }
 
 func NewUserHandler(db *gorm.DB, cfg *config.Config) *UserHandler {
-	return &UserHandler{db: db, cfg: cfg}
+	return &UserHandler{db: db, cfg: cfg, settings: service.NewSystemSettingsService(db, cfg)}
 }
 
 func (h *UserHandler) multipleKeyGroupsEnabled() (bool, error) {
-	settings, err := service.NewSystemSettingsService(h.db, h.cfg).Get()
+	settings, err := h.settings.Get()
 	if err != nil {
 		return false, err
 	}
 	return settings.KeyMultiGroupEnabled, nil
+}
+
+func (h *UserHandler) currentSettings(c *gin.Context) (service.SystemSettings, bool) {
+	if !h.db.Migrator().HasTable(&model.Setting{}) {
+		return h.settings.Defaults(), true
+	}
+	settings, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load system policy failed")
+		return service.SystemSettings{}, false
+	}
+	return settings, true
+}
+
+func (h *UserHandler) requireTOTPFeature(c *gin.Context) bool {
+	settings, ok := h.currentSettings(c)
+	if !ok {
+		return false
+	}
+	if !settings.Security.TOTPEnabled {
+		util.Fail(c, http.StatusForbidden, "authenticator setup is disabled by the administrator")
+		return false
+	}
+	return true
+}
+
+func (h *UserHandler) requireReferralFeature(c *gin.Context) bool {
+	settings, ok := h.currentSettings(c)
+	if !ok {
+		return false
+	}
+	if !settings.Features.ReferralEnabled {
+		util.Fail(c, http.StatusForbidden, "referral service is disabled")
+		return false
+	}
+	return true
 }
 
 func (h *UserHandler) Me(c *gin.Context) {
@@ -74,6 +111,28 @@ func (h *UserHandler) ChangePassword(c *gin.Context) {
 	util.OK(c, gin.H{"changed": true, "token": token})
 }
 
+func (h *UserHandler) StepUp(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var req struct {
+		Password string `json:"password" binding:"required"`
+		Code     string `json:"code" binding:"required"`
+	}
+	if c.ShouldBindJSON(&req) != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
+		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		return
+	}
+	if !user.TOTPEnabled || !util.ValidateTOTP(string(user.TOTPSecret), req.Code, time.Now()) {
+		util.Fail(c, http.StatusUnauthorized, "authenticator code is invalid")
+		return
+	}
+	token, err := h.signBoundToken(c, user, user.TokenVersion, true)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "sign token failed")
+		return
+	}
+	util.OK(c, gin.H{"token": token, "expires_in": 900})
+}
+
 type totpPasswordReq struct {
 	Password string `json:"password" binding:"required"`
 }
@@ -90,6 +149,9 @@ type totpDisableReq struct {
 }
 
 func (h *UserHandler) SetupTOTP(c *gin.Context) {
+	if !h.requireTOTPFeature(c) {
+		return
+	}
 	user := middleware.CurrentUser(c)
 	var req totpPasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
@@ -109,6 +171,9 @@ func (h *UserHandler) SetupTOTP(c *gin.Context) {
 }
 
 func (h *UserHandler) EnableTOTP(c *gin.Context) {
+	if !h.requireTOTPFeature(c) {
+		return
+	}
 	user := middleware.CurrentUser(c)
 	var req totpEnableReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
@@ -159,10 +224,14 @@ func (h *UserHandler) DisableTOTP(c *gin.Context) {
 }
 
 func (h *UserHandler) signBoundToken(c *gin.Context, user *model.User, version int, mfa bool) (string, error) {
+	fingerprint := ""
+	if settings, err := h.settings.Get(); err == nil && settings.Security.SessionBindingEnabled {
+		fingerprint = util.SessionFingerprint(h.cfg.JWT.Secret, c.ClientIP()+"\x00"+c.Request.UserAgent())
+	}
 	return util.SignJWTBound(
 		h.cfg.JWT.Secret, user.ID, user.Role, version,
 		time.Duration(h.cfg.JWT.ExpireHour)*time.Hour,
-		util.SessionFingerprint(h.cfg.JWT.Secret, c.Request.UserAgent()), mfa,
+		fingerprint, mfa,
 	)
 }
 
@@ -621,7 +690,15 @@ type catalogueModel struct {
 // the same active aliases and price rules the gateway uses, while deliberately
 // keeping account credentials and private routing data out of the response.
 func (h *UserHandler) ModelCatalogue(c *gin.Context) {
+	settings, ok := h.currentSettings(c)
+	if !ok {
+		return
+	}
 	user := middleware.CurrentUser(c)
+	if !settings.Features.ModelPlazaEnabled && user.Role != model.RoleAdmin {
+		util.OK(c, []catalogueModel{})
+		return
+	}
 	h.modelCatalogue(c, user.Role == model.RoleAdmin)
 }
 
@@ -629,6 +706,14 @@ func (h *UserHandler) ModelCatalogue(c *gin.Context) {
 // active public groups and non-secret catalogue metadata, so browsing it does
 // not require a console account.
 func (h *UserHandler) PublicModelCatalogue(c *gin.Context) {
+	settings, ok := h.currentSettings(c)
+	if !ok {
+		return
+	}
+	if !settings.Features.ModelPlazaEnabled {
+		util.OK(c, []catalogueModel{})
+		return
+	}
 	h.modelCatalogue(c, false)
 }
 
@@ -727,6 +812,13 @@ func (h *UserHandler) Usage(c *gin.Context) {
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+	settings, ok := h.currentSettings(c)
+	if !ok {
+		return
+	}
+	if !settings.Features.AllowUserViewErrorRequests {
+		filter.SuccessOnly = true
 	}
 	logs, total, err := queryUsage(h.db, filter, &user.ID)
 	if err != nil {

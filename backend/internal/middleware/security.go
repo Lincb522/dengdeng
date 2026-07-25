@@ -17,10 +17,10 @@ func SecurityHeaders() gin.HandlerFunc {
 	// Stripe Elements and Airwallex Checkout are loaded only after a user
 	// creates their own authenticated order. Their official origins are kept
 	// explicit here; no wildcard script, frame, or connect source is allowed.
-	const csp = "default-src 'self'; script-src 'self' https://js.stripe.com https://checkout.airwallex.com; style-src 'self' 'unsafe-inline'; " +
+	const csp = "default-src 'self'; script-src 'self' https://js.stripe.com https://checkout.airwallex.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; " +
 		"img-src 'self' data: https://*.stripe.com https://*.airwallex.com; font-src 'self' data:; " +
-		"connect-src 'self' https://api.stripe.com https://*.stripe.com https://*.airwallex.com; " +
-		"frame-src https://js.stripe.com https://hooks.stripe.com https://*.airwallex.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		"connect-src 'self' https://api.stripe.com https://*.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; " +
+		"frame-src https://js.stripe.com https://hooks.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
 		h.Set("X-Content-Type-Options", "nosniff")

@@ -1,9 +1,11 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"dengdeng/internal/config"
+	fieldcrypto "dengdeng/internal/crypto"
 	"dengdeng/internal/model"
 
 	"github.com/glebarez/sqlite"
@@ -37,6 +39,76 @@ func TestSystemSettingsAgreementRevisionChangesWithDocument(t *testing.T) {
 	}
 	if after.LoginAgreement.Revision() == before {
 		t.Fatal("agreement revision did not change after document update")
+	}
+}
+
+func TestSystemSettingsExtendedDefaultsAndPersistence(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:system-settings-extended-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSystemSettingsService(db, &config.Config{Site: config.SiteConfig{Name: "DengDeng", AllowRegister: true}})
+	settings, err := svc.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.Features.ChannelMonitorEnabled || !settings.Security.EmailVerificationEnabled || settings.SiteCustomization.TableDefaultPageSize != 20 {
+		t.Fatalf("unexpected extended defaults: %#v", settings)
+	}
+	settings.SiteCustomization.ContactInfo = "QQ群 1072353908"
+	settings.Features.RiskControlEnabled = true
+	settings.UserDefaults.Concurrency = 12
+	settings.UserDefaults.PlatformQuotas["openai"] = PlatformQuotaSetting{DailyMicro: 5_000_000}
+	settings.Notifications.AccountQuotaEmails = []string{"OPS@EXAMPLE.COM", "ops@example.com"}
+	updated, err := svc.Update(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.UserDefaults.Concurrency != 12 || updated.UserDefaults.PlatformQuotas["openai"].DailyMicro != 5_000_000 {
+		t.Fatalf("extended settings were not persisted: %#v", updated.UserDefaults)
+	}
+	if len(updated.Notifications.AccountQuotaEmails) != 1 || updated.Notifications.AccountQuotaEmails[0] != "ops@example.com" {
+		t.Fatalf("notification emails were not normalized: %#v", updated.Notifications.AccountQuotaEmails)
+	}
+}
+
+func TestSystemSettingsSecretsAreEncryptedAndClearable(t *testing.T) {
+	if err := fieldcrypto.Init("", "system-settings-secret-test"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := gorm.Open(sqlite.Open("file:system-settings-secret-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSystemSettingsService(db, &config.Config{})
+	if err := svc.UpdateSecrets(SystemSecretUpdate{Values: map[string]string{SecretSMTPPassword: "mail-secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	var stored model.Setting
+	if err := db.First(&stored, "key = ?", systemSecretPrefix+SecretSMTPPassword).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Value == "mail-secret" || !strings.HasPrefix(stored.Value, "enc:v1:") {
+		t.Fatalf("secret was not encrypted at rest: %q", stored.Value)
+	}
+	plain, err := svc.Secret(SecretSMTPPassword)
+	if err != nil || plain != "mail-secret" {
+		t.Fatalf("secret decrypt failed: value=%q err=%v", plain, err)
+	}
+	if !svc.SecretConfigured()[SecretSMTPPassword] {
+		t.Fatal("configured secret flag was false")
+	}
+	if err := svc.UpdateSecrets(SystemSecretUpdate{Clear: []string{SecretSMTPPassword}}); err != nil {
+		t.Fatal(err)
+	}
+	if svc.SecretConfigured()[SecretSMTPPassword] {
+		t.Fatal("cleared secret still reported configured")
 	}
 }
 

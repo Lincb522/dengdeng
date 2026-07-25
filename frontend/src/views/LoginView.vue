@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { api } from '../api/client'
+import { api, setToken } from '../api/client'
 import { useAuth } from '../stores/auth'
 import { useToast } from '../stores/toast'
 import BrandMark from '../components/BrandMark.vue'
+import TurnstileWidget from '../components/TurnstileWidget.vue'
 
 const auth = useAuth()
 const toast = useToast()
 const router = useRouter()
 
-const mode = ref<'login' | 'register'>('login')
+const mode = ref<'login' | 'register' | 'reset'>('login')
 const email = ref('')
 const password = ref('')
 const confirm = ref('')
@@ -23,11 +24,15 @@ const resendAfter = ref(0)
 const passwordVisible = ref(false)
 const acceptedAgreement = ref(false)
 const agreementVisible = ref(false)
+const turnstileToken = ref('')
+const turnstileNonce = ref(0)
+const pendingOAuthCode = ref(new URLSearchParams(window.location.search).get('oauth_code') || '')
 let cooldownTimer: number | undefined
 
 const agreement = computed(() => auth.loginAgreement)
 const agreementRequired = computed(() => agreement.value.enabled && agreement.value.documents.length > 0)
 const canContinue = computed(() => !agreementRequired.value || acceptedAgreement.value)
+const turnstileReady = computed(() => !auth.security.turnstile_enabled || !!turnstileToken.value)
 
 watch(
   () => agreement.value.revision,
@@ -74,28 +79,82 @@ async function sendVerificationCode() {
   }
   sendingCode.value = true
   try {
-    const result = await api.post<{ resend_after: number }>('/api/auth/register/code', { email: email.value.trim() })
+		const result = await api.post<{ resend_after: number }>('/api/auth/register/code', { email: email.value.trim(), turnstile_token: turnstileToken.value })
     beginCooldown(result.resend_after || 60)
     toast.show('验证码已发送', 'success')
   } catch (e) {
     toast.show(e instanceof Error ? e.message : '发送失败', 'error')
   } finally {
     sendingCode.value = false
+		turnstileToken.value = ''
+		turnstileNonce.value += 1
   }
+}
+
+async function sendResetCode() {
+	if (!email.value) {
+		toast.show('请先填写邮箱', 'error')
+		return
+	}
+	sendingCode.value = true
+	try {
+		const result = await api.post<{ resend_after: number }>('/api/auth/password-reset/code', { email: email.value.trim(), turnstile_token: turnstileToken.value })
+		beginCooldown(result.resend_after || 60)
+		toast.show('验证码已发送', 'success')
+	} catch (e) {
+		toast.show(e instanceof Error ? e.message : '发送失败', 'error')
+	} finally {
+		sendingCode.value = false
+		turnstileToken.value = ''
+		turnstileNonce.value += 1
+	}
 }
 
 onMounted(async () => {
   await auth.loadPublicSettings()
+	const oauthError = new URLSearchParams(window.location.search).get('oauth_error')
+	if (oauthError) toast.show(oauthError, 'error')
+	if (pendingOAuthCode.value) await completeOAuth()
   if (agreementRequired.value && agreement.value.mode === 'modal') agreementVisible.value = true
 })
+
+async function startOAuth(provider: string) {
+	if (!requireAgreement() || !turnstileReady.value) return
+	busy.value = true
+	try {
+		const result = await api.post<{ authorization_url: string }>(`/api/auth/oauth/${provider}/start`, { terms_revision: agreement.value.revision, turnstile_token: turnstileToken.value })
+		window.location.assign(result.authorization_url)
+	} catch (e) {
+		toast.show(e instanceof Error ? e.message : '第三方登录失败', 'error')
+		busy.value = false
+		turnstileToken.value = ''
+		turnstileNonce.value += 1
+	}
+}
+
+async function completeOAuth() {
+	if (!pendingOAuthCode.value) return
+	busy.value = true
+	try {
+		const result = await api.post<{ token: string }>('/api/auth/oauth/exchange', { code: pendingOAuthCode.value, totp_code: totpCode.value.trim() })
+		setToken(result.token)
+		await auth.fetchMe()
+		pendingOAuthCode.value = ''
+		await router.push('/dashboard')
+	} catch (e) {
+		toast.show(e instanceof Error ? e.message : '第三方登录确认失败', 'error')
+	} finally {
+		busy.value = false
+	}
+}
 
 onBeforeUnmount(() => {
   if (cooldownTimer) window.clearInterval(cooldownTimer)
 })
 
 async function submit() {
-  if (!email.value || !password.value || !requireAgreement()) return
-  if (mode.value === 'register') {
+	if (!email.value || !password.value || (mode.value !== 'reset' && !requireAgreement())) return
+	if (mode.value === 'register' || mode.value === 'reset') {
     if (password.value.length < 8) {
       toast.show('密码至少 8 位', 'error')
       return
@@ -104,23 +163,33 @@ async function submit() {
       toast.show('两次输入的密码不一致', 'error')
       return
     }
-    if (auth.registrationVerification && !/^\d{6}$/.test(verificationCode.value.trim())) {
+		if ((mode.value === 'reset' || auth.registrationVerification) && !/^\d{6}$/.test(verificationCode.value.trim())) {
       toast.show('请输入 6 位邮箱验证码', 'error')
       return
     }
   }
   busy.value = true
   try {
-    if (mode.value === 'login') {
-      await auth.login(email.value, password.value, agreement.value.revision, totpCode.value.trim())
-    } else {
-      await auth.register(email.value, password.value, verificationCode.value.trim(), agreement.value.revision, referralCode.value.trim())
+		if (mode.value === 'login') {
+			await auth.login(email.value, password.value, agreement.value.revision, totpCode.value.trim(), turnstileToken.value)
+		} else if (mode.value === 'register') {
+			await auth.register(email.value, password.value, verificationCode.value.trim(), agreement.value.revision, referralCode.value.trim(), turnstileToken.value)
+		} else {
+			await api.post('/api/auth/password-reset', { email: email.value.trim(), code: verificationCode.value.trim(), password: password.value, turnstile_token: turnstileToken.value })
+			mode.value = 'login'
+			password.value = ''
+			confirm.value = ''
+			verificationCode.value = ''
+			toast.show('密码已重置，请重新登录', 'success')
+			return
     }
     router.push('/dashboard')
   } catch (e) {
     toast.show(e instanceof Error ? e.message : '操作失败', 'error')
   } finally {
     busy.value = false
+		turnstileToken.value = ''
+		turnstileNonce.value += 1
   }
 }
 </script>
@@ -138,14 +207,18 @@ async function submit() {
         </div>
 
         <header class="login-panel-header">
-          <h1 id="login-title">{{ mode === 'login' ? '欢迎回来' : '创建账户' }}</h1>
-          <p>{{ mode === 'login' ? '使用你的邮箱继续' : '验证邮箱后即可使用' }}</p>
+          <h1 id="login-title">{{ mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建账户' : '重置密码' }}</h1>
+          <p>{{ mode === 'login' ? '使用你的邮箱继续' : mode === 'register' ? '验证邮箱后即可使用' : '验证邮箱后设置新密码' }}</p>
         </header>
 
         <div class="login-tabs" :class="{ 'login-tabs--single': !auth.allowRegister }" role="tablist" aria-label="账户操作">
-          <button type="button" role="tab" :aria-selected="mode === 'login'" :class="{ 'is-active': mode === 'login' }" @click="mode = 'login'">登录</button>
+          <button type="button" role="tab" :aria-selected="mode === 'login' || mode === 'reset'" :class="{ 'is-active': mode === 'login' || mode === 'reset' }" @click="mode = 'login'">登录</button>
           <button v-if="auth.allowRegister" type="button" role="tab" :aria-selected="mode === 'register'" :class="{ 'is-active': mode === 'register' }" @click="mode = 'register'">注册</button>
         </div>
+
+		<div v-if="auth.oauthProviders.length && mode === 'login'" class="login-oauth-grid">
+			<button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">{{ provider.name }}</button>
+		</div>
 
         <form class="login-form" @submit.prevent="submit">
           <div class="login-field">
@@ -153,11 +226,11 @@ async function submit() {
             <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" />
           </div>
 
-          <div v-if="mode === 'register' && auth.registrationVerification" class="login-field">
+			<div v-if="(mode === 'register' && auth.registrationVerification) || mode === 'reset'" class="login-field">
             <label for="verification-code">邮箱验证码</label>
             <div class="login-code-row">
               <input id="verification-code" v-model="verificationCode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
-              <button type="button" class="login-code-button" :disabled="sendingCode || resendAfter > 0 || !canContinue" @click="sendVerificationCode">
+				<button type="button" class="login-code-button" :disabled="sendingCode || resendAfter > 0 || !turnstileReady || (mode !== 'reset' && !canContinue)" @click="mode === 'reset' ? sendResetCode() : sendVerificationCode()">
                 {{ sendingCode ? '发送中' : resendAfter > 0 ? `${resendAfter}s 后重发` : '发送验证码' }}
               </button>
             </div>
@@ -177,8 +250,9 @@ async function submit() {
 						<label for="totp-code">验证器验证码（已开启时填写）</label>
 						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
 					</div>
+			<button v-if="pendingOAuthCode" type="button" class="login-submit" :disabled="busy" @click="completeOAuth">完成第三方登录</button>
 
-          <div v-if="mode === 'register'" class="login-field">
+			<div v-if="mode === 'register' || mode === 'reset'" class="login-field">
             <label for="confirm-password">确认密码</label>
             <input id="confirm-password" v-model="confirm" type="password" placeholder="再输入一次" autocomplete="new-password" />
           </div>
@@ -188,11 +262,15 @@ async function submit() {
             <input id="referral-code" v-model="referralCode" type="text" placeholder="例如 DD-XXXXXXXXXX" autocomplete="off" maxlength="32" />
           </div>
 
-          <button type="submit" class="login-submit" :disabled="busy || !canContinue">
-            {{ busy ? '请稍候…' : mode === 'login' ? '进入控制台' : '创建账户' }}
-          </button>
+			<TurnstileWidget v-if="auth.security.turnstile_enabled && auth.security.turnstile_site_key" :key="turnstileNonce" v-model="turnstileToken" :site-key="auth.security.turnstile_site_key" />
 
-          <div v-if="agreementRequired && agreement.mode === 'checkbox'" class="login-agreement-checkbox">
+			<button type="submit" class="login-submit" :disabled="busy || !turnstileReady || (mode !== 'reset' && !canContinue)">
+			{{ busy ? '请稍候…' : mode === 'login' ? '进入控制台' : mode === 'register' ? '创建账户' : '确认重置' }}
+          </button>
+			<button v-if="mode === 'login' && auth.security.password_reset_enabled" type="button" class="login-agreement-open" @click="mode = 'reset'; verificationCode = ''; confirm = ''">忘记密码</button>
+			<button v-else-if="mode === 'reset'" type="button" class="login-agreement-open" @click="mode = 'login'">返回登录</button>
+
+			<div v-if="mode !== 'reset' && agreementRequired && agreement.mode === 'checkbox'" class="login-agreement-checkbox">
             <input id="login-agreement-consent" v-model="acceptedAgreement" type="checkbox" />
             <label for="login-agreement-consent">
               我已阅读并同意
@@ -201,7 +279,7 @@ async function submit() {
               </template>
             </label>
           </div>
-          <button v-else-if="agreementRequired" type="button" class="login-agreement-open" @click="agreementVisible = true">查看并同意服务协议</button>
+			<button v-else-if="mode !== 'reset' && agreementRequired" type="button" class="login-agreement-open" @click="agreementVisible = true">查看并同意服务协议</button>
         </form>
       </section>
     </main>

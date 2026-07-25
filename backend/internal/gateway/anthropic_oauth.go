@@ -64,11 +64,19 @@ func applyAnthropicOAuthIdentityHeaders(header http.Header) {
 // (a real Claude Code request), so it is safe to apply unconditionally on the
 // OAuth path. Non-JSON or non-object bodies are returned unchanged.
 func injectClaudeCodeSystemPrompt(body []byte) []byte {
+	return injectClaudeCodeSystemPromptWithText(body, claudeCodeSystemPrompt)
+}
+
+func injectClaudeCodeSystemPromptWithText(body []byte, prompt string) []byte {
 	var request map[string]any
 	if err := json.Unmarshal(body, &request); err != nil || request == nil {
 		return body
 	}
-	identity := map[string]any{"type": "text", "text": claudeCodeSystemPrompt}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		prompt = claudeCodeSystemPrompt
+	}
+	identity := map[string]any{"type": "text", "text": prompt}
 
 	switch system := request["system"].(type) {
 	case nil:
@@ -76,13 +84,13 @@ func injectClaudeCodeSystemPrompt(body []byte) []byte {
 	case string:
 		if strings.TrimSpace(system) == "" {
 			request["system"] = []any{identity}
-		} else if system == claudeCodeSystemPrompt {
+		} else if system == prompt {
 			request["system"] = []any{identity}
 		} else {
 			request["system"] = []any{identity, map[string]any{"type": "text", "text": system}}
 		}
 	case []any:
-		if claudeCodeIdentityFirst(system) {
+		if claudeCodeIdentityFirstWithText(system, prompt) {
 			return body
 		}
 		request["system"] = append([]any{identity}, system...)
@@ -97,9 +105,56 @@ func injectClaudeCodeSystemPrompt(body []byte) []byte {
 	return encoded
 }
 
+func injectAnthropicCacheTTL1h(body []byte) []byte {
+	var request map[string]any
+	if json.Unmarshal(body, &request) != nil || request == nil {
+		return body
+	}
+	changed := false
+	apply := func(blocks []any) {
+		for _, raw := range blocks {
+			block, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			cache, ok := block["cache_control"].(map[string]any)
+			if ok && stringValue(cache["type"]) == "ephemeral" && stringValue(cache["ttl"]) != "1h" {
+				cache["ttl"] = "1h"
+				changed = true
+			}
+		}
+	}
+	if blocks, ok := request["system"].([]any); ok {
+		apply(blocks)
+	}
+	if messages, ok := request["messages"].([]any); ok {
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if blocks, ok := message["content"].([]any); ok {
+				apply(blocks)
+			}
+		}
+	}
+	if !changed {
+		return body
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return body
+	}
+	return encoded
+}
+
 // claudeCodeIdentityFirst reports whether the first text block already carries
 // the Claude Code identity, so a genuine CLI request is not double-prefixed.
 func claudeCodeIdentityFirst(system []any) bool {
+	return claudeCodeIdentityFirstWithText(system, claudeCodeSystemPrompt)
+}
+
+func claudeCodeIdentityFirstWithText(system []any, prompt string) bool {
 	if len(system) == 0 {
 		return false
 	}
@@ -107,5 +162,64 @@ func claudeCodeIdentityFirst(system []any) bool {
 	if !ok {
 		return false
 	}
-	return stringValue(first["text"]) == claudeCodeSystemPrompt
+	return stringValue(first["text"]) == prompt
+}
+
+func rewriteAnthropicMessageCacheControl(body []byte) []byte {
+	var request map[string]any
+	if json.Unmarshal(body, &request) != nil || request == nil {
+		return body
+	}
+	messages, ok := request["messages"].([]any)
+	if !ok || len(messages) == 0 {
+		return body
+	}
+	for _, rawMessage := range messages {
+		message, ok := rawMessage.(map[string]any)
+		if !ok {
+			continue
+		}
+		if blocks, ok := message["content"].([]any); ok {
+			for _, rawBlock := range blocks {
+				if block, ok := rawBlock.(map[string]any); ok {
+					delete(block, "cache_control")
+				}
+			}
+		}
+	}
+	targets := []int{len(messages) - 1}
+	if len(messages) >= 4 {
+		seenUsers := 0
+		for i := len(messages) - 1; i >= 0; i-- {
+			message, _ := messages[i].(map[string]any)
+			if stringValue(message["role"]) == "user" {
+				seenUsers++
+				if seenUsers == 2 {
+					targets = append(targets, i)
+					break
+				}
+			}
+		}
+	}
+	for _, index := range targets {
+		message, ok := messages[index].(map[string]any)
+		if !ok {
+			continue
+		}
+		switch content := message["content"].(type) {
+		case string:
+			message["content"] = []any{map[string]any{"type": "text", "text": content, "cache_control": map[string]any{"type": "ephemeral"}}}
+		case []any:
+			if len(content) > 0 {
+				if block, ok := content[len(content)-1].(map[string]any); ok {
+					block["cache_control"] = map[string]any{"type": "ephemeral"}
+				}
+			}
+		}
+	}
+	encoded, err := json.Marshal(request)
+	if err != nil {
+		return body
+	}
+	return encoded
 }

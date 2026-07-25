@@ -19,23 +19,24 @@ const maxUsagePageSize = 100
 // export and the operations dashboard. Keeping all filters in one place
 // prevents a dashboard number and the corresponding detail view disagreeing.
 type usageQuery struct {
-	Page       int
-	Size       int
-	Model      string
-	RequestID  string
-	ClientIP   string
-	IPLocation string
-	Platform   string
-	Status     string
-	Start      *time.Time
-	End        *time.Time
-	UserID     int64
-	APIKeyID   int64
-	GroupID    int64
-	AccountID  int64
-	Stream     *bool
-	Sort       string
-	Order      string
+	Page        int
+	Size        int
+	Model       string
+	RequestID   string
+	ClientIP    string
+	IPLocation  string
+	Platform    string
+	Status      string
+	Start       *time.Time
+	End         *time.Time
+	UserID      int64
+	APIKeyID    int64
+	GroupID     int64
+	AccountID   int64
+	Stream      *bool
+	Sort        string
+	Order       string
+	SuccessOnly bool
 }
 
 func parseUsageQuery(c *gin.Context) (usageQuery, error) {
@@ -195,6 +196,8 @@ func usageScope(db *gorm.DB, filter usageQuery, userID *int64) *gorm.DB {
 		q = q.Where("usage_logs.status_code >= ? AND usage_logs.status_code < ?", 200, 400)
 	} else if filter.Status == "error" {
 		q = q.Where("usage_logs.status_code < ? OR usage_logs.status_code >= ?", 200, 400)
+	} else if filter.SuccessOnly {
+		q = q.Where("usage_logs.status_code >= ? AND usage_logs.status_code < ?", 200, 400)
 	}
 	if filter.Stream != nil {
 		q = q.Where("usage_logs.stream = ?", *filter.Stream)

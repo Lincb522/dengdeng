@@ -92,6 +92,7 @@ type User struct {
 	// Concurrency is the maximum number of simultaneous relay requests owned
 	// by this user. Zero preserves the legacy unlimited behaviour.
 	Concurrency int    `gorm:"not null;default:0" json:"concurrency"`
+	RPMLimit    int64  `gorm:"not null;default:0" json:"rpm_limit"`
 	Note        string `gorm:"size:512" json:"note"`
 	// TokenVersion is bumped to invalidate all previously issued JWTs
 	// (password change, ban, role change).
@@ -105,6 +106,67 @@ type User struct {
 	TermsAcceptedAt *time.Time `json:"terms_accepted_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// UserPlatformQuota stores per-user spend ceilings copied from the active
+// registration policy. Zero means unlimited for that window.
+type UserPlatformQuota struct {
+	ID           int64     `gorm:"primaryKey" json:"id"`
+	UserID       int64     `gorm:"uniqueIndex:idx_user_platform_quota;not null" json:"user_id"`
+	Platform     string    `gorm:"uniqueIndex:idx_user_platform_quota;size:16;not null" json:"platform"`
+	DailyMicro   int64     `gorm:"not null;default:0" json:"daily_micro"`
+	WeeklyMicro  int64     `gorm:"not null;default:0" json:"weekly_micro"`
+	MonthlyMicro int64     `gorm:"not null;default:0" json:"monthly_micro"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+type UserGroupSubscription struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `gorm:"uniqueIndex:idx_user_group_subscription;not null" json:"user_id"`
+	GroupID   int64     `gorm:"uniqueIndex:idx_user_group_subscription;not null" json:"group_id"`
+	ExpiresAt time.Time `gorm:"index;not null" json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type UserOAuthIdentity struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	UserID    int64     `gorm:"index;not null" json:"user_id"`
+	Provider  string    `gorm:"uniqueIndex:idx_oauth_provider_subject;size:32;not null" json:"provider"`
+	Subject   string    `gorm:"uniqueIndex:idx_oauth_provider_subject;size:255;not null" json:"subject"`
+	Email     string    `gorm:"size:255" json:"email"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// UserOAuthFlow persists short-lived OAuth state and one-time login results.
+// Keeping it in the shared database makes callbacks work across multiple
+// application instances and prevents a restart from silently losing a login
+// that is already in progress. Sensitive verifier/nonce values never leave the
+// backend and every row is deleted as soon as it is consumed.
+type UserOAuthFlow struct {
+	ID            int64     `gorm:"primaryKey" json:"-"`
+	TokenHash     string    `gorm:"uniqueIndex;size:64;not null" json:"-"`
+	Kind          string    `gorm:"index;size:16;not null" json:"-"`
+	Provider      string    `gorm:"size:32" json:"-"`
+	Verifier      string    `gorm:"size:255" json:"-"`
+	Nonce         string    `gorm:"size:255" json:"-"`
+	TermsRevision string    `gorm:"size:64" json:"-"`
+	UserID        int64     `gorm:"index" json:"-"`
+	ExpiresAt     time.Time `gorm:"index;not null" json:"-"`
+	CreatedAt     time.Time `json:"-"`
+}
+
+// UserProviderDefaultGrant is the idempotency record for a provider's
+// first-bind defaults. A unique row guarantees a balance or subscription grant
+// can never be applied twice, even when callbacks race on different instances.
+type UserProviderDefaultGrant struct {
+	ID        int64     `gorm:"primaryKey" json:"-"`
+	UserID    int64     `gorm:"uniqueIndex:idx_user_provider_grant;not null" json:"-"`
+	Provider  string    `gorm:"uniqueIndex:idx_user_provider_grant;size:32;not null" json:"-"`
+	Reason    string    `gorm:"uniqueIndex:idx_user_provider_grant;size:32;not null" json:"-"`
+	CreatedAt time.Time `json:"-"`
 }
 
 // Group is a routing pool: API keys bind to a group, and the group owns a set

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type GatewayRuntimePolicy struct {
 	MaxAttempts                    int `json:"max_attempts"`
 	UnauthorizedCooldownSeconds    int `json:"unauthorized_cooldown_seconds"`
 	RateLimitCooldownSeconds       int `json:"rate_limit_cooldown_seconds"`
+	OverloadCooldownSeconds        int `json:"overload_cooldown_seconds"`
 	UpstreamFailureCooldownSeconds int `json:"upstream_failure_cooldown_seconds"`
 	NetworkFailureCooldownSeconds  int `json:"network_failure_cooldown_seconds"`
 	ProbeIntervalSeconds           int `json:"probe_interval_seconds"`
@@ -41,7 +43,23 @@ type GatewayRuntimePolicy struct {
 	// request by its effective reasoning effort. Token usage already grows
 	// with effort; this lets an operator additionally price the deeper tiers
 	// (subscription upstreams burn quota much faster on high/xhigh).
-	ReasoningEffortMultipliers map[string]float64 `json:"reasoning_effort_multipliers"`
+	ReasoningEffortMultipliers       map[string]float64 `json:"reasoning_effort_multipliers"`
+	FingerprintUnification           bool               `json:"fingerprint_unification"`
+	MetadataPassthrough              bool               `json:"metadata_passthrough"`
+	ClaudeOAuthSystemPromptInjection bool               `json:"claude_oauth_system_prompt_injection"`
+	ClaudeOAuthSystemPrompt          string             `json:"claude_oauth_system_prompt"`
+	AnthropicCacheTTL1hInjection     bool               `json:"anthropic_cache_ttl_1h_injection"`
+	RewriteMessageCacheControl       bool               `json:"rewrite_message_cache_control"`
+	OpenAICodexUserAgent             string             `json:"openai_codex_user_agent"`
+	ClaudeClientGateEnabled          bool               `json:"claude_client_gate_enabled"`
+	MinClaudeCodeVersion             string             `json:"min_claude_code_version"`
+	MaxClaudeCodeVersion             string             `json:"max_claude_code_version"`
+	CodexClientGateEnabled           bool               `json:"codex_client_gate_enabled"`
+	MinCodexVersion                  string             `json:"min_codex_version"`
+	MaxCodexVersion                  string             `json:"max_codex_version"`
+	CodexClientBlacklist             []string           `json:"codex_client_blacklist"`
+	CodexClientWhitelist             []string           `json:"codex_client_whitelist"`
+	CodexAllowAppServerClients       bool               `json:"codex_allow_app_server_clients"`
 }
 
 func DefaultReasoningEffortMultipliers() map[string]float64 {
@@ -57,18 +75,24 @@ func DefaultReasoningEffortMultipliers() map[string]float64 {
 
 func DefaultGatewayRuntimePolicy() GatewayRuntimePolicy {
 	return GatewayRuntimePolicy{
-		MaxAttempts:                    3,
-		UnauthorizedCooldownSeconds:    600,
-		RateLimitCooldownSeconds:       60,
-		UpstreamFailureCooldownSeconds: 30,
-		NetworkFailureCooldownSeconds:  15,
-		ProbeIntervalSeconds:           300,
-		ProbeTimeoutSeconds:            12,
-		ProbeRetentionDays:             30,
-		ProbeConcurrency:               4,
-		ConcurrencyWaitMilliseconds:    5000,
-		ConcurrencyQueueDepth:          256,
-		ReasoningEffortMultipliers:     DefaultReasoningEffortMultipliers(),
+		MaxAttempts:                      3,
+		UnauthorizedCooldownSeconds:      600,
+		RateLimitCooldownSeconds:         60,
+		OverloadCooldownSeconds:          300,
+		UpstreamFailureCooldownSeconds:   30,
+		NetworkFailureCooldownSeconds:    15,
+		ProbeIntervalSeconds:             300,
+		ProbeTimeoutSeconds:              12,
+		ProbeRetentionDays:               30,
+		ProbeConcurrency:                 4,
+		ConcurrencyWaitMilliseconds:      5000,
+		ConcurrencyQueueDepth:            256,
+		ReasoningEffortMultipliers:       DefaultReasoningEffortMultipliers(),
+		FingerprintUnification:           true,
+		ClaudeOAuthSystemPromptInjection: true,
+		ClaudeOAuthSystemPrompt:          "You are Claude Code, Anthropic's official CLI for Claude.",
+		OpenAICodexUserAgent:             "codex_cli_rs/0.114.0 (Mac OS 15.0.0; arm64) iTerm.app/3.5.14",
+		CodexAllowAppServerClients:       true,
 	}
 }
 
@@ -92,6 +116,8 @@ func (p GatewayRuntimePolicy) CooldownFor(statusCode int) time.Duration {
 		seconds = p.UnauthorizedCooldownSeconds
 	case statusCode == 429:
 		seconds = p.RateLimitCooldownSeconds
+	case statusCode == 529:
+		seconds = p.OverloadCooldownSeconds
 	case statusCode >= 500:
 		seconds = p.UpstreamFailureCooldownSeconds
 	}
@@ -118,6 +144,9 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 	}
 	if p.RateLimitCooldownSeconds == 0 {
 		p.RateLimitCooldownSeconds = defaults.RateLimitCooldownSeconds
+	}
+	if p.OverloadCooldownSeconds == 0 {
+		p.OverloadCooldownSeconds = defaults.OverloadCooldownSeconds
 	}
 	if p.UpstreamFailureCooldownSeconds == 0 {
 		p.UpstreamFailureCooldownSeconds = defaults.UpstreamFailureCooldownSeconds
@@ -151,6 +180,7 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 		{"max_attempts", p.MaxAttempts, 1, 8},
 		{"unauthorized_cooldown_seconds", p.UnauthorizedCooldownSeconds, 30, 86400},
 		{"rate_limit_cooldown_seconds", p.RateLimitCooldownSeconds, 5, 3600},
+		{"overload_cooldown_seconds", p.OverloadCooldownSeconds, 30, 86400},
 		{"upstream_failure_cooldown_seconds", p.UpstreamFailureCooldownSeconds, 5, 3600},
 		{"network_failure_cooldown_seconds", p.NetworkFailureCooldownSeconds, 1, 3600},
 		{"probe_interval_seconds", p.ProbeIntervalSeconds, 30, 86400},
@@ -180,7 +210,72 @@ func normalizeGatewayRuntimePolicy(p GatewayRuntimePolicy) (GatewayRuntimePolicy
 		normalizedMultipliers[effort] = value
 	}
 	p.ReasoningEffortMultipliers = normalizedMultipliers
+	p.ClaudeOAuthSystemPrompt = strings.TrimSpace(p.ClaudeOAuthSystemPrompt)
+	if p.ClaudeOAuthSystemPrompt == "" {
+		p.ClaudeOAuthSystemPrompt = defaults.ClaudeOAuthSystemPrompt
+	}
+	if len(p.ClaudeOAuthSystemPrompt) > 8000 {
+		return p, fmt.Errorf("claude_oauth_system_prompt is too long")
+	}
+	p.OpenAICodexUserAgent = strings.TrimSpace(p.OpenAICodexUserAgent)
+	if p.OpenAICodexUserAgent == "" {
+		p.OpenAICodexUserAgent = defaults.OpenAICodexUserAgent
+	}
+	if len(p.OpenAICodexUserAgent) > 512 {
+		return p, fmt.Errorf("openai_codex_user_agent is too long")
+	}
+	for _, version := range []string{p.MinClaudeCodeVersion, p.MaxClaudeCodeVersion, p.MinCodexVersion, p.MaxCodexVersion} {
+		if version != "" && !validClientVersion(version) {
+			return p, fmt.Errorf("client versions must use numeric x.y.z format")
+		}
+	}
+	cleanList := func(values []string) ([]string, error) {
+		if len(values) > 64 {
+			return nil, fmt.Errorf("client fingerprint lists allow at most 64 entries")
+		}
+		result := make([]string, 0, len(values))
+		seen := map[string]struct{}{}
+		for _, raw := range values {
+			value := strings.ToLower(strings.TrimSpace(raw))
+			if value == "" {
+				continue
+			}
+			if len(value) > 200 {
+				return nil, fmt.Errorf("client fingerprint entry is too long")
+			}
+			if _, ok := seen[value]; !ok {
+				seen[value] = struct{}{}
+				result = append(result, value)
+			}
+		}
+		return result, nil
+	}
+	var err error
+	if p.CodexClientBlacklist, err = cleanList(p.CodexClientBlacklist); err != nil {
+		return p, err
+	}
+	if p.CodexClientWhitelist, err = cleanList(p.CodexClientWhitelist); err != nil {
+		return p, err
+	}
 	return p, nil
+}
+
+func validClientVersion(value string) bool {
+	parts := strings.Split(strings.TrimPrefix(strings.TrimSpace(value), "v"), ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type RuntimePolicyService struct {
@@ -196,7 +291,7 @@ func NewRuntimePolicyService(db *gorm.DB) *RuntimePolicyService {
 	}
 	var row model.Setting
 	if err := db.Where("key = ?", runtimePolicyKey).First(&row).Error; err == nil {
-		var stored GatewayRuntimePolicy
+		stored := DefaultGatewayRuntimePolicy()
 		if json.Unmarshal([]byte(row.Value), &stored) == nil {
 			if normalized, err := normalizeGatewayRuntimePolicy(stored); err == nil {
 				s.policy = normalized

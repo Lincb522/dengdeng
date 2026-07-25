@@ -23,10 +23,84 @@ type RegistrationMailer interface {
 	SendRegistrationCode(to, code string) error
 }
 
+type PasswordResetMailer interface {
+	SendPasswordResetCode(to, code string) error
+}
+
 type SMTPMailer struct {
 	cfg           config.SMTPConfig
 	siteName      string
 	sitePublicURL string
+}
+
+// RuntimeSMTPMailer resolves the latest administrator-managed SMTP settings
+// for every delivery. This keeps mail changes live without restarting the
+// process while retaining environment variables as a safe fallback.
+type RuntimeSMTPMailer struct {
+	settings  *SystemSettingsService
+	fallback  config.SMTPConfig
+	publicURL string
+}
+
+func NewRuntimeSMTPMailer(settings *SystemSettingsService, fallback config.SMTPConfig, publicURL string) *RuntimeSMTPMailer {
+	return &RuntimeSMTPMailer{settings: settings, fallback: fallback, publicURL: publicURL}
+}
+
+func (m *RuntimeSMTPMailer) resolved() (*SMTPMailer, error) {
+	cfg := m.fallback
+	siteName := "DengDeng AI"
+	if m.settings != nil {
+		current, err := m.settings.Get()
+		if err != nil {
+			return nil, err
+		}
+		siteName = current.SiteName
+		if current.Email.Host != "" {
+			cfg.Host = current.Email.Host
+			cfg.Port = current.Email.Port
+			cfg.User = current.Email.Username
+			cfg.FromName = current.Email.FromName
+			cfg.From = current.Email.From
+			cfg.Secure = current.Email.UseTLS
+		}
+		password, err := m.settings.Secret(SecretSMTPPassword)
+		if err != nil {
+			return nil, err
+		}
+		if password != "" {
+			cfg.Pass = password
+		}
+	}
+	return NewSMTPMailer(cfg, siteName, m.publicURL), nil
+}
+
+func (m *RuntimeSMTPMailer) Configured() bool {
+	mailer, err := m.resolved()
+	return err == nil && mailer.Configured()
+}
+
+func (m *RuntimeSMTPMailer) SendRegistrationCode(to, code string) error {
+	mailer, err := m.resolved()
+	if err != nil {
+		return err
+	}
+	return mailer.SendRegistrationCode(to, code)
+}
+
+func (m *RuntimeSMTPMailer) SendPasswordResetCode(to, code string) error {
+	mailer, err := m.resolved()
+	if err != nil {
+		return err
+	}
+	return mailer.SendPasswordResetCode(to, code)
+}
+
+func (m *RuntimeSMTPMailer) SendOperationalAlert(to, title, summary string) error {
+	mailer, err := m.resolved()
+	if err != nil {
+		return err
+	}
+	return mailer.SendOperationalAlert(to, title, summary)
 }
 
 func NewSMTPMailer(cfg config.SMTPConfig, siteName, sitePublicURL string) *SMTPMailer {
@@ -53,6 +127,18 @@ func (m *SMTPMailer) SendRegistrationCode(to, code string) error {
 	return m.send(from, to, message)
 }
 
+func (m *SMTPMailer) SendPasswordResetCode(to, code string) error {
+	if !m.Configured() {
+		return ErrSMTPNotConfigured
+	}
+	from := m.cfg.From
+	if from == "" {
+		from = m.cfg.User
+	}
+	message := codeEmail(m.siteName, m.sitePublicURL, from, to, code, "重置密码", "输入下面的验证码，重新设置账户密码。")
+	return m.send(from, to, message)
+}
+
 // SendOperationalAlert reuses the verified SMTP transport for a compact,
 // credential-free alert. It is invoked only when a new incident opens, never
 // once per repeated health check.
@@ -73,7 +159,7 @@ func (m *SMTPMailer) SendOperationalAlert(to, title, summary string) error {
 	subject := mime.QEncoding.Encode("UTF-8", fmt.Sprintf("【%s】%s", site, title))
 	fromName := mime.QEncoding.Encode("UTF-8", site)
 	mark := emailBrandMark(m.sitePublicURL, site)
-	message := fmt.Sprintf("MIME-Version: 1.0\r\nFrom: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<!doctype html><html lang=\"zh-CN\"><body style=\"margin:0;background:#fffaf1;color:#30261e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"padding:32px 12px\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:520px;background:#fffdf8;border:1px solid #e8d9c6;border-radius:14px;overflow:hidden\"><tr><td style=\"height:5px;background:#c98a20\"></td></tr><tr><td style=\"padding:30px 34px\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding-right:10px\">%s</td><td style=\"font-size:14px;font-weight:700;letter-spacing:.04em\">%s · 运行告警</td></tr></table><h1 style=\"margin:24px 0 10px;font-size:23px;line-height:1.3\">%s</h1><p style=\"margin:0;color:#746154;font-size:14px;line-height:1.75;white-space:pre-wrap\">%s</p><p style=\"margin:22px 0 0;color:#9a8065;font-size:12px;line-height:1.6\">请前往管理端的「告警与巡检」确认处理情况。</p></td></tr></table></td></tr></table></body></html>", fromName, from, to, subject, mark, site, title, summary)
+	message := fmt.Sprintf("MIME-Version: 1.0\r\nFrom: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<!doctype html><html lang=\"zh-CN\"><body style=\"margin:0;background:#fffaf1;color:#30261e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"padding:32px 12px\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:520px;background:#fffdf8;border:1px solid #e8d9c6;border-radius:14px;overflow:hidden\"><tr><td style=\"height:5px;background:#c98a20\"></td></tr><tr><td style=\"padding:30px 34px\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding-right:10px\">%s</td><td style=\"font-size:14px;font-weight:700;letter-spacing:.04em\">%s · 系统通知</td></tr></table><h1 style=\"margin:24px 0 10px;font-size:23px;line-height:1.3\">%s</h1><p style=\"margin:0;color:#746154;font-size:14px;line-height:1.75;white-space:pre-wrap\">%s</p><p style=\"margin:22px 0 0;color:#9a8065;font-size:12px;line-height:1.6\">请登录控制台查看详细状态。</p></td></tr></table></td></tr></table></body></html>", fromName, from, to, subject, mark, site, title, summary)
 	return m.send(from, to, message)
 }
 
@@ -144,6 +230,10 @@ func emailBrandMark(sitePublicURL, siteName string) string {
 // registrationEmail uses conservative table markup and inline styles so the
 // warm interface palette holds up in Gmail, Apple Mail, and Outlook.
 func registrationEmail(siteName, sitePublicURL, from, to, code string) string {
+	return codeEmail(siteName, sitePublicURL, from, to, code, "确认你的邮箱", "输入下面的验证码，完成账户注册。")
+}
+
+func codeEmail(siteName, sitePublicURL, from, to, code, title, instruction string) string {
 	site := html.EscapeString(strings.TrimSpace(siteName))
 	if site == "" {
 		site = "DengDeng AI"
@@ -151,5 +241,5 @@ func registrationEmail(siteName, sitePublicURL, from, to, code string) string {
 	fromName := mime.QEncoding.Encode("UTF-8", site)
 	subject := mime.QEncoding.Encode("UTF-8", fmt.Sprintf("【%s】邮箱验证码", site))
 	mark := emailBrandMark(sitePublicURL, site)
-	return fmt.Sprintf("MIME-Version: 1.0\r\nFrom: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<!doctype html><html lang=\"zh-CN\"><body style=\"margin:0;background:#fffaf1;color:#30261e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#fffaf1;padding:32px 12px;\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:520px;background:#fffdf8;border:1px solid #e8d9c6;border-radius:14px;overflow:hidden;\"><tr><td style=\"height:5px;background:#c98a20;\"></td></tr><tr><td style=\"padding:32px 34px 28px;\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding-right:10px\">%s</td><td style=\"font-size:14px;font-weight:700;letter-spacing:.04em;color:#30261e;\">%s</td></tr></table><h1 style=\"margin:28px 0 10px;font-size:25px;line-height:1.25;color:#30261e;\">确认你的邮箱</h1><p style=\"margin:0;color:#746154;font-size:15px;line-height:1.7;\">输入下面的验证码，完成账户注册。</p><div style=\"margin:26px 0 20px;padding:18px 20px;border-radius:10px;background:#30261e;color:#fffdf8;font-size:29px;font-weight:750;letter-spacing:9px;line-height:1;text-align:center;\">%s</div><p style=\"margin:0;color:#746154;font-size:13px;line-height:1.7;\">验证码 10 分钟内有效。如非本人操作，无需处理这封邮件。</p></td></tr><tr><td style=\"padding:17px 34px;border-top:1px solid #e8d9c6;color:#9a8065;font-size:12px;line-height:1.6;\">此邮件由 %s 自动发送，请勿直接回复。</td></tr></table></td></tr></table></body></html>", fromName, from, to, subject, mark, site, html.EscapeString(code), site)
+	return fmt.Sprintf("MIME-Version: 1.0\r\nFrom: %s <%s>\r\nTo: %s\r\nSubject: %s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n<!doctype html><html lang=\"zh-CN\"><body style=\"margin:0;background:#fffaf1;color:#30261e;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"background:#fffaf1;padding:32px 12px;\"><tr><td align=\"center\"><table role=\"presentation\" width=\"100%%\" cellspacing=\"0\" cellpadding=\"0\" style=\"max-width:520px;background:#fffdf8;border:1px solid #e8d9c6;border-radius:14px;overflow:hidden;\"><tr><td style=\"height:5px;background:#c98a20;\"></td></tr><tr><td style=\"padding:32px 34px 28px;\"><table role=\"presentation\" cellspacing=\"0\" cellpadding=\"0\"><tr><td style=\"padding-right:10px\">%s</td><td style=\"font-size:14px;font-weight:700;letter-spacing:.04em;color:#30261e;\">%s</td></tr></table><h1 style=\"margin:28px 0 10px;font-size:25px;line-height:1.25;color:#30261e;\">%s</h1><p style=\"margin:0;color:#746154;font-size:15px;line-height:1.7;\">%s</p><div style=\"margin:26px 0 20px;padding:18px 20px;border-radius:10px;background:#30261e;color:#fffdf8;font-size:29px;font-weight:750;letter-spacing:9px;line-height:1;text-align:center;\">%s</div><p style=\"margin:0;color:#746154;font-size:13px;line-height:1.7;\">验证码 10 分钟内有效。如非本人操作，无需处理这封邮件。</p></td></tr><tr><td style=\"padding:17px 34px;border-top:1px solid #e8d9c6;color:#9a8065;font-size:12px;line-height:1.6;\">此邮件由 %s 自动发送，请勿直接回复。</td></tr></table></td></tr></table></body></html>", fromName, from, to, subject, mark, site, html.EscapeString(title), html.EscapeString(instruction), html.EscapeString(code), site)
 }

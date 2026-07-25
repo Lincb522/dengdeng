@@ -106,6 +106,9 @@ func referralCodeWithStats(db *gorm.DB, code model.ReferralCode) referralCodeSta
 // ReferralDashboard returns both sides of the current user's referral state:
 // the code they were invited with and the code/stats they can share.
 func (h *UserHandler) ReferralDashboard(c *gin.Context) {
+	if !h.requireReferralFeature(c) {
+		return
+	}
 	user := middleware.CurrentUser(c)
 	var codes []model.ReferralCode
 	h.db.Preload("Owner").Where("owner_user_id = ?", user.ID).Order("id DESC").Find(&codes)
@@ -166,6 +169,9 @@ func (h *UserHandler) ReferralDashboard(c *gin.Context) {
 }
 
 func (h *UserHandler) CreateMyReferralCode(c *gin.Context) {
+	if !h.requireReferralFeature(c) {
+		return
+	}
 	user := middleware.CurrentUser(c)
 	var existing model.ReferralCode
 	if err := h.db.Preload("Owner").Where("owner_user_id = ?", user.ID).First(&existing).Error; err == nil {
@@ -186,6 +192,9 @@ type bindReferralReq struct {
 }
 
 func (h *UserHandler) BindReferralCode(c *gin.Context) {
+	if !h.requireReferralFeature(c) {
+		return
+	}
 	user := middleware.CurrentUser(c)
 	var req bindReferralReq
 	if err := c.ShouldBindJSON(&req); err != nil {

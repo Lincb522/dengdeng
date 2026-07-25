@@ -232,6 +232,8 @@ body {
 	filter: drop-shadow(0 7px 7px rgba(67, 47, 27, .16));
 }
 .home-brand-mark svg { display: block; }
+.home-custom-logo { display: block; width: 7.875rem; height: 7.875rem; border-radius: 1.7rem; object-fit: contain; }
+.home-custom-content { max-width: 34rem; margin: 1.25rem auto 0; color: var(--ink-soft); font-size: .78rem; line-height: 1.65; white-space: pre-wrap; }
 .home-wordmark { margin-top: 1.35rem; }
 .home-wordmark h1 {
 	font-family: ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
@@ -345,8 +347,9 @@ body {
 	.home-hero { padding: 2rem 0 3rem; }
 	.home-brand-mark svg { width: 96px; height: 96px; }
 	.home-wordmark { margin-top: 1.1rem; }
-	.home-wordmark h1 { font-size: clamp(2.75rem, 13.4vw, 3.3rem); white-space: nowrap; }
-	.home-wordmark p { margin-top: 1.65rem; font-size: 1.28rem; }
+	.home-wordmark { width: 100%; }
+	.home-wordmark h1 { max-width: 100%; font-size: clamp(2rem, 9.4vw, 2.75rem); letter-spacing: -.055em; white-space: nowrap; }
+	.home-wordmark p { margin-top: 1.65rem; font-size: 1.08rem; white-space: nowrap; }
 	.home-wordmark span { margin-top: .6rem; font-size: .68rem; letter-spacing: .1em; }
 	.home-primary-actions { width: 100%; flex-direction: column; gap: .7rem; margin-top: 1.75rem; }
 	.home-primary-actions a { width: min(15rem, 100%); }
@@ -1626,6 +1629,10 @@ body {
   .login-code-button:hover:not(:disabled) { border-color: #b77917; background: #f8e6bb; color: #5f3b0b; }
   .login-code-button:focus-visible, .login-password-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .login-code-button:disabled { cursor: not-allowed; border-color: var(--line); color: #9d8978; }
+	.turnstile-widget { min-height: 65px; overflow: hidden; border-radius: .55rem; }
+	.login-oauth-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; margin-bottom: 1rem; }
+	.login-oauth-grid button { min-height: 2.65rem; border: 1px solid var(--line); border-radius: .62rem; background: var(--surface); color: var(--ink); font-size: .74rem; font-weight: 750; }
+	.login-oauth-grid button:hover:not(:disabled) { border-color: var(--accent); }
   .login-password-wrap input { padding-right: 4rem; }
   .login-password-toggle { position: absolute; right: .2rem; min-height: 2.3rem; padding: 0 .55rem; border-radius: .45rem; color: #765f4d; font-size: .75rem; font-weight: 750; transition: background .18s ease, color .18s ease; }
   .login-password-toggle:hover { background: #f7eee1; color: var(--ink); }
@@ -1917,6 +1924,38 @@ body {
 .settings-field { display: grid; gap: .42rem; color: #624f3e; font-size: .72rem; font-weight: 750; }
 .settings-field small { color: var(--ink-soft); font-size: .68rem; font-weight: 500; line-height: 1.45; }
 .settings-field--compact { width: min(16rem, 100%); }
+.settings-field--spaced, .settings-fields-spaced, .settings-toggle-stack { margin-top: 1rem; }
+.settings-toggle-stack { display: grid; }
+.settings-editor-list { display: grid; gap: .7rem; }
+.settings-inline-card { position: relative; padding: .9rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
+.settings-inline-card--row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(8rem, .6fr) auto; gap: .75rem; align-items: end; }
+.settings-inline-card__actions { display: flex; justify-content: flex-end; margin-top: .65rem; }
+.settings-inline-card__actions button, .settings-remove-button { color: rgb(var(--dd-signal-red)); font-size: .7rem; font-weight: 750; }
+.settings-remove-button { min-height: 2.55rem; padding: 0 .7rem; border: 1px solid rgba(var(--dd-signal-red), .22); border-radius: .55rem; }
+.settings-quota-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.settings-quota-card { display: grid; grid-template-columns: 6rem repeat(3, minmax(0, 1fr)); gap: .75rem; align-items: end; padding: .9rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
+.settings-quota-card > strong { align-self: center; color: var(--ink); font-size: .78rem; }
+.settings-test-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; }
+.settings-service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.settings-service-card { display: grid; gap: .25rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); color: var(--ink); transition: border-color .16s ease, transform .16s ease; }
+.settings-service-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.settings-service-card strong { font-size: .8rem; }
+.settings-service-card span { color: var(--ink-soft); font-size: .7rem; }
+.settings-oauth-list { display: grid; gap: .8rem; }
+.settings-oauth-card { padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--surface); }
+.settings-oauth-card > summary { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 2rem; cursor: pointer; list-style: none; }
+.settings-oauth-card > summary::-webkit-details-marker { display: none; }
+.settings-oauth-card > summary div { display: grid; gap: .15rem; }
+.settings-oauth-card > summary > span { color: var(--accent-strong); font-size: .72rem; font-weight: 700; }
+.settings-oauth-card[open] > summary { padding-bottom: .85rem; margin-bottom: .85rem; border-bottom: 1px solid var(--line); }
+.settings-oauth-card > summary strong, .settings-source-policy strong { color: var(--ink); font-size: .8rem; }
+.settings-oauth-card > summary small { color: var(--ink-soft); font-size: .68rem; }
+.settings-source-quotas { margin-top: .8rem; border-top: 1px solid var(--line); padding-top: .8rem; }
+.settings-source-quotas > summary { color: var(--accent-strong); cursor: pointer; font-size: .74rem; font-weight: 700; }
+.settings-source-quotas[open] > summary { margin-bottom: .8rem; }
+.settings-toggle-stack--compact { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.settings-toggle-stack--compact .settings-toggle-row { min-height: 3rem; }
+.settings-source-policy { display: grid; gap: .8rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 .settings-status-list { display: grid; gap: 0; border-top: 1px solid rgba(232,217,198,.75); }
 .settings-status-list div { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 1rem; padding: .7rem 0; border-bottom: 1px solid rgba(232,217,198,.7); }
 .settings-status-list dt { color: var(--ink-soft); font-size: .72rem; }
@@ -2098,6 +2137,11 @@ body {
   .usage-filter-actions { grid-column: span 2; }
   .settings-section__with-control { align-items: flex-start; }
   .settings-form-grid, .settings-form-grid--agreement, .settings-form-grid--three, .settings-form-grid--four { grid-template-columns: 1fr; }
+	.settings-quota-grid { grid-template-columns: 1fr; }
+	.settings-quota-card { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+	.settings-quota-card > strong { grid-column: 1 / -1; }
+	.settings-inline-card--row { grid-template-columns: 1fr 1fr; }
+	.settings-inline-card--row .settings-remove-button { grid-column: 1 / -1; }
   .studio-topbar { min-height: 4.25rem; }
   .studio-keybar { max-width: none; margin-bottom: .75rem; }
   .studio-composer textarea { min-height: 13rem; }
@@ -2128,8 +2172,13 @@ body {
   .agreement-dialog__actions { grid-template-columns: 1fr; }
   .legal-shell { padding: .75rem; }
   .legal-document { padding: 1.4rem 1.15rem; }
-  .settings-nav { grid-template-columns: 1fr; }
-  .settings-nav button { min-height: auto; }
+	.settings-nav { display: flex; width: 100%; overflow-x: auto; padding: .35rem; scroll-snap-type: x proximity; scrollbar-width: none; }
+	.settings-nav::-webkit-scrollbar { display: none; }
+	.settings-nav button { min-width: 7.6rem; min-height: 3.5rem; flex: 0 0 auto; scroll-snap-align: start; }
+	.settings-nav span { display: none; }
+	.settings-test-row, .settings-service-grid, .settings-quota-card, .settings-inline-card--row { grid-template-columns: 1fr; }
+	.settings-toggle-stack--compact { grid-template-columns: 1fr; gap: 0; }
+	.settings-quota-card > strong, .settings-inline-card--row .settings-remove-button { grid-column: auto; }
   .settings-section { padding: 1rem; }
   .settings-section__with-control { display: grid; }
   .settings-toggle-row--small { justify-content: flex-start; }

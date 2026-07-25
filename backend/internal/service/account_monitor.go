@@ -22,14 +22,15 @@ import (
 // freshness plus HTTPS transport, and Agent Identity accounts authenticate
 // against the signed Codex usage endpoint before the transport check.
 type AccountMonitor struct {
-	db      *gorm.DB
-	cfg     *config.Config
-	policy  *RuntimePolicyService
-	alerts  *AlertService
-	oauth   *oauth.Manager
-	quota   *AccountQuotaService
-	started sync.Once
-	running atomic.Bool
+	db       *gorm.DB
+	cfg      *config.Config
+	policy   *RuntimePolicyService
+	alerts   *AlertService
+	oauth    *oauth.Manager
+	quota    *AccountQuotaService
+	settings *SystemSettingsService
+	started  sync.Once
+	running  atomic.Bool
 }
 
 func NewAccountMonitor(db *gorm.DB, cfg *config.Config) *AccountMonitor {
@@ -44,13 +45,31 @@ func (m *AccountMonitor) SetAlertService(alerts *AlertService) { m.alerts = aler
 
 func (m *AccountMonitor) SetOAuthManager(manager *oauth.Manager) { m.oauth = manager }
 
-func (m *AccountMonitor) SetQuotaService(quota *AccountQuotaService) { m.quota = quota }
+func (m *AccountMonitor) SetQuotaService(quota *AccountQuotaService)        { m.quota = quota }
+func (m *AccountMonitor) SetSystemSettings(settings *SystemSettingsService) { m.settings = settings }
+
+func (m *AccountMonitor) enabled() bool {
+	if m == nil || m.settings == nil {
+		return true
+	}
+	settings, err := m.settings.Get()
+	return err != nil || settings.Features.ChannelMonitorEnabled
+}
 
 func (m *AccountMonitor) runtimePolicy() GatewayRuntimePolicy {
 	if m != nil && m.policy != nil {
 		return m.policy.Current()
 	}
 	return DefaultGatewayRuntimePolicy()
+}
+
+func (m *AccountMonitor) monitorInterval() time.Duration {
+	if m != nil && m.settings != nil {
+		if settings, err := m.settings.Get(); err == nil && settings.Features.ChannelMonitorIntervalSeconds >= 15 {
+			return time.Duration(settings.Features.ChannelMonitorIntervalSeconds) * time.Second
+		}
+	}
+	return m.runtimePolicy().ProbeInterval()
 }
 
 func (m *AccountMonitor) Start() {
@@ -61,7 +80,7 @@ func (m *AccountMonitor) Start() {
 		go func() {
 			m.Trigger()
 			for {
-				timer := time.NewTimer(m.runtimePolicy().ProbeInterval())
+				timer := time.NewTimer(m.monitorInterval())
 				<-timer.C
 				m.Trigger()
 			}
@@ -72,7 +91,7 @@ func (m *AccountMonitor) Start() {
 // Trigger starts one full pass if another one is not already in progress.
 // It returns false when a running pass already owns the account set.
 func (m *AccountMonitor) Trigger() bool {
-	if m == nil || m.db == nil || !m.running.CompareAndSwap(false, true) {
+	if m == nil || m.db == nil || !m.enabled() || !m.running.CompareAndSwap(false, true) {
 		return false
 	}
 	go func() {

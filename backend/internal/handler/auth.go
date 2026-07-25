@@ -5,9 +5,12 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -22,11 +25,12 @@ import (
 )
 
 const (
-	maxLoginFailures        = 5
-	lockoutDuration         = 15 * time.Minute
-	codeTTL                 = 10 * time.Minute
-	codeCooldown            = time.Minute
-	registrationCodePurpose = "register"
+	maxLoginFailures         = 5
+	lockoutDuration          = 15 * time.Minute
+	codeTTL                  = 10 * time.Minute
+	codeCooldown             = time.Minute
+	registrationCodePurpose  = "register"
+	passwordResetCodePurpose = "password_reset"
 )
 
 type loginAttempt struct {
@@ -82,10 +86,11 @@ func (h *AuthHandler) clearFailures(email string) {
 }
 
 type credentials struct {
-	Email         string `json:"email" binding:"required,email"`
-	Password      string `json:"password" binding:"required,min=8,max=72"`
-	TOTPCode      string `json:"totp_code"`
-	TermsRevision string `json:"terms_revision"`
+	Email          string `json:"email" binding:"required,email"`
+	Password       string `json:"password" binding:"required,min=8,max=72"`
+	TOTPCode       string `json:"totp_code"`
+	TermsRevision  string `json:"terms_revision"`
+	TurnstileToken string `json:"turnstile_token"`
 }
 
 type registrationCredentials struct {
@@ -93,14 +98,54 @@ type registrationCredentials struct {
 	// Code is enforced in Register only while SMTP is configured; without a
 	// mailer there is no way to receive one, so registration falls back to
 	// plain email+password instead of locking everyone out.
-	Code          string `json:"code"`
-	Password      string `json:"password" binding:"required,min=8,max=72"`
-	TermsRevision string `json:"terms_revision"`
-	ReferralCode  string `json:"referral_code"`
+	Code           string `json:"code"`
+	Password       string `json:"password" binding:"required,min=8,max=72"`
+	TermsRevision  string `json:"terms_revision"`
+	ReferralCode   string `json:"referral_code"`
+	TurnstileToken string `json:"turnstile_token"`
 }
 
 type emailAddress struct {
-	Email string `json:"email" binding:"required,email"`
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
+func (h *AuthHandler) verifyTurnstile(c *gin.Context, token string) bool {
+	settings, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load bot protection settings failed")
+		return false
+	}
+	if !settings.Security.TurnstileEnabled {
+		return true
+	}
+	secret, err := h.settings.Secret(service.SecretTurnstile)
+	if err != nil || strings.TrimSpace(secret) == "" {
+		util.Fail(c, http.StatusServiceUnavailable, "Turnstile is enabled but not completely configured")
+		return false
+	}
+	if strings.TrimSpace(token) == "" {
+		util.Fail(c, http.StatusBadRequest, "bot verification is required")
+		return false
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	response, err := client.PostForm("https://challenges.cloudflare.com/turnstile/v0/siteverify", url.Values{
+		"secret": {secret}, "response": {strings.TrimSpace(token)}, "remoteip": {c.ClientIP()},
+	})
+	if err != nil {
+		util.Fail(c, http.StatusBadGateway, "bot verification service is unavailable")
+		return false
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 16<<10))
+	var result struct {
+		Success bool `json:"success"`
+	}
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &result) != nil || !result.Success {
+		util.Fail(c, http.StatusForbidden, "bot verification failed")
+		return false
+	}
+	return true
 }
 
 func normalizedEmail(email string) string {
@@ -134,8 +179,12 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "load registration settings failed")
 		return
 	}
-	if !settings.AllowRegister {
+	if !settings.AllowRegister || settings.SiteCustomization.BackendModeEnabled {
 		util.Fail(c, http.StatusForbidden, "registration is disabled")
+		return
+	}
+	if !settings.Security.EmailVerificationEnabled {
+		util.Fail(c, http.StatusForbidden, "registration email verification is disabled")
 		return
 	}
 	if h.mailer == nil || !h.mailer.Configured() {
@@ -145,6 +194,9 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 	var req emailAddress
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.Fail(c, http.StatusBadRequest, "a valid email is required")
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
 		return
 	}
 	email := normalizedEmail(req.Email)
@@ -189,19 +241,128 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 	util.OK(c, gin.H{"expires_in": int(codeTTL.Seconds()), "resend_after": int(codeCooldown.Seconds())})
 }
 
+func (h *AuthHandler) SendPasswordResetCode(c *gin.Context) {
+	settings, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load password reset settings failed")
+		return
+	}
+	if !settings.Security.PasswordResetEnabled {
+		util.Fail(c, http.StatusForbidden, "password reset is disabled")
+		return
+	}
+	if h.mailer == nil || !h.mailer.Configured() {
+		util.Fail(c, http.StatusServiceUnavailable, "email service is not configured")
+		return
+	}
+	var req emailAddress
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.Fail(c, http.StatusBadRequest, "a valid email is required")
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
+		return
+	}
+	email := normalizedEmail(req.Email)
+	var user model.User
+	if err := h.db.Where("email = ? AND status = ?", email, model.StatusActive).First(&user).Error; err != nil {
+		util.OK(c, gin.H{"accepted": true, "resend_after": int(codeCooldown.Seconds())})
+		return
+	}
+	now := time.Now()
+	var latest model.EmailVerification
+	if err := h.db.Where("email = ? AND purpose = ?", email, passwordResetCodePurpose).Order("id DESC").First(&latest).Error; err == nil && now.Sub(latest.CreatedAt) < codeCooldown {
+		util.Fail(c, http.StatusTooManyRequests, "please wait before requesting another code")
+		return
+	}
+	code, err := newVerificationCode()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "generate verification code failed")
+		return
+	}
+	record := model.EmailVerification{Email: email, Purpose: passwordResetCodePurpose, CodeHash: h.verificationHash(email, passwordResetCodePurpose, code), ExpiresAt: now.Add(codeTTL)}
+	if err := h.db.Create(&record).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "save verification code failed")
+		return
+	}
+	var sendErr error
+	if resetMailer, ok := h.mailer.(service.PasswordResetMailer); ok {
+		sendErr = resetMailer.SendPasswordResetCode(email, code)
+	} else {
+		sendErr = h.mailer.SendRegistrationCode(email, code)
+	}
+	if sendErr != nil {
+		h.db.Delete(&model.EmailVerification{}, record.ID)
+		util.Fail(c, http.StatusBadGateway, "send password reset email failed")
+		return
+	}
+	util.OK(c, gin.H{"accepted": true, "expires_in": int(codeTTL.Seconds()), "resend_after": int(codeCooldown.Seconds())})
+}
+
+func (h *AuthHandler) ResetPassword(c *gin.Context) {
+	settings, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load password reset settings failed")
+		return
+	}
+	if !settings.Security.PasswordResetEnabled {
+		util.Fail(c, http.StatusForbidden, "password reset is disabled")
+		return
+	}
+	var req struct {
+		Email          string `json:"email" binding:"required,email"`
+		Code           string `json:"code" binding:"required,len=6"`
+		Password       string `json:"password" binding:"required,min=8,max=72"`
+		TurnstileToken string `json:"turnstile_token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.Fail(c, http.StatusBadRequest, "email, 6-digit code and new password are required")
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
+		return
+	}
+	email := normalizedEmail(req.Email)
+	hash, err := util.HashPassword(req.Password)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "hash password failed")
+		return
+	}
+	now := time.Now()
+	err = h.db.Transaction(func(tx *gorm.DB) error {
+		var verification model.EmailVerification
+		if err := tx.Where("email = ? AND purpose = ? AND code_hash = ? AND used_at IS NULL AND expires_at > ?", email, passwordResetCodePurpose, h.verificationHash(email, passwordResetCodePurpose, strings.TrimSpace(req.Code)), now).Order("id DESC").First(&verification).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&model.User{}).Where("email = ? AND status = ?", email, model.StatusActive).Updates(map[string]any{"password_hash": hash, "token_version": gorm.Expr("token_version + 1")})
+		if result.Error != nil || result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&model.EmailVerification{}).Where("id = ? AND used_at IS NULL", verification.ID).Update("used_at", now).Error
+	})
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid or expired password reset code")
+		return
+	}
+	util.OK(c, gin.H{"reset": true})
+}
+
 func (h *AuthHandler) Register(c *gin.Context) {
 	settings, err := h.settings.Get()
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "load registration settings failed")
 		return
 	}
-	if !settings.AllowRegister {
+	if !settings.AllowRegister || settings.SiteCustomization.BackendModeEnabled {
 		util.Fail(c, http.StatusForbidden, "registration is disabled")
 		return
 	}
 	var req registrationCredentials
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.Fail(c, http.StatusBadRequest, "email, verification code and password (>=8 chars) are required")
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
 		return
 	}
 	email := normalizedEmail(req.Email)
@@ -214,10 +375,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		util.Fail(c, http.StatusForbidden, "latest terms must be accepted")
 		return
 	}
-	// Email verification is only enforceable when a mailer can actually send
-	// codes. Without SMTP the flow degrades to email+password so a fresh
-	// deployment is still usable; the account is marked unverified.
-	verifyEmail := h.mailer != nil && h.mailer.Configured()
+	if settings.Security.EmailVerificationEnabled && (h.mailer == nil || !h.mailer.Configured()) {
+		util.Fail(c, http.StatusServiceUnavailable, "email verification is enabled but SMTP is not configured")
+		return
+	}
+	verifyEmail := settings.Security.EmailVerificationEnabled && h.mailer != nil && h.mailer.Configured()
 	if verifyEmail && len(code) != 6 {
 		util.Fail(c, http.StatusBadRequest, "verification code must be 6 digits")
 		return
@@ -248,7 +410,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			return fmt.Errorf("email already registered")
 		}
 		var referral *model.ReferralCode
-		if referralText := normalizeReferralCode(req.ReferralCode); referralText != "" {
+		if referralText := normalizeReferralCode(req.ReferralCode); settings.Features.ReferralEnabled && referralText != "" {
 			var item model.ReferralCode
 			if err := tx.Where("code = ? AND status = ?", referralText, model.StatusActive).First(&item).Error; err != nil {
 				return fmt.Errorf("invalid referral code")
@@ -260,14 +422,54 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			referral = &item
 		}
 		acceptedAt := now
+		balance, concurrency, rpm := settings.UserDefaults.BalanceMicro, settings.UserDefaults.Concurrency, settings.UserDefaults.RPMLimit
+		quotas, subscriptions := settings.UserDefaults.PlatformQuotas, settings.UserDefaults.DefaultSubscriptions
+		if source, ok := settings.UserDefaults.AuthSourceDefaults["email"]; ok && source.Enabled && source.GrantOnSignup {
+			balance, concurrency, rpm = source.BalanceMicro, source.Concurrency, source.RPMLimit
+			if len(source.PlatformQuotas) > 0 {
+				quotas = source.PlatformQuotas
+			}
+			if len(source.DefaultSubscriptions) > 0 {
+				subscriptions = source.DefaultSubscriptions
+			}
+		}
 		user = model.User{
 			Email: email, EmailVerified: verifyEmail, PasswordHash: hash,
 			Role: model.RoleUser, Status: model.StatusActive,
-			BalanceMicro: settings.InitBalanceMicro, RateMultiplier: 1,
+			BalanceMicro: balance, RateMultiplier: 1,
+			Concurrency: concurrency, RPMLimit: int64(rpm),
 			TermsRevision: settings.LoginAgreement.Revision(), TermsAcceptedAt: &acceptedAt,
 		}
 		if err := tx.Create(&user).Error; err != nil {
 			return err
+		}
+		for platform, quota := range quotas {
+			if quota.DailyMicro == 0 && quota.WeeklyMicro == 0 && quota.MonthlyMicro == 0 {
+				continue
+			}
+			item := model.UserPlatformQuota{
+				UserID: user.ID, Platform: strings.ToLower(strings.TrimSpace(platform)),
+				DailyMicro: quota.DailyMicro, WeeklyMicro: quota.WeeklyMicro, MonthlyMicro: quota.MonthlyMicro,
+			}
+			if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
+		}
+		for _, subscription := range subscriptions {
+			var count int64
+			if err := tx.Model(&model.Group{}).Where("id = ? AND status = ?", subscription.GroupID, model.StatusActive).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return fmt.Errorf("default subscription group %d is unavailable", subscription.GroupID)
+			}
+			item := model.UserGroupSubscription{
+				UserID: user.ID, GroupID: subscription.GroupID,
+				ExpiresAt: now.AddDate(0, 0, subscription.ValidityDays),
+			}
+			if err := tx.Create(&item).Error; err != nil {
+				return err
+			}
 		}
 		if referral != nil {
 			binding := model.ReferralBinding{
@@ -311,6 +513,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req credentials
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.Fail(c, http.StatusBadRequest, "invalid request")
+		return
+	}
+	if !h.verifyTurnstile(c, req.TurnstileToken) {
 		return
 	}
 	email := normalizedEmail(req.Email)
@@ -365,10 +570,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 }
 
 func (h *AuthHandler) issueToken(c *gin.Context, user *model.User) {
+	fingerprint := ""
+	if settings, err := h.settings.Get(); err == nil && settings.Security.SessionBindingEnabled {
+		fingerprint = util.SessionFingerprint(h.cfg.JWT.Secret, c.ClientIP()+"\x00"+c.Request.UserAgent())
+	}
 	token, err := util.SignJWTBound(
 		h.cfg.JWT.Secret, user.ID, user.Role, user.TokenVersion,
 		time.Duration(h.cfg.JWT.ExpireHour)*time.Hour,
-		util.SessionFingerprint(h.cfg.JWT.Secret, c.Request.UserAgent()), user.TOTPEnabled,
+		fingerprint, user.TOTPEnabled,
 	)
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "sign token failed")
@@ -384,13 +593,49 @@ func (h *AuthHandler) PublicSettings(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "load public settings failed")
 		return
 	}
+	oauthProviders := make([]gin.H, 0, 6)
+	for _, item := range []struct {
+		ID     string
+		Config service.OAuthProviderSettings
+	}{
+		{"linuxdo", settings.AuthProviders.LinuxDO}, {"dingtalk", settings.AuthProviders.DingTalk}, {"wechat", settings.AuthProviders.WeChat},
+		{"oidc", settings.AuthProviders.OIDC}, {"github", settings.AuthProviders.GitHub}, {"google", settings.AuthProviders.Google},
+	} {
+		if item.Config.Enabled {
+			oauthProviders = append(oauthProviders, gin.H{"id": item.ID, "name": item.Config.ProviderName})
+		}
+	}
 	util.OK(c, gin.H{
 		"site_name":               settings.SiteName,
 		"site_subtitle":           settings.SiteSubtitle,
-		"allow_register":          settings.AllowRegister,
+		"allow_register":          settings.AllowRegister && !settings.SiteCustomization.BackendModeEnabled,
 		"key_multi_group_enabled": settings.KeyMultiGroupEnabled,
 		// Verification is only demanded when the deployment can send codes.
-		"registration_verification": h.mailer != nil && h.mailer.Configured(),
+		"registration_verification": settings.Security.EmailVerificationEnabled && h.mailer != nil && h.mailer.Configured(),
+		"oauth_providers":           oauthProviders,
+		"site_customization": gin.H{
+			"logo_url":                settings.SiteCustomization.LogoURL,
+			"contact_info":            settings.SiteCustomization.ContactInfo,
+			"docs_url":                settings.SiteCustomization.DocsURL,
+			"home_content":            settings.SiteCustomization.HomeContent,
+			"backend_mode_enabled":    settings.SiteCustomization.BackendModeEnabled,
+			"hide_ccs_import_button":  settings.SiteCustomization.HideCCSImportButton,
+			"table_default_page_size": settings.SiteCustomization.TableDefaultPageSize,
+			"table_page_size_options": settings.SiteCustomization.TablePageSizeOptions,
+			"custom_menu_items":       settings.SiteCustomization.CustomMenuItems,
+			"custom_endpoints":        settings.SiteCustomization.CustomEndpoints,
+		},
+		"features": gin.H{
+			"model_plaza_enabled":            settings.Features.ModelPlazaEnabled,
+			"referral_enabled":               settings.Features.ReferralEnabled,
+			"allow_user_view_error_requests": settings.Features.AllowUserViewErrorRequests,
+		},
+		"security": gin.H{
+			"password_reset_enabled": settings.Security.PasswordResetEnabled,
+			"totp_enabled":           settings.Security.TOTPEnabled,
+			"turnstile_enabled":      settings.Security.TurnstileEnabled,
+			"turnstile_site_key":     settings.Security.TurnstileSiteKey,
+		},
 		"login_agreement": gin.H{
 			"enabled":    settings.LoginAgreement.Enabled,
 			"mode":       settings.LoginAgreement.Mode,

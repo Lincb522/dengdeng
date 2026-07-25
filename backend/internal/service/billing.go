@@ -16,16 +16,18 @@ import (
 // deduction. Balance may go negative on an in-flight request; the gateway
 // blocks new requests once balance <= 0.
 type BillingService struct {
-	db      *gorm.DB
-	pricing *PricingService
-	geo     *IPGeoResolver
+	db       *gorm.DB
+	pricing  *PricingService
+	geo      *IPGeoResolver
+	settings *SystemSettingsService
 }
 
 func NewBillingService(db *gorm.DB, pricing *PricingService) *BillingService {
 	return &BillingService{db: db, pricing: pricing}
 }
 
-func (s *BillingService) SetIPGeoResolver(resolver *IPGeoResolver) { s.geo = resolver }
+func (s *BillingService) SetIPGeoResolver(resolver *IPGeoResolver)          { s.geo = resolver }
+func (s *BillingService) SetSystemSettings(settings *SystemSettingsService) { s.settings = settings }
 
 type BillContext struct {
 	RequestID       string
@@ -61,6 +63,11 @@ type BillContext struct {
 }
 
 func (s *BillingService) Record(bc BillContext) {
+	referralsEnabled := true
+	if s.settings != nil {
+		settings, err := s.settings.Get()
+		referralsEnabled = err == nil && settings.Features.ReferralEnabled
+	}
 	breakdown := s.pricing.Breakdown(bc.Model, bc.Usage, bc.Rates)
 	cost := breakdown.TotalMicro
 	entry := model.UsageLog{
@@ -128,7 +135,7 @@ func (s *BillingService) Record(bc BillContext) {
 				log.Printf("[billing] ops error sidecar unavailable for request %s: %v", entry.RequestID, err)
 			}
 		}
-		if cost > 0 && !bc.SkipBalance {
+		if referralsEnabled && cost > 0 && !bc.SkipBalance {
 			if err := tx.Model(&model.User{}).Where("id = ?", bc.UserID).
 				Update("balance_micro", gorm.Expr("balance_micro - ?", cost)).Error; err != nil {
 				return err

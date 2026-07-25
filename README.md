@@ -38,6 +38,7 @@
 - [部署手册](docs/DEPLOYMENT.md)：Docker、二进制、Nginx、备份和回滚
 - [架构说明](docs/ARCHITECTURE.md)：请求如何经过网关、调度器和结算模块
 - [Agent Identity](docs/AGENT_IDENTITY.md)：身份文件、Task 注册、请求签名与失效恢复
+- [系统设置](docs/SYSTEM_SETTINGS.md)：站点、认证、邮件、用户默认值、风控和网关策略
 - [更新记录](CHANGELOG.md)：重要功能、兼容性修复和升级说明
 - [开发说明](CONTRIBUTING.md)：本地环境、测试和提交要求
 - [安全说明](SECURITY.md)：凭据边界、上线检查和漏洞反馈

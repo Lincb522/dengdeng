@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api, downloadFile, withToast } from '../api/client'
 import type { UsageLog } from '../api/types'
 import UsageTable from '../components/UsageTable.vue'
 import Pagination from '../components/Pagination.vue'
+import { useAuth } from '../stores/auth'
+
+const auth = useAuth()
 
 const items = ref<UsageLog[]>([])
 const total = ref(0)
 const page = ref(1)
-const size = 20
+const size = computed(() => auth.siteCustomization.table_default_page_size || 20)
 const modelFilter = ref('')
 const requestIDFilter = ref('')
 
@@ -16,7 +19,7 @@ function params(withPagination = true) {
   const q = new URLSearchParams()
   if (withPagination) {
     q.set('page', String(page.value))
-    q.set('size', String(size))
+		q.set('size', String(size.value))
   }
   if (modelFilter.value.trim()) q.set('model', modelFilter.value.trim())
   if (requestIDFilter.value.trim()) q.set('request_id', requestIDFilter.value.trim())
