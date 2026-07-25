@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { UsageLog } from '../api/types'
 import { formatTokens } from '../api/types'
 import { copyText } from '../api/client'
@@ -6,9 +7,69 @@ import { reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 
-defineProps<{ items: UsageLog[]; showUser?: boolean }>()
+const props = defineProps<{ items: UsageLog[]; showUser?: boolean }>()
 
 const toast = useToast()
+const tableRegion = ref<HTMLElement | null>(null)
+const tableViewport = ref<HTMLElement | null>(null)
+const tableElement = ref<HTMLTableElement | null>(null)
+const floatingScrollbar = ref<HTMLElement | null>(null)
+const scrollWidth = ref(0)
+const hasHorizontalOverflow = ref(false)
+const regionIsVisible = ref(false)
+let resizeObserver: ResizeObserver | null = null
+let intersectionObserver: IntersectionObserver | null = null
+
+function updateScrollMetrics() {
+	const viewport = tableViewport.value
+	const table = tableElement.value
+	if (!viewport || !table) return
+
+	scrollWidth.value = Math.max(viewport.scrollWidth, table.scrollWidth)
+	hasHorizontalOverflow.value = scrollWidth.value > viewport.clientWidth + 1
+
+	if (floatingScrollbar.value && Math.abs(floatingScrollbar.value.scrollLeft - viewport.scrollLeft) > 1) {
+		floatingScrollbar.value.scrollLeft = viewport.scrollLeft
+	}
+}
+
+function syncHorizontalScroll(source: HTMLElement | null, target: HTMLElement | null) {
+	if (!source || !target || Math.abs(source.scrollLeft - target.scrollLeft) <= 1) return
+	target.scrollLeft = source.scrollLeft
+}
+
+function syncFromTable() {
+	syncHorizontalScroll(tableViewport.value, floatingScrollbar.value)
+}
+
+function syncFromFloatingScrollbar() {
+	syncHorizontalScroll(floatingScrollbar.value, tableViewport.value)
+}
+
+onMounted(async () => {
+	await nextTick()
+	updateScrollMetrics()
+
+	resizeObserver = new ResizeObserver(updateScrollMetrics)
+	if (tableViewport.value) resizeObserver.observe(tableViewport.value)
+	if (tableElement.value) resizeObserver.observe(tableElement.value)
+
+	intersectionObserver = new IntersectionObserver(([entry]) => {
+		regionIsVisible.value = entry?.isIntersecting ?? false
+	})
+	if (tableRegion.value) intersectionObserver.observe(tableRegion.value)
+})
+
+onBeforeUnmount(() => {
+	resizeObserver?.disconnect()
+	intersectionObserver?.disconnect()
+})
+
+watch(
+	() => [props.items, props.showUser],
+	() => nextTick(updateScrollMetrics),
+	{ deep: true },
+)
 
 async function copyRequestID(id: string) {
 	try {
@@ -27,8 +88,9 @@ function formatLatency(milliseconds: number) {
 </script>
 
 <template>
-  <div class="card overflow-x-auto">
-    <table v-responsive-table class="table-base">
+  <div ref="tableRegion" class="usage-table-region">
+    <div ref="tableViewport" class="card usage-table-scroll" @scroll.passive="syncFromTable">
+      <table ref="tableElement" v-responsive-table class="table-base">
       <thead>
         <tr>
           <th>时间</th>
@@ -96,6 +158,17 @@ function formatLatency(milliseconds: number) {
 				<td :colspan="showUser ? 15 : 14" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
         </tr>
       </tbody>
-    </table>
+      </table>
+    </div>
+    <div
+			v-show="hasHorizontalOverflow && regionIsVisible"
+			ref="floatingScrollbar"
+			class="usage-table-floating-scroll"
+			tabindex="0"
+			aria-label="用量明细横向滚动"
+			@scroll.passive="syncFromFloatingScrollbar"
+		>
+			<div class="usage-table-floating-scroll-spacer" :style="{ width: `${scrollWidth}px` }" />
+		</div>
   </div>
 </template>

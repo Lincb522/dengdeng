@@ -861,6 +861,38 @@ body {
   .table-base tbody tr {
     @apply transition-colors hover:bg-amber/5;
   }
+	.usage-table-region {
+		position: relative;
+		min-width: 0;
+		max-width: 100%;
+	}
+	.usage-table-scroll {
+		overflow-x: auto;
+		overflow-y: hidden;
+	}
+	.usage-table-floating-scroll {
+		position: sticky;
+		bottom: .5rem;
+		z-index: 20;
+		width: calc(100% - 2px);
+		height: 1rem;
+		margin: .35rem 1px 0;
+		overflow-x: auto;
+		overflow-y: hidden;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--surface) 92%, transparent);
+		box-shadow: 0 0 0 1px var(--line), 0 4px 14px rgba(34, 24, 14, .12);
+		scrollbar-color: var(--ink-soft) transparent;
+		scrollbar-width: auto;
+		backdrop-filter: blur(8px);
+	}
+	.usage-table-floating-scroll:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+	}
+	.usage-table-floating-scroll-spacer {
+		height: 1px;
+	}
   .tag {
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
 		max-width: none;
@@ -2280,6 +2312,7 @@ body {
 }
 
 @media (max-width: 767px) {
+	.usage-table-floating-scroll { display: none !important; }
 	.payment-tabs { width: 100%; }
 	.payment-tabs button { flex: 1 0 auto; }
 	.payment-cashflow { grid-template-columns: minmax(0, 1fr); }
