@@ -1009,6 +1009,15 @@ body {
 		white-space: nowrap;
 	}
 	.usage-model-trigger > svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+	.usage-time {
+		display: grid;
+		gap: .18rem;
+		width: max-content;
+		font-variant-numeric: tabular-nums;
+		white-space: nowrap;
+	}
+	.usage-time strong { color: var(--ink); font-size: .7rem; font-weight: 760; line-height: 1.25; }
+	.usage-time small { color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .64rem; line-height: 1.25; }
 	.usage-cost-popover {
 		position: fixed;
 		z-index: 120;

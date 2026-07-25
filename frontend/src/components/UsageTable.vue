@@ -86,6 +86,17 @@ async function copyRequestID(id: string) {
 function billingModeLabel(mode?: string) {
 	return ({ usage: '按量', request: '按次', day: '按日', admin: '管理端', none: '未计费' } as Record<string, string>)[mode || ''] || '未记录'
 }
+
+const dateFormatter = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
+const timeFormatter = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+
+function usageDate(value: string) {
+	return dateFormatter.format(new Date(value))
+}
+
+function usageTime(value: string) {
+	return timeFormatter.format(new Date(value))
+}
 </script>
 
 <template>
@@ -109,7 +120,12 @@ function billingModeLabel(mode?: string) {
       </thead>
       <tbody>
         <tr v-for="l in items" :key="l.id">
-          <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(l.created_at).toLocaleString() }}</td>
+			<td>
+				<time class="usage-time" :datetime="l.created_at">
+					<strong>{{ usageDate(l.created_at) }}</strong>
+					<small>{{ usageTime(l.created_at) }}</small>
+				</time>
+			</td>
 			<td v-if="showUser"><UsageUserDetail :log="l" /></td>
 			<td><UsageModelDetail :log="l" :show-internal="showUser" /></td>
 			<td><UsageLocationDetail :log="l" /></td>
