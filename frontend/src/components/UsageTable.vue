@@ -83,11 +83,6 @@ async function copyRequestID(id: string) {
 	}
 }
 
-function endpointLabel(path?: string) {
-	const normalized = (path || '').replace(/\?.*$/, '').trim()
-	return normalized || '—'
-}
-
 function billingModeLabel(mode?: string) {
 	return ({ usage: '按量', request: '按次', day: '按日', admin: '管理端', none: '未计费' } as Record<string, string>)[mode || ''] || '未记录'
 }
@@ -101,9 +96,7 @@ function billingModeLabel(mode?: string) {
         <tr>
           <th>时间</th>
           <th v-if="showUser">用户</th>
-          <th>模型</th>
-			<th>入站端点</th>
-          <th>分组</th>
+			<th>分组 / 模型</th>
 			<th>请求地区</th>
 			<th>Token</th>
 				<th class="text-right">图片</th>
@@ -118,12 +111,7 @@ function billingModeLabel(mode?: string) {
         <tr v-for="l in items" :key="l.id">
           <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(l.created_at).toLocaleString() }}</td>
 			<td v-if="showUser"><UsageUserDetail :log="l" /></td>
-          <td><UsageModelDetail :log="l" /></td>
-			<td><code class="usage-endpoint" :title="l.request_path || '未记录入站端点'">{{ endpointLabel(l.request_path) }}</code></td>
-          <td>
-            <div class="text-xs text-slate-400">{{ l.group_name || '—' }}</div>
-            <div v-if="showUser && l.account_name" class="mt-0.5 text-[10px] text-slate-500">{{ l.account_name }}</div>
-          </td>
+			<td><UsageModelDetail :log="l" :show-internal="showUser" /></td>
 			<td><UsageLocationDetail :log="l" /></td>
 			<td><UsageTokenDetail :log="l" /></td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
@@ -139,7 +127,7 @@ function billingModeLabel(mode?: string) {
 			</td>
         </tr>
         <tr v-if="!items.length">
-				<td :colspan="showUser ? 13 : 12" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
+				<td :colspan="showUser ? 11 : 10" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
         </tr>
       </tbody>
       </table>

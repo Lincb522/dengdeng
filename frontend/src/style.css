@@ -973,14 +973,42 @@ body {
 	.usage-location-trigger path,
 	.usage-model-trigger circle,
 	.usage-model-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
-	.usage-model-trigger { max-width: 13rem; color: var(--ink); }
-	.usage-model-trigger small {
-		flex: 0 0 auto;
-		color: rgb(var(--dd-signal-cyan));
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: .58rem;
-		font-weight: 800;
+	.usage-model-trigger {
+		display: grid;
+		width: max-content;
+		max-width: none;
+		grid-template-columns: minmax(7rem, auto) auto;
+		grid-template-rows: auto auto;
+		gap: .1rem .42rem;
+		color: var(--ink);
+		text-align: left;
 	}
+	.usage-model-trigger .usage-model-summary {
+		display: grid;
+		grid-column: 1;
+		grid-row: 1 / span 2;
+		gap: .18rem;
+		width: max-content;
+		max-width: none;
+		overflow: visible;
+		text-overflow: clip;
+	}
+	.usage-model-summary strong {
+		color: var(--ink);
+		font-size: .72rem;
+		font-weight: 800;
+		line-height: 1.25;
+		white-space: nowrap;
+	}
+	.usage-model-trigger .usage-model-summary small {
+		color: var(--ink-soft);
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: .65rem;
+		font-weight: 700;
+		line-height: 1.25;
+		white-space: nowrap;
+	}
+	.usage-model-trigger > svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
 	.usage-cost-popover {
 		position: fixed;
 		z-index: 120;
@@ -1038,7 +1066,7 @@ body {
 	.usage-cost-summary dd.is-rate { color: rgb(var(--dd-signal-cyan)); }
 	.usage-cost-summary dd.is-total { color: rgb(var(--dd-signal-green)); font-weight: 850; }
 	.usage-location-popover { width: min(19rem, calc(100vw - 1.25rem)); }
-	.usage-model-popover { width: min(21rem, calc(100vw - 1.25rem)); }
+	.usage-model-popover { width: min(23rem, calc(100vw - 1.25rem)); }
 	.usage-location-lines {
 		display: grid;
 		gap: 1px;
@@ -1137,17 +1165,6 @@ body {
 		color: #a99a8c;
 		font-size: .62rem;
 		line-height: 1.45;
-	}
-	.usage-endpoint {
-		display: inline-flex;
-		width: max-content;
-		max-width: none;
-		border-radius: .38rem;
-		color: var(--ink-soft);
-		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-		font-size: .68rem;
-		font-weight: 720;
-		white-space: nowrap;
 	}
 	.usage-billing-mode {
 		display: inline-flex;
@@ -2639,8 +2656,8 @@ body {
 
 @media (max-width: 767px) {
 	.usage-table-floating-scroll { display: none !important; }
-	.usage-location-trigger,
-	.usage-model-trigger { max-width: 100%; }
+	.usage-location-trigger { max-width: 100%; }
+	.usage-model-trigger { max-width: none; }
 	.payment-tabs { width: 100%; }
 	.payment-tabs button { flex: 1 0 auto; }
 	.payment-cashflow { grid-template-columns: minmax(0, 1fr); }

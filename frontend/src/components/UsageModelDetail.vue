@@ -4,7 +4,7 @@ import type { UsageLog } from '../api/types'
 import { reasoningLabel } from '../api/reasoning'
 import { useAnchoredPopover } from '../composables/useAnchoredPopover'
 
-const props = defineProps<{ log: UsageLog }>()
+const props = defineProps<{ log: UsageLog; showInternal?: boolean }>()
 
 const { trigger, panel, open, panelStyle, clearCloseTimer, show, scheduleClose, togglePinned } = useAnchoredPopover('start')
 const tooltipID = `usage-model-${Math.random().toString(36).slice(2)}`
@@ -72,6 +72,7 @@ function protocolLabel(path?: string) {
 }
 
 const shortName = computed(() => modelShortName(props.log.model))
+const groupName = computed(() => (props.log.group_name || '').trim() || '未记录分组')
 </script>
 
 <template>
@@ -81,14 +82,17 @@ const shortName = computed(() => modelShortName(props.log.model))
 		class="usage-model-trigger"
 		:aria-expanded="open"
 		:aria-describedby="open ? tooltipID : undefined"
+		:aria-label="`路由与模型详情：${groupName}，${log.model || '未记录模型'}`"
 		@click.stop="togglePinned"
 		@mouseenter="show"
 		@mouseleave="scheduleClose"
 		@focus="show"
 		@blur="scheduleClose"
 	>
-		<span>{{ shortName }}</span>
-		<small v-if="log.stream">SSE</small>
+		<span class="usage-model-summary">
+			<strong>{{ groupName }}</strong>
+			<small>{{ log.model || '未记录模型' }}</small>
+		</span>
 		<svg aria-hidden="true" viewBox="0 0 20 20">
 			<circle cx="10" cy="10" r="7.25" />
 			<path d="M10 8.2v5M10 5.8h.01" />
@@ -108,11 +112,15 @@ const shortName = computed(() => modelShortName(props.log.model))
 				@mouseleave="scheduleClose"
 			>
 				<header>
-					<strong>模型详情</strong>
+					<strong>路由与模型</strong>
 					<span>{{ providerLabel(log.model, log.platform) }}</span>
 				</header>
 
 				<dl class="usage-location-lines usage-model-lines">
+					<div>
+						<dt>分组</dt>
+						<dd>{{ groupName }}</dd>
+					</div>
 					<div>
 						<dt>模型简称</dt>
 						<dd>{{ shortName }}</dd>
@@ -134,8 +142,20 @@ const shortName = computed(() => modelShortName(props.log.model))
 						<dd>{{ log.stream ? '是 · SSE' : '否' }}</dd>
 					</div>
 					<div>
-						<dt>请求接口</dt>
+						<dt>入站端点</dt>
+						<dd class="is-code">{{ log.request_path || '未记录' }}</dd>
+					</div>
+					<div>
+						<dt>接口协议</dt>
 						<dd>{{ protocolLabel(log.request_path) }}</dd>
+					</div>
+					<div v-if="showInternal">
+						<dt>上游账号</dt>
+						<dd>{{ log.account_name || '未记录' }}</dd>
+					</div>
+					<div v-if="showInternal">
+						<dt>路由编号</dt>
+						<dd class="is-code">分组 {{ log.group_id || '—' }} · 账号 {{ log.account_id || '—' }}</dd>
 					</div>
 				</dl>
 			</section>
