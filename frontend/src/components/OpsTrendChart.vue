@@ -4,6 +4,7 @@ import type { OpsTrend } from '../api/types'
 import { formatMoney, formatTokens } from '../api/types'
 
 const props = defineProps<{ items: OpsTrend[] }>()
+const emit = defineEmits<{ drilldown: [item: OpsTrend] }>()
 
 const W = 920
 const H = 292
@@ -121,6 +122,7 @@ const successRate = computed(() => totalRequests.value ? ((totalRequests.value -
           :aria-label="`${point.label}，${point.requests} 次请求，${point.error_requests} 次失败，${formatTokens(point.tokens)} Token`"
           @mouseenter="activeIndex = index"
           @focus="activeIndex = index"
+			@click="emit('drilldown', point)"
         />
       </svg>
     </div>

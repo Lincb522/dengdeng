@@ -1,22 +1,28 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, withToast } from '../../api/client'
-import type { Group, OpsAccountHealth, OpsRank, OpsSnapshot } from '../../api/types'
+import type { Group, OpsAccountHealth, OpsErrorLog, OpsRank, OpsSnapshot } from '../../api/types'
 import { formatMoney, formatTokens, PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
 import OpsTrendChart from '../../components/OpsTrendChart.vue'
 
 const snapshot = ref<OpsSnapshot | null>(null)
+const errors = ref<OpsErrorLog[]>([])
 const groups = ref<Group[]>([])
-const range = ref('24h')
-const platform = ref('')
-const groupID = ref('')
+const initialQuery = new URLSearchParams(window.location.search)
+const range = ref(initialQuery.get('range') || '24h')
+const platform = ref(initialQuery.get('platform') || '')
+const groupID = ref(initialQuery.get('group_id') || '')
 const autoRefresh = ref(true)
 const loading = ref(false)
 const loadError = ref('')
 const probingAll = ref(false)
 const probingAccountID = ref<number | null>(null)
+const refreshInterval = ref(30)
+const refreshRemaining = ref(30)
+const pageRoot = ref<HTMLElement | null>(null)
 let refreshTimer: number | undefined
+let countdownTimer: number | undefined
 
 const overview = computed(() => snapshot.value?.overview)
 const lastUpdated = computed(() => snapshot.value ? new Date(snapshot.value.generated_at).toLocaleString() : '—')
@@ -31,15 +37,33 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    const query = new URLSearchParams({ range: range.value })
+    const query = monitoringQuery()
     if (platform.value) query.set('platform', platform.value)
     if (groupID.value) query.set('group_id', groupID.value)
-    snapshot.value = normalizeSnapshot(await api.get<OpsSnapshot>(`/api/admin/ops/snapshot?${query}`))
+    const errorQuery = new URLSearchParams(query)
+    errorQuery.set('page', '1'); errorQuery.set('size', '20')
+    const [snapshotData, errorData] = await Promise.all([
+      api.get<OpsSnapshot>(`/api/admin/ops/snapshot?${query}`),
+      api.get<{ items: OpsErrorLog[] }>(`/api/admin/ops/errors?${errorQuery}`),
+    ])
+    snapshot.value = normalizeSnapshot(snapshotData)
+    errors.value = errorData.items || []
+    refreshRemaining.value = refreshInterval.value
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '暂时无法读取监控数据'
   } finally {
     loading.value = false
   }
+}
+
+function monitoringQuery() {
+  const query = new URLSearchParams({ range: ['1h', '24h', '7d', '30d'].includes(range.value) ? range.value : '24h' })
+  const durations: Record<string, number> = { '5m': 5 * 60_000, '30m': 30 * 60_000, '6h': 6 * 3_600_000 }
+  if (durations[range.value]) { const end = new Date(); query.set('start', new Date(end.getTime() - durations[range.value]).toISOString()); query.set('end', end.toISOString()) }
+  if (platform.value) query.set('platform', platform.value)
+  if (groupID.value) query.set('group_id', groupID.value)
+  const url = new URL(window.location.href); url.search = ''; url.searchParams.set('range', range.value); if (platform.value) url.searchParams.set('platform', platform.value); if (groupID.value) url.searchParams.set('group_id', groupID.value); window.history.replaceState({}, '', url)
+  return query
 }
 
 function resetGroupWhenPlatformChanges() {
@@ -50,6 +74,12 @@ function resetGroupWhenPlatformChanges() {
 function setRange(value: string) {
   range.value = value
 }
+
+function drilldown(item: { start: string; end: string }) { const query=new URLSearchParams({start:item.start,end:item.end});if(platform.value)query.set('platform',platform.value);if(groupID.value)query.set('group_id',groupID.value);window.location.href=`/admin/usage?${query}` }
+
+async function toggleFullscreen() { if (!document.fullscreenElement) await pageRoot.value?.requestFullscreen(); else await document.exitFullscreen() }
+
+async function resolveError(id: number) { await withToast(() => api.post(`/api/admin/ops/errors/${id}/resolve`, {}), '错误已标记处理'); await load() }
 
 function percent(value: number) {
   return `${(value || 0).toFixed(2)}%`
@@ -66,6 +96,8 @@ function formatBytes(value: number) {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
   return `${(value / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`
 }
+
+function barWidth(values: number[], value: number) { const max = Math.max(...values, 1); return `${value ? Math.max(2, value / max * 100) : 0}%` }
 
 function healthLabel(health: OpsAccountHealth['health']) {
   return { ready: '已验证', checking: '等待检测', stale: '检测过期', attention: '异常', cooling: '冷却中', disabled: '已停用' }[health]
@@ -141,7 +173,13 @@ function normalizeSnapshot(data: OpsSnapshot): OpsSnapshot {
     rate_profiles: Array.isArray(data.rate_profiles) ? data.rate_profiles : [],
     account_health: Array.isArray(data.account_health) ? data.account_health : [],
     recent_errors: Array.isArray(data.recent_errors) ? data.recent_errors : [],
-		scheduler_diagnostics: Array.isArray(data.scheduler_diagnostics) ? data.scheduler_diagnostics : [],
+    scheduler_diagnostics: Array.isArray(data.scheduler_diagnostics) ? data.scheduler_diagnostics : [],
+		latency_histogram: Array.isArray(data.latency_histogram) ? data.latency_histogram : [],
+		ttft_histogram: Array.isArray(data.ttft_histogram) ? data.ttft_histogram : [],
+		error_trend: Array.isArray(data.error_trend) ? data.error_trend : [],
+		status_distribution: Array.isArray(data.status_distribution) ? data.status_distribution : [],
+		system_history: Array.isArray(data.system_history) ? data.system_history : [],
+		job_heartbeats: Array.isArray(data.job_heartbeats) ? data.job_heartbeats : [],
     realtime: { ...realtime, last_minute: realtime.last_minute || emptyWindow, breakdown: Array.isArray(realtime.breakdown) ? realtime.breakdown : [] },
   }
 }
@@ -150,11 +188,14 @@ function setupTimer() {
   if (refreshTimer) window.clearInterval(refreshTimer)
   refreshTimer = window.setInterval(() => {
     if (autoRefresh.value && !loading.value) void load()
-  }, 30_000)
+  }, refreshInterval.value * 1000)
+	if (countdownTimer) window.clearInterval(countdownTimer)
+	countdownTimer = window.setInterval(() => { if (autoRefresh.value) refreshRemaining.value = refreshRemaining.value <= 1 ? refreshInterval.value : refreshRemaining.value - 1 }, 1000)
 }
 
 watch([range, platform, groupID], () => void load())
 watch(platform, resetGroupWhenPlatformChanges)
+watch(refreshInterval, () => { refreshRemaining.value = refreshInterval.value; setupTimer() })
 
 onMounted(async () => {
   groups.value = await api.get<Group[]>('/api/admin/groups')
@@ -163,11 +204,12 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   if (refreshTimer) window.clearInterval(refreshTimer)
+	if (countdownTimer) window.clearInterval(countdownTimer)
 })
 </script>
 
 <template>
-  <div class="ops-page">
+  <div ref="pageRoot" class="ops-page">
     <header class="console-page-head ops-page-head">
       <div>
         <div class="ops-eyebrow"><span></span> 运行监控</div>
@@ -177,8 +219,10 @@ onBeforeUnmount(() => {
       <div class="ops-page-actions">
         <label class="ops-auto-refresh">
           <input v-model="autoRefresh" type="checkbox" />
-          <span>30 秒刷新</span>
+          <span>{{ refreshRemaining }} 秒后刷新</span>
         </label>
+		<select v-model.number="refreshInterval" class="input !w-24 text-xs"><option :value="10">10 秒</option><option :value="30">30 秒</option><option :value="60">60 秒</option></select>
+		<button class="btn-ghost" @click="toggleFullscreen">全屏</button>
         <button class="btn-ghost" :disabled="probingAll" @click="triggerAllProbes">{{ probingAll ? '检测中…' : '检查全部账户' }}</button>
         <button class="btn-ghost" :disabled="loading" @click="load">{{ loading ? '更新中' : '刷新' }}</button>
       </div>
@@ -186,7 +230,7 @@ onBeforeUnmount(() => {
 
     <section class="ops-filterbar" aria-label="监控筛选">
       <div class="ops-range-tabs" role="tablist" aria-label="时间范围">
-        <button v-for="item in [{ value: '1h', label: '1 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' }, { value: '30d', label: '30 天' }]" :key="item.value" type="button" :class="{ 'is-active': range === item.value }" @click="setRange(item.value)">{{ item.label }}</button>
+        <button v-for="item in [{ value: '5m', label: '5 分钟' }, { value: '30m', label: '30 分钟' }, { value: '1h', label: '1 小时' }, { value: '6h', label: '6 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' }, { value: '30d', label: '30 天' }]" :key="item.value" type="button" :class="{ 'is-active': range === item.value }" @click="setRange(item.value)">{{ item.label }}</button>
       </div>
       <div class="ops-filter-selects">
         <select v-model="platform" class="input">
@@ -262,7 +306,7 @@ onBeforeUnmount(() => {
 		</section>
 
       <section class="ops-main-grid">
-        <OpsTrendChart :items="snapshot?.trend ?? []" />
+        <OpsTrendChart :items="snapshot?.trend ?? []" @drilldown="drilldown" />
         <aside class="ops-account-brief card">
           <div class="ops-section-title">
             <div><h3>账号池</h3><p>上游可用性</p></div>
@@ -282,6 +326,34 @@ onBeforeUnmount(() => {
           </div>
         </aside>
       </section>
+
+		<section class="ops-observability-grid" aria-label="延迟与吞吐">
+			<article class="card ops-observability-panel">
+				<div class="ops-section-title"><div><h3>响应延迟</h3><p>成功请求的总耗时与首字耗时分位数。</p></div></div>
+				<div class="ops-percentile-block"><div><span>总耗时</span><dl><div><dt>P50</dt><dd>{{ formatLatency(overview.p50_latency_ms) }}</dd></div><div><dt>P90</dt><dd>{{ formatLatency(overview.p90_latency_ms) }}</dd></div><div><dt>P95</dt><dd>{{ formatLatency(overview.p95_latency_ms) }}</dd></div><div><dt>P99</dt><dd>{{ formatLatency(overview.p99_latency_ms) }}</dd></div><div><dt>最大</dt><dd>{{ formatLatency(overview.max_latency_ms) }}</dd></div></dl></div></div>
+				<div class="ops-percentile-block"><div><span>首字耗时 TTFT</span><dl><div><dt>P50</dt><dd>{{ formatLatency(overview.p50_ttft_ms) }}</dd></div><div><dt>P90</dt><dd>{{ formatLatency(overview.p90_ttft_ms) }}</dd></div><div><dt>P95</dt><dd>{{ formatLatency(overview.p95_ttft_ms) }}</dd></div><div><dt>P99</dt><dd>{{ formatLatency(overview.p99_ttft_ms) }}</dd></div><div><dt>最大</dt><dd>{{ formatLatency(overview.max_ttft_ms) }}</dd></div></dl></div></div>
+			</article>
+			<article class="card ops-observability-panel">
+				<div class="ops-section-title"><div><h3>吞吐</h3><p>当前、峰值和所选周期平均值。</p></div><span class="tag-gray">{{ snapshot?.query_mode || 'raw' }}</span></div>
+				<div class="ops-rate-summary"><div><span>QPS</span><strong>{{ overview.qps?.current?.toFixed(3) || '0.000' }}</strong><small>峰值 {{ overview.qps?.peak?.toFixed(3) || '0.000' }} · 平均 {{ overview.qps?.average?.toFixed(3) || '0.000' }}</small></div><div><span>TPS</span><strong>{{ overview.tps?.current?.toFixed(1) || '0.0' }}</strong><small>峰值 {{ overview.tps?.peak?.toFixed(1) || '0.0' }} · 平均 {{ overview.tps?.average?.toFixed(1) || '0.0' }}</small></div><div><span>账号切换</span><strong>{{ overview.switch_count || 0 }}</strong><small>{{ percent(overview.switch_rate || 0) }} 请求发生切换</small></div></div>
+			</article>
+		</section>
+
+		<section class="ops-observability-grid" aria-label="延迟分布">
+			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>总耗时分布</h3><p>尾延迟会集中出现在右侧区间。</p></div></div><div class="ops-histogram"><div v-for="bucket in snapshot?.latency_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i><b :style="{ width: barWidth(snapshot?.latency_histogram.map((item) => item.count) || [], bucket.count) }"></b></i><strong>{{ bucket.count }}</strong></div></div></article>
+			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>首字耗时分布</h3><p>仅统计有首字数据的成功响应。</p></div></div><div class="ops-histogram"><div v-for="bucket in snapshot?.ttft_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i><b :style="{ width: barWidth(snapshot?.ttft_histogram.map((item) => item.count) || [], bucket.count) }"></b></i><strong>{{ bucket.count }}</strong></div></div></article>
+		</section>
+		<section v-if="snapshot?.error_trend.some((item) => item.total)" class="card ops-observability-panel mt-3"><div class="ops-section-title"><div><h3>错误趋势</h3><p>429、529 与其他上游错误按时间桶分开。</p></div></div><div class="ops-error-timeline"><div v-for="item in snapshot?.error_trend" :key="item.start" :title="`${item.label} · ${item.total} 次错误`"><span>{{ item.label }}</span><i><b class="is-limit" :style="{height:barWidth(snapshot?.error_trend.map((row)=>row.total)||[],item.business_limited)}"></b><b class="is-upstream" :style="{height:barWidth(snapshot?.error_trend.map((row)=>row.total)||[],item.upstream_529+item.upstream_other)}"></b></i><strong>{{item.total}}</strong></div></div></section>
+
+		<section class="card ops-concurrency-panel">
+			<div class="ops-section-title ops-table-title"><div><h3>实时并发</h3><p>平台、分组、账号和用户的占用、容量、负载与等待队列。</p></div></div>
+			<div class="ops-concurrency-grid"><article v-for="item in snapshot?.realtime.breakdown" :key="`capacity-${item.scope}-${item.id || item.name}`"><header><span>{{ ({platform:'平台',group:'分组',account:'账号',user:'用户'} as Record<string,string>)[item.scope] }}</span><strong :title="item.name">{{ item.name }}</strong></header><div class="ops-capacity-value"><b>{{ item.in_flight }}</b><span>/ {{ item.max_capacity || '不限' }}</span></div><div class="ops-capacity-track"><i :style="{ width: `${Math.min(item.load_percentage || 0, 100)}%` }"></i></div><footer><span>负载 {{ item.max_capacity ? percent(item.load_percentage) : '不限' }}</span><span>等待 {{ item.waiting || 0 }}</span></footer></article></div>
+		</section>
+
+		<section class="ops-observability-grid" aria-label="错误分析">
+			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>错误状态分布</h3><p>业务限流与上游失败分开统计。</p></div></div><div class="ops-status-list"><div v-for="item in snapshot?.status_distribution" :key="item.status_code"><span :class="item.status_code >= 500 ? 'tag-red' : 'tag-amber'">HTTP {{ item.status_code }}</span><i><b :style="{ width: barWidth(snapshot?.status_distribution.map((row) => row.count) || [], item.count) }"></b></i><strong>{{ item.count }}</strong><small v-if="item.business_limited">限流 {{ item.business_limited }}</small></div><div v-if="!snapshot?.status_distribution.length" class="ops-empty">当前周期没有错误</div></div></article>
+			<article class="card ops-observability-panel"><div class="ops-section-title"><div><h3>系统资源</h3><p>分钟采集，数据库与后台任务单独保留心跳。</p></div></div><div class="ops-resource-grid"><div><span>CPU</span><strong>{{ percent(snapshot?.system_history.at(-1)?.cpu_percent || 0) }}</strong></div><div><span>内存</span><strong>{{ percent(snapshot?.system_history.at(-1)?.memory_percent || 0) }}</strong></div><div><span>DB</span><strong :class="snapshot?.system_history.at(-1)?.db_ok === false ? 'text-signal-red' : 'text-signal-green'">{{ snapshot?.system_history.at(-1)?.db_ok === false ? '异常' : '正常' }}</strong></div><div><span>队列</span><strong>{{ snapshot?.system_history.at(-1)?.queue_depth || 0 }}</strong></div></div><div class="ops-job-list"><div v-for="job in snapshot?.job_heartbeats" :key="job.job_name"><span>{{ job.job_name }}</span><strong :class="job.last_error ? 'text-signal-red' : 'text-signal-green'">{{ job.last_error ? '失败' : '正常' }}</strong><small>{{ job.last_success_at ? new Date(job.last_success_at).toLocaleString() : '尚未成功' }}</small></div></div></article>
+		</section>
 
       <p v-if="snapshot?.sample_truncated" class="ops-sample-note">明细样本已超过 50,000 条；总请求、费用和成功率仍为完整统计，趋势与排行按最近样本计算。</p>
 
@@ -304,7 +376,7 @@ onBeforeUnmount(() => {
           <div class="ops-section-title ops-table-title"><div><h3>模型用量明细</h3><p>按账面费用排序，含输入、输出、缓存读写、请求数和失败率。</p></div></div>
           <div class="overflow-x-auto">
             <table v-responsive-table class="table-base ops-model-table">
-              <thead><tr><th>模型</th><th class="text-right">请求</th><th class="text-right">输入</th><th class="text-right">输出</th><th class="text-right">缓存读</th><th class="text-right">5m 写入</th><th class="text-right">1h 写入</th><th class="text-right">失败率</th><th class="text-right">P 均耗时</th><th class="text-right">费用</th></tr></thead>
+              <thead><tr><th>模型</th><th class="text-right">请求</th><th class="text-right">输入</th><th class="text-right">输出</th><th class="text-right">缓存读</th><th class="text-right">5m 写入</th><th class="text-right">1h 写入</th><th class="text-right">失败率</th><th class="text-right">平均 TTFT</th><th class="text-right">平均 TPS</th><th class="text-right">平均总耗时</th><th class="text-right">费用</th></tr></thead>
               <tbody>
                 <tr v-for="item in snapshot?.model_usage" :key="item.name">
                   <td class="font-mono text-xs text-slate-200">{{ item.name }}</td>
@@ -315,10 +387,12 @@ onBeforeUnmount(() => {
                   <td class="num text-right">{{ formatTokens(item.cache_write_5m_tokens) }}</td>
                   <td class="num text-right">{{ formatTokens(item.cache_write_1h_tokens) }}</td>
                   <td class="num text-right" :class="rankErrorRate(item) ? 'text-amber' : 'text-signal-green'">{{ percent(rankErrorRate(item)) }}</td>
+					<td class="num text-right">{{ formatLatency(item.average_ttft_ms) }}<small class="ml-1 text-[10px] text-slate-500">{{ item.ttft_samples }}</small></td>
+					<td class="num text-right">{{ (item.output_tps || 0).toFixed(1) }}</td>
                   <td class="num text-right">{{ formatLatency(item.average_latency_ms) }}</td>
                   <td class="num text-right text-slate-200">{{ formatMoney(item.cost_micro) }}</td>
                 </tr>
-                <tr v-if="!snapshot?.model_usage.length"><td colspan="10" class="py-10 text-center text-sm text-slate-500">当前时间段还没有模型调用</td></tr>
+                <tr v-if="!snapshot?.model_usage.length"><td colspan="12" class="py-10 text-center text-sm text-slate-500">当前时间段还没有模型调用</td></tr>
               </tbody>
             </table>
           </div>
@@ -372,21 +446,23 @@ onBeforeUnmount(() => {
         </article>
 
         <article class="card overflow-hidden">
-          <div class="ops-section-title ops-table-title"><div><h3>最近失败</h3><p>显示最近 12 条非成功调用，可前往用量明细查看完整账本。</p></div><RouterLink to="/admin/usage?status=error" class="ops-link">查看明细</RouterLink></div>
+          <div class="ops-section-title ops-table-title"><div><h3>错误中心</h3><p>请求错误与上游错误独立留档，包含请求 IP、地区、端点和关联编号。</p></div><RouterLink to="/admin/usage?status=error" class="ops-link">请求明细</RouterLink></div>
           <div class="overflow-x-auto">
             <table v-responsive-table class="table-base ops-error-table">
-              <thead><tr><th>时间</th><th>用户 / 密钥</th><th>模型</th><th>上游账号</th><th>错误</th><th class="text-right">首字耗时</th><th class="text-right">总耗时</th></tr></thead>
+              <thead><tr><th>时间</th><th>用户 / 密钥</th><th>模型 / 端点</th><th>分组 / 账号</th><th>请求 IP / 地区</th><th>错误</th><th>请求编号</th><th class="text-right">耗时</th><th>处理</th></tr></thead>
               <tbody>
-                <tr v-for="item in snapshot?.recent_errors" :key="item.id">
+                <tr v-for="item in errors" :key="item.id">
                   <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(item.created_at).toLocaleString() }}</td>
                   <td><div class="text-xs text-slate-300">{{ item.user_email || '—' }}</div><div class="text-[11px] text-slate-500">{{ item.key_name || '未命名密钥' }}</div></td>
-                  <td class="font-mono text-xs text-slate-200">{{ item.model || '—' }}</td>
-                  <td class="text-xs text-slate-400">{{ item.account_name || '—' }}</td>
+                  <td><div class="font-mono text-xs text-slate-200">{{ item.model || '—' }}</div><div class="font-mono text-[10px] text-slate-500">{{ item.request_path || '—' }}</div></td>
+                  <td><div class="text-xs text-slate-400">{{ item.group_name || '—' }}</div><div class="text-[10px] text-slate-500">{{ item.account_name || '未选中账号' }}</div></td>
+                  <td><div class="font-mono text-xs text-slate-300">{{ item.client_ip || '—' }}</div><div class="text-[10px] text-slate-500">{{ item.ip_location || '地区解析中' }}</div></td>
                   <td class="max-w-sm truncate text-xs text-signal-red" :title="item.error_message"><span class="mr-1 font-mono">{{ item.status_code }}</span>{{ summarizeProviderError(item.error_message || '上游返回失败') }}</td>
-                  <td class="num text-right text-xs text-slate-500">{{ formatLatency(item.first_token_ms) }}</td>
+                  <td class="font-mono text-[10px] text-slate-500">{{ item.request_id || '—' }}</td>
                   <td class="num text-right text-xs text-slate-500">{{ formatLatency(item.duration_ms) }}</td>
+                  <td><span v-if="item.resolved_at" class="tag-green">已处理</span><button v-else class="btn-ghost !px-2 !py-1 text-xs" @click="resolveError(item.id)">标记处理</button></td>
                 </tr>
-                <tr v-if="!snapshot?.recent_errors.length"><td colspan="7" class="py-10 text-center text-sm text-slate-500">当前时间段没有失败记录</td></tr>
+                <tr v-if="!errors.length"><td colspan="9" class="py-10 text-center text-sm text-slate-500">当前时间段没有失败记录</td></tr>
               </tbody>
             </table>
           </div>

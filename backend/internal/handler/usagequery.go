@@ -19,21 +19,23 @@ const maxUsagePageSize = 100
 // export and the operations dashboard. Keeping all filters in one place
 // prevents a dashboard number and the corresponding detail view disagreeing.
 type usageQuery struct {
-	Page      int
-	Size      int
-	Model     string
-	RequestID string
-	Platform  string
-	Status    string
-	Start     *time.Time
-	End       *time.Time
-	UserID    int64
-	APIKeyID  int64
-	GroupID   int64
-	AccountID int64
-	Stream    *bool
-	Sort      string
-	Order     string
+	Page       int
+	Size       int
+	Model      string
+	RequestID  string
+	ClientIP   string
+	IPLocation string
+	Platform   string
+	Status     string
+	Start      *time.Time
+	End        *time.Time
+	UserID     int64
+	APIKeyID   int64
+	GroupID    int64
+	AccountID  int64
+	Stream     *bool
+	Sort       string
+	Order      string
 }
 
 func parseUsageQuery(c *gin.Context) (usageQuery, error) {
@@ -47,14 +49,16 @@ func parseUsageQuery(c *gin.Context) (usageQuery, error) {
 	}
 
 	q := usageQuery{
-		Page:      page,
-		Size:      size,
-		Model:     strings.TrimSpace(c.Query("model")),
-		RequestID: strings.TrimSpace(c.Query("request_id")),
-		Platform:  strings.TrimSpace(c.Query("platform")),
-		Status:    strings.TrimSpace(c.Query("status")),
-		Sort:      strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
-		Order:     strings.ToLower(strings.TrimSpace(c.DefaultQuery("order", "desc"))),
+		Page:       page,
+		Size:       size,
+		Model:      strings.TrimSpace(c.Query("model")),
+		RequestID:  strings.TrimSpace(c.Query("request_id")),
+		ClientIP:   strings.TrimSpace(c.Query("client_ip")),
+		IPLocation: strings.TrimSpace(c.Query("ip_location")),
+		Platform:   strings.TrimSpace(c.Query("platform")),
+		Status:     strings.TrimSpace(c.Query("status")),
+		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "created_at")),
+		Order:      strings.ToLower(strings.TrimSpace(c.DefaultQuery("order", "desc"))),
 	}
 	if len(q.RequestID) > 64 {
 		return usageQuery{}, fmt.Errorf("request_id is too long")
@@ -174,6 +178,12 @@ func usageScope(db *gorm.DB, filter usageQuery, userID *int64) *gorm.DB {
 	}
 	if filter.RequestID != "" {
 		q = q.Where("usage_logs.request_id = ?", filter.RequestID)
+	}
+	if filter.ClientIP != "" {
+		q = q.Where("usage_logs.client_ip = ?", filter.ClientIP)
+	}
+	if filter.IPLocation != "" {
+		q = q.Where("usage_logs.ip_location LIKE ?", "%"+filter.IPLocation+"%")
 	}
 	if filter.Start != nil {
 		q = q.Where("usage_logs.created_at >= ?", *filter.Start)
@@ -302,24 +312,29 @@ func writeUsageCSV(c *gin.Context, db *gorm.DB, filter usageQuery, userID *int64
 	c.Header("Content-Disposition", "attachment; filename=usage-"+time.Now().UTC().Format("20060102")+".csv")
 	c.Writer.Write([]byte{0xEF, 0xBB, 0xBF}) // Excel's UTF-8 marker
 	w := csv.NewWriter(c.Writer)
-	header := []string{"请求 ID", "时间", "密钥", "分组", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "首字耗时(ms)", "总耗时(ms)", "状态码", "错误"}
+	header := []string{"请求 ID", "时间", "密钥", "分组", "模型", "请求 IP", "IP 地区", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "首字耗时(ms)", "总耗时(ms)", "状态码", "错误"}
 	if includeInternal {
-		header = []string{"请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "首字耗时(ms)", "总耗时(ms)", "排队(ms)", "调度(ms)", "上游(ms)", "尝试次数", "状态码", "错误"}
+		header = []string{"请求 ID", "客户端请求 ID", "时间", "用户", "密钥", "分组", "上游账号", "模型", "端点", "请求 IP", "IP 地区", "运营商", "User-Agent", "思考强度 Reasoning Effort", "流式", "输入 Token", "输出 Token", "缓存读", "缓存写", "5m 缓存写", "1h 缓存写", "图片数", "费用(USD)", "首字耗时(ms)", "总耗时(ms)", "排队(ms)", "调度(ms)", "上游(ms)", "尝试次数", "状态码", "错误"}
 	}
 	_ = w.Write(header)
 	for _, entry := range logs {
 		row := make([]string, 0, len(header))
 		if includeInternal {
 			row = append(row,
-				entry.RequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.UserEmail, entry.KeyName, entry.GroupName, entry.AccountName,
+				entry.RequestID, entry.ClientRequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.UserEmail, entry.KeyName, entry.GroupName, entry.AccountName,
 			)
 		} else {
 			row = append(row,
 				entry.RequestID, entry.CreatedAt.UTC().Format(time.RFC3339), entry.KeyName, entry.GroupName,
 			)
 		}
+		if includeInternal {
+			row = append(row, entry.Model, entry.RequestPath, entry.ClientIP, entry.IPLocation, entry.IPISP, entry.UserAgent)
+		} else {
+			row = append(row, entry.Model, entry.ClientIP, entry.IPLocation)
+		}
 		row = append(row,
-			entry.Model, entry.ReasoningEffort, strconv.FormatBool(entry.Stream),
+			entry.ReasoningEffort, strconv.FormatBool(entry.Stream),
 			strconv.FormatInt(entry.InputTokens, 10), strconv.FormatInt(entry.OutputTokens, 10),
 			strconv.FormatInt(entry.CacheReadTokens, 10), strconv.FormatInt(entry.CacheWriteTokens, 10),
 			strconv.FormatInt(entry.CacheWrite5mTokens, 10), strconv.FormatInt(entry.CacheWrite1hTokens, 10),

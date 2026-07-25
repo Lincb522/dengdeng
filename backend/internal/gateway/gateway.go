@@ -435,10 +435,11 @@ type relayRequest struct {
 }
 
 type relayTrace struct {
-	QueueMs      int64
-	ScheduleMs   int64
-	UpstreamMs   int64
-	AttemptCount int
+	QueueMs       int64
+	ScheduleMs    int64
+	UpstreamMs    int64
+	AttemptCount  int
+	LastAccountID int64
 }
 
 // firstTokenWriter records the first response body write without treating an
@@ -702,6 +703,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			return
 		}
 		tried = append(tried, acc.ID)
+		trace.LastAccountID = acc.ID
 		attempt++
 		trace.AttemptCount++
 		lastAttemptGroup = routeGroup
@@ -754,25 +756,30 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 
 		if req.Billable {
 			g.billing.Record(service.BillContext{
-				RequestID:    middleware.RequestIDFromContext(c),
-				UserID:       ak.User.ID,
-				APIKeyID:     ak.Key.ID,
-				AccountID:    acc.ID,
-				GroupID:      routeGroup.ID,
-				Model:        req.Model,
-				Stream:       streamed,
-				Effort:       req.Effort,
-				ServiceTier:  req.ServiceTier,
-				Usage:        usage,
-				Rates:        g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
-				FirstTokenMs: timingWriter.firstTokenMs,
-				DurationMs:   time.Since(start).Milliseconds(),
-				QueueMs:      trace.QueueMs,
-				ScheduleMs:   trace.ScheduleMs,
-				UpstreamMs:   trace.UpstreamMs,
-				AttemptCount: trace.AttemptCount,
-				StatusCode:   resp.StatusCode,
-				SkipBalance:  ak.AccessActive || ak.RequestReserved,
+				RequestID:       middleware.RequestIDFromContext(c),
+				ClientRequestID: clientRequestID(c),
+				UserID:          ak.User.ID,
+				APIKeyID:        ak.Key.ID,
+				AccountID:       acc.ID,
+				GroupID:         routeGroup.ID,
+				Model:           req.Model,
+				Platform:        req.Platform,
+				RequestPath:     publicRequestPath(c),
+				ClientIP:        c.ClientIP(),
+				UserAgent:       truncate(c.Request.UserAgent(), 512),
+				Stream:          streamed,
+				Effort:          req.Effort,
+				ServiceTier:     req.ServiceTier,
+				Usage:           usage,
+				Rates:           g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
+				FirstTokenMs:    timingWriter.firstTokenMs,
+				DurationMs:      time.Since(start).Milliseconds(),
+				QueueMs:         trace.QueueMs,
+				ScheduleMs:      trace.ScheduleMs,
+				UpstreamMs:      trace.UpstreamMs,
+				AttemptCount:    trace.AttemptCount,
+				StatusCode:      resp.StatusCode,
+				SkipBalance:     ak.AccessActive || ak.RequestReserved,
 			})
 		}
 		completed = true
@@ -807,24 +814,49 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		return
 	}
 	g.billing.Record(service.BillContext{
-		RequestID:    middleware.RequestIDFromContext(c),
-		UserID:       ak.User.ID,
-		APIKeyID:     ak.Key.ID,
-		GroupID:      group.ID,
-		Model:        req.Model,
-		Stream:       false,
-		Effort:       req.Effort,
-		ServiceTier:  req.ServiceTier,
-		Rates:        billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
-		DurationMs:   time.Since(started).Milliseconds(),
-		QueueMs:      trace.QueueMs,
-		ScheduleMs:   trace.ScheduleMs,
-		UpstreamMs:   trace.UpstreamMs,
-		AttemptCount: trace.AttemptCount,
-		StatusCode:   status,
-		ErrorMessage: message,
-		SkipBalance:  true,
+		RequestID:       middleware.RequestIDFromContext(c),
+		ClientRequestID: clientRequestID(c),
+		UserID:          ak.User.ID,
+		APIKeyID:        ak.Key.ID,
+		AccountID:       trace.LastAccountID,
+		GroupID:         group.ID,
+		Model:           req.Model,
+		Platform:        req.Platform,
+		RequestPath:     publicRequestPath(c),
+		ClientIP:        c.ClientIP(),
+		UserAgent:       truncate(c.Request.UserAgent(), 512),
+		Stream:          false,
+		Effort:          req.Effort,
+		ServiceTier:     req.ServiceTier,
+		Rates:           billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
+		DurationMs:      time.Since(started).Milliseconds(),
+		QueueMs:         trace.QueueMs,
+		ScheduleMs:      trace.ScheduleMs,
+		UpstreamMs:      trace.UpstreamMs,
+		AttemptCount:    trace.AttemptCount,
+		StatusCode:      status,
+		ErrorMessage:    message,
+		SkipBalance:     true,
 	})
+}
+
+func clientRequestID(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	for _, header := range []string{"X-Client-Request-ID", "X-Stainless-Request-ID", "X-Request-ID"} {
+		if value := strings.TrimSpace(c.GetHeader(header)); value != "" {
+			return truncate(value, 64)
+		}
+	}
+	return ""
+}
+
+func publicRequestPath(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return ""
+	}
+	return truncate(c.Request.URL.Path, 256)
 }
 
 func requestServiceTier(body []byte) string {

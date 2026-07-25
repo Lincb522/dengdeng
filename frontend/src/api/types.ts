@@ -91,6 +91,15 @@ export interface AlertRule {
 	group_id: number
 	account_id: number
 	notify_email: string
+	metric_type?: string
+	operator?: 'gt' | 'gte' | 'lt' | 'lte'
+	threshold?: number
+	window_minutes?: number
+	sustained_minutes?: number
+	cooldown_minutes?: number
+	severity?: 'info' | 'warning' | 'critical'
+	description?: string
+	last_triggered_at?: string
 	created_at: string
 	updated_at: string
 }
@@ -492,11 +501,20 @@ export interface ModelCatalogueItem {
 export interface UsageLog {
   id: number
 	request_id: string
+	client_request_id?: string
   user_id: number
   api_key_id: number
   account_id: number
   group_id: number
   model: string
+	request_path?: string
+	client_ip?: string
+	ip_country?: string
+	ip_region?: string
+	ip_city?: string
+	ip_location?: string
+	ip_isp?: string
+	user_agent?: string
   stream: boolean
 	reasoning_effort?: string
   input_tokens: number
@@ -568,7 +586,20 @@ export interface OpsOverview extends OpsAggregate {
   success_rate: number
   error_rate: number
   p50_latency_ms: number
+	p90_latency_ms: number
   p95_latency_ms: number
+	p99_latency_ms: number
+	max_latency_ms: number
+	p50_ttft_ms: number
+	p90_ttft_ms: number
+	p95_ttft_ms: number
+	p99_ttft_ms: number
+	average_ttft_ms: number
+	max_ttft_ms: number
+	qps: OpsRateSummary
+	tps: OpsRateSummary
+	switch_count: number
+	switch_rate: number
   health_score: number
   account_total: number
   account_available: number
@@ -588,7 +619,15 @@ export interface OpsTrend {
   tokens: number
   cost_micro: number
   average_latency_ms: number
+	qps: number
+	tps: number
+	switch_count: number
 }
+
+export interface OpsRateSummary { current: number; peak: number; average: number }
+export interface OpsHistogramBucket { range: string; count: number }
+export interface OpsErrorTrend { start: string; label: string; total: number; business_limited: number; upstream_429: number; upstream_529: number; upstream_other: number }
+export interface OpsStatusDistribution { status_code: number; count: number; business_limited: number }
 
 export interface OpsRank {
   id?: number
@@ -605,6 +644,9 @@ export interface OpsRank {
 	cache_write_1h_tokens: number
   cost_micro: number
   average_latency_ms: number
+	average_ttft_ms: number
+	ttft_samples: number
+	output_tps: number
 }
 
 export interface OpsRateProfile {
@@ -620,10 +662,13 @@ export interface OpsRateProfile {
 }
 
 export interface OpsLiveCount {
-	scope: 'platform' | 'group' | 'account'
+	scope: 'platform' | 'group' | 'account' | 'user'
 	id?: number
 	name: string
 	in_flight: number
+	max_capacity: number
+	load_percentage: number
+	waiting: number
 }
 
 export interface OpsRealtime {
@@ -666,6 +711,84 @@ export interface OpsSystemMetrics {
   db_wait_count: number
 }
 
+export interface OpsSystemMetric {
+	id: number
+	bucket_at: string
+	window_minutes: number
+	platform?: string
+	group_id?: number
+	success_count: number
+	error_count: number
+	business_limited_count: number
+	upstream_429_count: number
+	upstream_529_count: number
+	upstream_other_errors: number
+	token_consumed: number
+	switch_count: number
+	qps: number
+	tps: number
+	duration_p50_ms: number
+	duration_p90_ms: number
+	duration_p95_ms: number
+	duration_p99_ms: number
+	duration_avg_ms: number
+	duration_max_ms: number
+	ttft_p50_ms: number
+	ttft_p90_ms: number
+	ttft_p95_ms: number
+	ttft_p99_ms: number
+	ttft_avg_ms: number
+	ttft_max_ms: number
+	cpu_percent: number
+	memory_used_bytes: number
+	memory_total_bytes: number
+	memory_percent: number
+	db_ok: boolean
+	db_open_connections: number
+	db_in_use: number
+	db_idle: number
+	db_wait_count: number
+	goroutines: number
+	in_flight: number
+	queue_depth: number
+}
+
+export interface OpsJobHeartbeat { job_name: string; last_run_at?: string; last_success_at?: string; last_error_at?: string; last_error?: string; last_duration_ms: number; updated_at: string }
+
+export interface OpsErrorLog {
+	id: number
+	usage_log_id: number
+	request_id: string
+	client_request_id?: string
+	user_id: number
+	api_key_id: number
+	account_id: number
+	group_id: number
+	platform: string
+	model: string
+	request_path: string
+	client_ip: string
+	ip_location: string
+	user_agent: string
+	status_code: number
+	error_phase: string
+	error_type: string
+	error_source: string
+	severity: string
+	business_limited: boolean
+	retryable: boolean
+	error_message: string
+	duration_ms: number
+	first_token_ms: number
+	resolved_at?: string
+	resolved_by?: string
+	created_at: string
+	user_email?: string
+	key_name?: string
+	group_name?: string
+	account_name?: string
+}
+
 export interface SchedulerDiagnostic {
 	group_id: number
 	model?: string
@@ -694,6 +817,13 @@ export interface OpsSnapshot {
   recent_errors: UsageLog[]
   system: OpsSystemMetrics
 	scheduler_diagnostics: SchedulerDiagnostic[]
+	latency_histogram: OpsHistogramBucket[]
+	ttft_histogram: OpsHistogramBucket[]
+	error_trend: OpsErrorTrend[]
+	status_distribution: OpsStatusDistribution[]
+	system_history: OpsSystemMetric[]
+	job_heartbeats: OpsJobHeartbeat[]
+	query_mode: string
   sample_truncated: boolean
 }
 

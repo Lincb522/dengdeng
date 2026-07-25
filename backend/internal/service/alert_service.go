@@ -55,6 +55,9 @@ func (s *AlertService) EvaluateProbe(probe model.AccountProbe) {
 		return
 	}
 	for _, rule := range rules {
+		if rule.MetricType != "" {
+			continue
+		}
 		if !ruleApplies(rule, account) {
 			continue
 		}
@@ -63,6 +66,164 @@ func (s *AlertService) EvaluateProbe(probe model.AccountProbe) {
 		} else {
 			s.resolve(rule.ID, account.ID, probe.CheckedAt)
 		}
+	}
+}
+
+// EvaluateMetricSnapshot evaluates generic operational rules after each
+// durable minute snapshot. Probe rules continue through EvaluateProbe.
+func (s *AlertService) EvaluateMetricSnapshot(snapshot model.OpsSystemMetric) {
+	if s == nil || s.db == nil {
+		return
+	}
+	var rules []model.AlertRule
+	if err := s.db.Where("enabled = ? AND metric_type <> ''", true).Find(&rules).Error; err != nil {
+		return
+	}
+	for _, rule := range rules {
+		if s.metricRuleSilenced(rule.ID) {
+			continue
+		}
+		value, ok := s.metricRuleValue(rule, snapshot)
+		if !ok {
+			continue
+		}
+		firing := compareMetric(value, rule.Operator, rule.Threshold)
+		if firing {
+			s.openOrRefreshMetric(rule, value, snapshot.BucketAt)
+		} else {
+			s.resolve(rule.ID, 0, snapshot.BucketAt)
+		}
+	}
+}
+
+func (s *AlertService) metricRuleSilenced(ruleID int64) bool {
+	now := time.Now().UTC()
+	var count int64
+	_ = s.db.Model(&model.OpsAlertSilence{}).
+		Where("deleted_at IS NULL AND starts_at <= ? AND ends_at > ? AND (rule_id = 0 OR rule_id = ?)", now, now, ruleID).
+		Count(&count).Error
+	return count > 0
+}
+
+func (s *AlertService) metricRuleValue(rule model.AlertRule, snapshot model.OpsSystemMetric) (float64, bool) {
+	switch rule.MetricType {
+	case "cpu_percent":
+		return snapshot.CPUPercent, true
+	case "memory_percent":
+		return snapshot.MemoryPercent, true
+	case "queue_depth":
+		return float64(snapshot.QueueDepth), true
+	case "qps":
+		return snapshot.QPS, true
+	case "tps":
+		return snapshot.TPS, true
+	case "success_rate", "error_rate", "upstream_error_rate":
+		window := rule.WindowMinutes
+		if window < 1 {
+			window = 1
+		}
+		q := s.db.Model(&model.UsageLog{}).Where("usage_logs.created_at >= ?", time.Now().UTC().Add(-time.Duration(window)*time.Minute))
+		if rule.GroupID > 0 {
+			q = q.Where("usage_logs.group_id = ?", rule.GroupID)
+		}
+		if rule.Platform != "" {
+			q = q.Joins("JOIN groups alert_groups ON alert_groups.id = usage_logs.group_id").Where("alert_groups.platform = ?", rule.Platform)
+		}
+		var row struct{ Total, Success, Upstream int64 }
+		if err := q.Select("COUNT(*) AS total, COALESCE(SUM(CASE WHEN usage_logs.status_code >= 200 AND usage_logs.status_code < 400 THEN 1 ELSE 0 END),0) AS success, COALESCE(SUM(CASE WHEN usage_logs.status_code >= 500 THEN 1 ELSE 0 END),0) AS upstream").Scan(&row).Error; err != nil || row.Total == 0 {
+			return 0, false
+		}
+		successRate := float64(row.Success) / float64(row.Total) * 100
+		if rule.MetricType == "success_rate" {
+			return successRate, true
+		}
+		if rule.MetricType == "upstream_error_rate" {
+			return float64(row.Upstream) / float64(row.Total) * 100, true
+		}
+		return 100 - successRate, true
+	case "available_account_ratio", "available_account_count", "rate_limited_account_count", "error_account_count":
+		q := s.db.Model(&model.UpstreamAccount{})
+		if rule.GroupID > 0 {
+			q = q.Where("group_id = ?", rule.GroupID)
+		}
+		if rule.Platform != "" {
+			q = q.Where("platform = ?", rule.Platform)
+		}
+		var accounts []model.UpstreamAccount
+		if err := q.Find(&accounts).Error; err != nil || len(accounts) == 0 {
+			return 0, false
+		}
+		now, available, limited, failed := time.Now().UTC(), 0, 0, 0
+		for _, account := range accounts {
+			cooling := account.CooldownUntil != nil && account.CooldownUntil.After(now)
+			if account.Status == model.StatusActive && !cooling {
+				available++
+			}
+			if cooling {
+				limited++
+			}
+			if account.Status == model.StatusError || account.ErrorCount > 0 {
+				failed++
+			}
+		}
+		switch rule.MetricType {
+		case "available_account_ratio":
+			return float64(available) / float64(len(accounts)) * 100, true
+		case "available_account_count":
+			return float64(available), true
+		case "rate_limited_account_count":
+			return float64(limited), true
+		default:
+			return float64(failed), true
+		}
+	}
+	return 0, false
+}
+
+func compareMetric(value float64, operator string, threshold float64) bool {
+	switch strings.ToLower(strings.TrimSpace(operator)) {
+	case "lt", "<":
+		return value < threshold
+	case "lte", "<=":
+		return value <= threshold
+	case "gt", ">":
+		return value > threshold
+	default:
+		return value >= threshold
+	}
+}
+
+func (s *AlertService) openOrRefreshMetric(rule model.AlertRule, value float64, at time.Time) {
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	var event model.AlertEvent
+	err := s.db.Where("rule_id = ? AND account_id = 0 AND state = ?", rule.ID, "open").Order("id DESC").First(&event).Error
+	message := fmt.Sprintf("%s 当前值 %.2f，阈值 %s %.2f", rule.MetricType, value, rule.Operator, rule.Threshold)
+	if err == nil {
+		_ = s.db.Model(&event).Updates(map[string]any{"last_seen_at": at, "message": message, "metric_value": value, "threshold_value": rule.Threshold}).Error
+		return
+	}
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return
+	}
+	if rule.LastTriggeredAt != nil && time.Since(*rule.LastTriggeredAt) < time.Duration(max(rule.CooldownMinutes, 1))*time.Minute {
+		return
+	}
+	event = model.AlertEvent{RuleID: rule.ID, GroupID: rule.GroupID, Platform: rule.Platform, State: "open", Severity: rule.Severity, Title: rule.Name, Message: message, MetricValue: value, ThresholdValue: rule.Threshold, FirstSeenAt: at, LastSeenAt: at, DeliveryStatus: "console"}
+	if event.Severity == "" {
+		event.Severity = "warning"
+	}
+	if err := s.db.Create(&event).Error; err != nil {
+		return
+	}
+	_ = s.db.Model(&model.AlertRule{}).Where("id = ?", rule.ID).Update("last_triggered_at", at).Error
+	to := strings.TrimSpace(rule.NotifyEmail)
+	if to == "" {
+		to = s.fallbackEmail
+	}
+	if to != "" && s.mailer != nil && s.mailer.Configured() {
+		go s.deliver(event.ID, to, event.Title, event.Message)
 	}
 }
 

@@ -19,8 +19,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const opsSampleLimit = 50_000
-
 const opsProbeStaleAfter = 15 * time.Minute
 
 var opsProcessStartedAt = time.Now().UTC()
@@ -63,10 +61,13 @@ type opsWindow struct {
 }
 
 type opsLiveCount struct {
-	Scope    string `json:"scope"`
-	ID       int64  `json:"id,omitempty"`
-	Name     string `json:"name"`
-	InFlight int    `json:"in_flight"`
+	Scope          string  `json:"scope"`
+	ID             int64   `json:"id,omitempty"`
+	Name           string  `json:"name"`
+	InFlight       int     `json:"in_flight"`
+	MaxCapacity    int     `json:"max_capacity"`
+	LoadPercentage float64 `json:"load_percentage"`
+	Waiting        int     `json:"waiting"`
 }
 
 // opsRealtime combines exact ledger totals for the last minute with the
@@ -83,18 +84,31 @@ type opsRealtime struct {
 
 type opsOverview struct {
 	opsAggregate
-	TotalTokens      int64      `json:"total_tokens"`
-	SuccessRate      float64    `json:"success_rate"`
-	ErrorRate        float64    `json:"error_rate"`
-	P50LatencyMs     int64      `json:"p50_latency_ms"`
-	P95LatencyMs     int64      `json:"p95_latency_ms"`
-	HealthScore      int        `json:"health_score"`
-	AccountTotal     int        `json:"account_total"`
-	AccountAvailable int        `json:"account_available"`
-	AccountCooling   int        `json:"account_cooling"`
-	AccountAttention int        `json:"account_attention"`
-	AccountDisabled  int        `json:"account_disabled"`
-	Last5Minutes     *opsWindow `json:"last_5_minutes"`
+	TotalTokens      int64          `json:"total_tokens"`
+	SuccessRate      float64        `json:"success_rate"`
+	ErrorRate        float64        `json:"error_rate"`
+	P50LatencyMs     int64          `json:"p50_latency_ms"`
+	P90LatencyMs     int64          `json:"p90_latency_ms"`
+	P95LatencyMs     int64          `json:"p95_latency_ms"`
+	P99LatencyMs     int64          `json:"p99_latency_ms"`
+	MaxLatencyMs     int64          `json:"max_latency_ms"`
+	P50TTFTMs        int64          `json:"p50_ttft_ms"`
+	P90TTFTMs        int64          `json:"p90_ttft_ms"`
+	P95TTFTMs        int64          `json:"p95_ttft_ms"`
+	P99TTFTMs        int64          `json:"p99_ttft_ms"`
+	AverageTTFTMs    float64        `json:"average_ttft_ms"`
+	MaxTTFTMs        int64          `json:"max_ttft_ms"`
+	QPS              opsRateSummary `json:"qps"`
+	TPS              opsRateSummary `json:"tps"`
+	SwitchCount      int64          `json:"switch_count"`
+	SwitchRate       float64        `json:"switch_rate"`
+	HealthScore      int            `json:"health_score"`
+	AccountTotal     int            `json:"account_total"`
+	AccountAvailable int            `json:"account_available"`
+	AccountCooling   int            `json:"account_cooling"`
+	AccountAttention int            `json:"account_attention"`
+	AccountDisabled  int            `json:"account_disabled"`
+	Last5Minutes     *opsWindow     `json:"last_5_minutes"`
 }
 
 type opsTrend struct {
@@ -107,7 +121,34 @@ type opsTrend struct {
 	Tokens           int64   `json:"tokens"`
 	CostMicro        int64   `json:"cost_micro"`
 	AverageLatencyMs float64 `json:"average_latency_ms"`
+	QPS              float64 `json:"qps"`
+	TPS              float64 `json:"tps"`
+	SwitchCount      int64   `json:"switch_count"`
 	latencyTotal     int64
+}
+
+type opsRateSummary struct {
+	Current float64 `json:"current"`
+	Peak    float64 `json:"peak"`
+	Average float64 `json:"average"`
+}
+type opsHistogramBucket struct {
+	Range string `json:"range"`
+	Count int64  `json:"count"`
+}
+type opsErrorTrend struct {
+	Start           string `json:"start"`
+	Label           string `json:"label"`
+	Total           int64  `json:"total"`
+	BusinessLimited int64  `json:"business_limited"`
+	Upstream429     int64  `json:"upstream_429"`
+	Upstream529     int64  `json:"upstream_529"`
+	UpstreamOther   int64  `json:"upstream_other"`
+}
+type opsStatusDistribution struct {
+	StatusCode      int   `json:"status_code"`
+	Count           int64 `json:"count"`
+	BusinessLimited int64 `json:"business_limited"`
 }
 
 type opsRank struct {
@@ -125,7 +166,11 @@ type opsRank struct {
 	CacheWrite1hTokens int64   `json:"cache_write_1h_tokens"`
 	CostMicro          int64   `json:"cost_micro"`
 	AverageLatencyMs   float64 `json:"average_latency_ms"`
+	AverageTTFTMs      float64 `json:"average_ttft_ms"`
+	TTFTSamples        int64   `json:"ttft_samples"`
+	OutputTPS          float64 `json:"output_tps"`
 	latencyTotal       int64
+	ttftTotal          int64
 }
 
 // opsRateProfile deliberately reports the current group configuration beside
@@ -180,26 +225,33 @@ type opsSystemMetrics struct {
 }
 
 type opsSnapshot struct {
-	GeneratedAt     time.Time                      `json:"generated_at"`
-	Range           string                         `json:"range"`
-	Start           time.Time                      `json:"start"`
-	End             time.Time                      `json:"end"`
-	Platform        string                         `json:"platform,omitempty"`
-	GroupID         int64                          `json:"group_id,omitempty"`
-	Overview        opsOverview                    `json:"overview"`
-	Trend           []opsTrend                     `json:"trend"`
-	TopModels       []opsRank                      `json:"top_models"`
-	TopGroups       []opsRank                      `json:"top_groups"`
-	TopUsers        []opsRank                      `json:"top_users"`
-	TopAccounts     []opsRank                      `json:"top_accounts"`
-	ModelUsage      []opsRank                      `json:"model_usage"`
-	RateProfiles    []opsRateProfile               `json:"rate_profiles"`
-	Realtime        opsRealtime                    `json:"realtime"`
-	AccountHealth   []opsAccountHealth             `json:"account_health"`
-	RecentErrors    []model.UsageLog               `json:"recent_errors"`
-	System          opsSystemMetrics               `json:"system"`
-	Scheduler       []service.SchedulerDiagnostics `json:"scheduler_diagnostics"`
-	SampleTruncated bool                           `json:"sample_truncated"`
+	GeneratedAt        time.Time                      `json:"generated_at"`
+	Range              string                         `json:"range"`
+	Start              time.Time                      `json:"start"`
+	End                time.Time                      `json:"end"`
+	Platform           string                         `json:"platform,omitempty"`
+	GroupID            int64                          `json:"group_id,omitempty"`
+	Overview           opsOverview                    `json:"overview"`
+	Trend              []opsTrend                     `json:"trend"`
+	TopModels          []opsRank                      `json:"top_models"`
+	TopGroups          []opsRank                      `json:"top_groups"`
+	TopUsers           []opsRank                      `json:"top_users"`
+	TopAccounts        []opsRank                      `json:"top_accounts"`
+	ModelUsage         []opsRank                      `json:"model_usage"`
+	RateProfiles       []opsRateProfile               `json:"rate_profiles"`
+	Realtime           opsRealtime                    `json:"realtime"`
+	AccountHealth      []opsAccountHealth             `json:"account_health"`
+	RecentErrors       []model.UsageLog               `json:"recent_errors"`
+	System             opsSystemMetrics               `json:"system"`
+	Scheduler          []service.SchedulerDiagnostics `json:"scheduler_diagnostics"`
+	LatencyHistogram   []opsHistogramBucket           `json:"latency_histogram"`
+	TTFTHistogram      []opsHistogramBucket           `json:"ttft_histogram"`
+	ErrorTrend         []opsErrorTrend                `json:"error_trend"`
+	StatusDistribution []opsStatusDistribution        `json:"status_distribution"`
+	SystemHistory      []model.OpsSystemMetric        `json:"system_history"`
+	JobHeartbeats      []model.OpsJobHeartbeat        `json:"job_heartbeats"`
+	QueryMode          string                         `json:"query_mode"`
+	SampleTruncated    bool                           `json:"sample_truncated"`
 }
 
 type opsLogMetric struct {
@@ -216,6 +268,8 @@ type opsLogMetric struct {
 	CacheWrite1hTokens int64
 	CostMicro          int64
 	DurationMs         int64
+	FirstTokenMs       int64
+	AttemptCount       int
 	StatusCode         int
 }
 
@@ -393,29 +447,65 @@ func (h *AdminHandler) buildOpsSnapshot(filter opsFilter) (opsSnapshot, error) {
 		overview.ErrorRate = ratio(aggregate.ErrorRequests, aggregate.Requests)
 	}
 	latencies := make([]int64, 0, len(raw))
+	ttfts := make([]int64, 0, len(raw))
 	for _, entry := range raw {
 		if isOpsSuccess(entry.StatusCode) && entry.DurationMs >= 0 {
 			latencies = append(latencies, entry.DurationMs)
 		}
+		if isOpsSuccess(entry.StatusCode) && entry.FirstTokenMs > 0 {
+			ttfts = append(ttfts, entry.FirstTokenMs)
+		}
+		if entry.AttemptCount > 1 {
+			overview.SwitchCount += int64(entry.AttemptCount - 1)
+		}
 	}
 	overview.P50LatencyMs = percentile(latencies, .50)
+	overview.P90LatencyMs = percentile(latencies, .90)
 	overview.P95LatencyMs = percentile(latencies, .95)
+	overview.P99LatencyMs = percentile(latencies, .99)
+	if len(latencies) > 0 {
+		overview.MaxLatencyMs = latencies[len(latencies)-1]
+	}
+	overview.P50TTFTMs, overview.P90TTFTMs = percentile(ttfts, .50), percentile(ttfts, .90)
+	overview.P95TTFTMs, overview.P99TTFTMs = percentile(ttfts, .95), percentile(ttfts, .99)
+	if len(ttfts) > 0 {
+		var sum int64
+		for _, value := range ttfts {
+			sum += value
+		}
+		overview.AverageTTFTMs = float64(sum) / float64(len(ttfts))
+		overview.MaxTTFTMs = ttfts[len(ttfts)-1]
+	}
+	if overview.Requests > 0 {
+		overview.SwitchRate = float64(overview.SwitchCount) / float64(overview.Requests) * 100
+	}
 	last5Window := opsWindowFor(lastFive, filter.End.Sub(windowStart))
 	overview.Last5Minutes = last5Window
 	overview.HealthScore = calculateOpsHealth(overview)
 
 	trend, modelRanks, groupRanks, userRanks, accountRanks := buildOpsBreakdown(raw, filter.Start, filter.End)
+	overview.QPS, overview.TPS = opsRateSummaries(trend, lastMinute, aggregate, filter.End.Sub(filter.Start))
+	latencyHistogram := buildOpsHistogram(latencies, []int64{100, 250, 500, 1000, 2000, 5000, 10000})
+	ttftHistogram := buildOpsHistogram(ttfts, []int64{100, 250, 500, 1000, 2000, 5000, 10000})
+	errorTrend, statusDistribution := buildOpsErrors(raw, filter.Start, filter.End)
 	fillOpsRankNames(h.db, groupRanks, userRanks, accountRanks, accountHealth)
 	rateProfiles, err := h.loadOpsRateProfiles(filter)
 	if err != nil {
 		return opsSnapshot{}, err
 	}
 	realtime := h.loadOpsRealtime(filter, opsWindowFor(lastMinute, filter.End.Sub(minuteStart)))
+	systemHistory, jobHeartbeats := h.loadOpsSystemHistory(filter)
 
 	return opsSnapshot{
 		GeneratedAt: time.Now().UTC(), Range: filter.Range, Start: filter.Start, End: filter.End, Platform: filter.Platform, GroupID: filter.GroupID,
 		Overview: overview, Trend: trend, TopModels: sortedOpsRanks(modelRanks), TopGroups: sortedOpsRanks(groupRanks), TopUsers: sortedOpsRanks(userRanks), TopAccounts: sortedOpsRanks(accountRanks),
-		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(), Scheduler: h.schedulerDiagnostics(filter), SampleTruncated: truncated,
+		ModelUsage: detailedOpsRanks(modelRanks), RateProfiles: rateProfiles, Realtime: realtime, AccountHealth: accountHealth, RecentErrors: recentErrors, System: h.opsSystemMetrics(), Scheduler: h.schedulerDiagnostics(filter),
+		LatencyHistogram: latencyHistogram, TTFTHistogram: ttftHistogram, ErrorTrend: errorTrend, StatusDistribution: statusDistribution, SystemHistory: systemHistory, JobHeartbeats: jobHeartbeats, QueryMode: func() string {
+			if filter.End.Sub(filter.Start) > 48*time.Hour {
+				return "preagg+raw"
+			}
+			return "raw"
+		}(), SampleTruncated: truncated,
 	}, nil
 }
 
@@ -465,8 +555,26 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 	snapshot := h.runtime.Snapshot(filter.Platform, filter.GroupID)
 	result.InFlight = snapshot.InFlight
 	result.Waiting = snapshot.Waiting
+	var capacityAccounts []model.UpstreamAccount
+	accountQuery := h.db.Where("status = ?", model.StatusActive)
+	if filter.Platform != "" {
+		accountQuery = accountQuery.Where("platform = ?", filter.Platform)
+	}
+	if filter.GroupID > 0 {
+		accountQuery = accountQuery.Where("group_id = ?", filter.GroupID)
+	}
+	_ = accountQuery.Find(&capacityAccounts).Error
+	platformCapacity, groupCapacity, accountCapacity := map[string]int{}, map[int64]int{}, map[int64]int{}
+	for _, account := range capacityAccounts {
+		if account.Concurrency > 0 {
+			platformCapacity[account.Platform] += account.Concurrency
+			groupCapacity[account.GroupID] += account.Concurrency
+			accountCapacity[account.ID] = account.Concurrency
+		}
+	}
 	for platform, count := range snapshot.Platform {
-		result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "platform", Name: platform, InFlight: count})
+		capacity := platformCapacity[platform]
+		result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "platform", Name: platform, InFlight: count, MaxCapacity: capacity, LoadPercentage: opsLoad(count, capacity), Waiting: snapshot.WaitingPlatform[platform]})
 	}
 	if len(snapshot.Group) > 0 {
 		var groups []model.Group
@@ -484,7 +592,8 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 			if name == "" {
 				name = fmt.Sprintf("分组 #%d", id)
 			}
-			result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "group", ID: id, Name: name, InFlight: count})
+			capacity := groupCapacity[id]
+			result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "group", ID: id, Name: name, InFlight: count, MaxCapacity: capacity, LoadPercentage: opsLoad(count, capacity), Waiting: snapshot.WaitingGroup[id]})
 		}
 	}
 	if len(snapshot.Account) > 0 {
@@ -503,7 +612,29 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 			if name == "" {
 				name = fmt.Sprintf("账号 #%d", id)
 			}
-			result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "account", ID: id, Name: name, InFlight: count})
+			capacity := accountCapacity[id]
+			result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "account", ID: id, Name: name, InFlight: count, MaxCapacity: capacity, LoadPercentage: opsLoad(count, capacity)})
+		}
+	}
+	if len(snapshot.User) > 0 {
+		ids := make([]int64, 0, len(snapshot.User))
+		for id := range snapshot.User {
+			ids = append(ids, id)
+		}
+		var users []model.User
+		h.db.Where("id IN ?", ids).Find(&users)
+		names, capacities := map[int64]string{}, map[int64]int{}
+		for _, user := range users {
+			names[user.ID] = user.Email
+			capacities[user.ID] = user.Concurrency
+		}
+		for id, count := range snapshot.User {
+			name := names[id]
+			if name == "" {
+				name = fmt.Sprintf("用户 #%d", id)
+			}
+			capacity := capacities[id]
+			result.Breakdown = append(result.Breakdown, opsLiveCount{Scope: "user", ID: id, Name: name, InFlight: count, MaxCapacity: capacity, LoadPercentage: opsLoad(count, capacity), Waiting: snapshot.WaitingUser[id]})
 		}
 	}
 	sort.Slice(result.Breakdown, func(i, j int) bool {
@@ -513,6 +644,13 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 		return result.Breakdown[i].InFlight > result.Breakdown[j].InFlight
 	})
 	return result
+}
+
+func opsLoad(current, capacity int) float64 {
+	if capacity <= 0 {
+		return 0
+	}
+	return math.Round(float64(current)/float64(capacity)*10000) / 100
 }
 
 func (h *AdminHandler) opsSystemMetrics() opsSystemMetrics {
@@ -537,16 +675,12 @@ func (h *AdminHandler) opsSystemMetrics() opsSystemMetrics {
 func (h *AdminHandler) loadOpsMetrics(filter usageQuery) ([]opsLogMetric, bool, error) {
 	var rows []opsLogMetric
 	err := usageScope(h.db, filter, nil).
-		Select("usage_logs.created_at, usage_logs.user_id, usage_logs.group_id, usage_logs.account_id, usage_logs.model, usage_logs.input_tokens, usage_logs.output_tokens, usage_logs.cache_read_tokens, usage_logs.cache_write_tokens, usage_logs.cache_write5m_tokens, usage_logs.cache_write1h_tokens, usage_logs.cost_micro, usage_logs.duration_ms, usage_logs.status_code").
-		Order("usage_logs.created_at DESC").Limit(opsSampleLimit + 1).Find(&rows).Error
+		Select("usage_logs.created_at, usage_logs.user_id, usage_logs.group_id, usage_logs.account_id, usage_logs.model, usage_logs.input_tokens, usage_logs.output_tokens, usage_logs.cache_read_tokens, usage_logs.cache_write_tokens, usage_logs.cache_write5m_tokens, usage_logs.cache_write1h_tokens, usage_logs.cost_micro, usage_logs.duration_ms, usage_logs.first_token_ms, usage_logs.attempt_count, usage_logs.status_code").
+		Order("usage_logs.created_at DESC").Find(&rows).Error
 	if err != nil {
 		return nil, false, err
 	}
-	truncated := len(rows) > opsSampleLimit
-	if truncated {
-		rows = rows[:opsSampleLimit]
-	}
-	return rows, truncated, nil
+	return rows, false, nil
 }
 
 func (h *AdminHandler) loadOpsRateProfiles(filter opsFilter) ([]opsRateProfile, error) {
@@ -690,6 +824,11 @@ func buildOpsBreakdown(rows []opsLogMetric, start, end time.Time) ([]opsTrend, m
 		if trend[i].Requests > 0 {
 			trend[i].AverageLatencyMs = float64(trend[i].latencyTotal) / float64(trend[i].Requests)
 		}
+		seconds := step.Seconds()
+		if seconds > 0 {
+			trend[i].QPS = float64(trend[i].Requests) / seconds
+			trend[i].TPS = float64(trend[i].Tokens) / seconds
+		}
 	}
 	return trend, models, groups, users, accounts
 }
@@ -744,6 +883,9 @@ func applyOpsTrend(target *opsTrend, row opsLogMetric) {
 	target.Tokens += opsTokens(row)
 	target.CostMicro += row.CostMicro
 	target.latencyTotal += row.DurationMs
+	if row.AttemptCount > 1 {
+		target.SwitchCount += int64(row.AttemptCount - 1)
+	}
 	if isOpsSuccess(row.StatusCode) {
 		target.SuccessRequests++
 	} else {
@@ -762,6 +904,10 @@ func applyOpsRank(target *opsRank, row opsLogMetric) {
 	target.CacheWrite1hTokens += row.CacheWrite1hTokens
 	target.CostMicro += row.CostMicro
 	target.latencyTotal += row.DurationMs
+	if row.FirstTokenMs > 0 {
+		target.ttftTotal += row.FirstTokenMs
+		target.TTFTSamples++
+	}
 	if isOpsSuccess(row.StatusCode) {
 		target.SuccessRequests++
 	} else {
@@ -814,6 +960,12 @@ func sortedOpsRanks[K comparable](items map[K]*opsRank) []opsRank {
 		if item.Requests > 0 {
 			item.AverageLatencyMs = float64(item.latencyTotal) / float64(item.Requests)
 		}
+		if item.TTFTSamples > 0 {
+			item.AverageTTFTMs = float64(item.ttftTotal) / float64(item.TTFTSamples)
+		}
+		if item.latencyTotal > 0 {
+			item.OutputTPS = float64(item.OutputTokens) / float64(item.latencyTotal) * 1000
+		}
 		out = append(out, *item)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -838,6 +990,12 @@ func detailedOpsRanks(items map[string]*opsRank) []opsRank {
 		if item.Requests > 0 {
 			item.AverageLatencyMs = float64(item.latencyTotal) / float64(item.Requests)
 		}
+		if item.TTFTSamples > 0 {
+			item.AverageTTFTMs = float64(item.ttftTotal) / float64(item.TTFTSamples)
+		}
+		if item.latencyTotal > 0 {
+			item.OutputTPS = float64(item.OutputTokens) / float64(item.latencyTotal) * 1000
+		}
 		out = append(out, *item)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -850,6 +1008,106 @@ func detailedOpsRanks(items map[string]*opsRank) []opsRank {
 		out = out[:100]
 	}
 	return out
+}
+
+func opsRateSummaries(trend []opsTrend, current opsAggregate, total opsAggregate, window time.Duration) (opsRateSummary, opsRateSummary) {
+	qps := opsRateSummary{Current: float64(current.Requests) / 60}
+	tokens := current.InputTokens + current.OutputTokens + current.CacheReadTokens + current.CacheWriteTokens
+	tps := opsRateSummary{Current: float64(tokens) / 60}
+	for _, point := range trend {
+		if point.QPS > qps.Peak {
+			qps.Peak = point.QPS
+		}
+		if point.TPS > tps.Peak {
+			tps.Peak = point.TPS
+		}
+	}
+	if seconds := window.Seconds(); seconds > 0 {
+		qps.Average = float64(total.Requests) / seconds
+		totalTokens := total.InputTokens + total.OutputTokens + total.CacheReadTokens + total.CacheWriteTokens
+		tps.Average = float64(totalTokens) / seconds
+	}
+	return qps, tps
+}
+
+func buildOpsHistogram(values []int64, boundaries []int64) []opsHistogramBucket {
+	result := make([]opsHistogramBucket, 0, len(boundaries)+1)
+	previous := int64(0)
+	for _, upper := range boundaries {
+		label := fmt.Sprintf("%d–%dms", previous, upper)
+		if previous >= 1000 {
+			label = fmt.Sprintf("%.1f–%.1fs", float64(previous)/1000, float64(upper)/1000)
+		}
+		result = append(result, opsHistogramBucket{Range: label})
+		previous = upper
+	}
+	result = append(result, opsHistogramBucket{Range: fmt.Sprintf(">%ds", previous/1000)})
+	for _, value := range values {
+		index := len(boundaries)
+		for i, upper := range boundaries {
+			if value <= upper {
+				index = i
+				break
+			}
+		}
+		result[index].Count++
+	}
+	return result
+}
+
+func buildOpsErrors(rows []opsLogMetric, start, end time.Time) ([]opsErrorTrend, []opsStatusDistribution) {
+	step := opsBucketSize(end.Sub(start))
+	base, _ := makeOpsTrend(start, end, step)
+	trend := make([]opsErrorTrend, len(base))
+	index := map[string]int{}
+	for i, item := range base {
+		trend[i] = opsErrorTrend{Start: item.Start, Label: item.Label}
+		index[item.Start] = i
+	}
+	statuses := map[int]*opsStatusDistribution{}
+	for _, row := range rows {
+		if isOpsSuccess(row.StatusCode) {
+			continue
+		}
+		key := row.CreatedAt.UTC().Truncate(step).Format(time.RFC3339)
+		if i, ok := index[key]; ok {
+			point := &trend[i]
+			point.Total++
+			switch row.StatusCode {
+			case 429:
+				point.BusinessLimited++
+				point.Upstream429++
+			case 529:
+				point.Upstream529++
+			default:
+				if row.StatusCode >= 500 {
+					point.UpstreamOther++
+				}
+			}
+		}
+		if statuses[row.StatusCode] == nil {
+			statuses[row.StatusCode] = &opsStatusDistribution{StatusCode: row.StatusCode}
+		}
+		statuses[row.StatusCode].Count++
+		if row.StatusCode == 429 {
+			statuses[row.StatusCode].BusinessLimited++
+		}
+	}
+	distribution := make([]opsStatusDistribution, 0, len(statuses))
+	for _, item := range statuses {
+		distribution = append(distribution, *item)
+	}
+	sort.Slice(distribution, func(i, j int) bool { return distribution[i].Count > distribution[j].Count })
+	return trend, distribution
+}
+
+func (h *AdminHandler) loadOpsSystemHistory(filter opsFilter) ([]model.OpsSystemMetric, []model.OpsJobHeartbeat) {
+	var metrics []model.OpsSystemMetric
+	q := h.db.Where("bucket_at >= ? AND bucket_at < ?", filter.Start, filter.End).Order("bucket_at ASC")
+	_ = q.Limit(10080).Find(&metrics).Error
+	var jobs []model.OpsJobHeartbeat
+	_ = h.db.Order("job_name ASC").Find(&jobs).Error
+	return metrics, jobs
 }
 
 func ratio(numerator, denominator int64) float64 {

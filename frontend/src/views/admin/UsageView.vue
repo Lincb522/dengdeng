@@ -18,13 +18,15 @@ const expanded = ref(false)
 const filters = ref({
   model: '',
 	request_id: '',
-  platform: '',
-  group_id: '',
+	client_ip: '',
+	ip_location: '',
+	platform: String(route.query.platform || ''),
+	group_id: String(route.query.group_id || ''),
   user_id: '',
   account_id: '',
   status: String(route.query.status || ''),
-  start: '',
-  end: '',
+	start: route.query.start ? new Date(String(route.query.start)).toISOString().slice(0,16) : '',
+	end: route.query.end ? new Date(String(route.query.end)).toISOString().slice(0,16) : '',
   sort: 'created_at',
   order: 'desc',
 })
@@ -86,7 +88,7 @@ function search() {
 }
 
 function reset() {
-  filters.value = { model: '', request_id: '', platform: '', group_id: '', user_id: '', account_id: '', status: '', start: '', end: '', sort: 'created_at', order: 'desc' }
+  filters.value = { model: '', request_id: '', client_ip: '', ip_location: '', platform: '', group_id: '', user_id: '', account_id: '', status: '', start: '', end: '', sort: 'created_at', order: 'desc' }
   search()
 }
 
@@ -121,7 +123,9 @@ onMounted(async () => {
         <label><span>开始时间</span><input v-model="filters.start" class="input" type="datetime-local" /></label>
         <label><span>结束时间</span><input v-model="filters.end" class="input" type="datetime-local" /></label>
         <label><span>用户 ID</span><input v-model="filters.user_id" class="input" inputmode="numeric" placeholder="例如 42" /></label>
-			<label><span>请求编号</span><input v-model="filters.request_id" class="input font-mono" placeholder="ddr_…" /></label>
+		<label><span>请求编号</span><input v-model="filters.request_id" class="input font-mono" placeholder="ddr_…" /></label>
+		<label><span>请求 IP</span><input v-model="filters.client_ip" class="input font-mono" placeholder="例如 203.0.113.8" /></label>
+		<label><span>IP 地区</span><input v-model="filters.ip_location" class="input" placeholder="国家 / 地区 / 城市" /></label>
         <label><span>上游账号 ID</span><input v-model="filters.account_id" class="input" inputmode="numeric" placeholder="例如 8" /></label>
         <label><span>排序</span><select v-model="filters.sort" class="input"><option value="created_at">调用时间</option><option value="cost_micro">费用</option><option value="first_token_ms">首字耗时</option><option value="duration_ms">总耗时</option><option value="status_code">状态码</option></select></label>
         <label><span>顺序</span><select v-model="filters.order" class="input"><option value="desc">从高到低 / 最新</option><option value="asc">从低到高 / 最早</option></select></label>

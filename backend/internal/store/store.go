@@ -52,6 +52,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&model.User{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
+		&model.OpsSystemMetric{}, &model.OpsMetricAggregate{}, &model.OpsErrorLog{}, &model.OpsJobHeartbeat{}, &model.OpsAlertSilence{}, &model.OpsSystemLog{},
 		&model.PaymentConfig{}, &model.PaymentProviderInstance{}, &model.PaymentOrder{}, &model.PaymentAuditLog{}, &model.PaymentLedgerEntry{}, &model.BackupRecord{},
 		&model.ImageStorageConfig{}, &model.ImageTask{},
 	); err != nil {
@@ -108,7 +109,56 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	if err := normalizeSQLiteUsageTimes(db, cfg); err != nil {
 		return nil, fmt.Errorf("normalize usage timestamps: %w", err)
 	}
+	if err := backfillOpsErrorLogs(db); err != nil {
+		return nil, fmt.Errorf("backfill ops errors: %w", err)
+	}
 	return db, nil
+}
+
+func backfillOpsErrorLogs(db *gorm.DB) error {
+	const pageSize = 500
+	var lastID int64
+	platforms := map[int64]string{}
+	var groups []model.Group
+	if err := db.Select("id", "platform").Find(&groups).Error; err != nil {
+		return err
+	}
+	for _, group := range groups {
+		platforms[group.ID] = group.Platform
+	}
+	for {
+		var rows []model.UsageLog
+		err := db.Where("id > ? AND (status_code < 200 OR status_code >= 400) AND NOT EXISTS (SELECT 1 FROM ops_error_logs WHERE ops_error_logs.usage_log_id = usage_logs.id)", lastID).
+			Order("id ASC").Limit(pageSize).Find(&rows).Error
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		items := make([]model.OpsErrorLog, 0, len(rows))
+		for _, row := range rows {
+			errorType, phase, source := "upstream_error", "upstream", "provider"
+			if row.StatusCode == 429 {
+				errorType, phase = "rate_limit", "routing"
+			}
+			if row.StatusCode == 401 || row.StatusCode == 403 {
+				errorType, phase = "authentication", "authentication"
+			}
+			if row.StatusCode == 400 || row.StatusCode == 413 {
+				errorType, phase, source = "invalid_request", "request", "client"
+			}
+			severity := "P2"
+			if row.StatusCode >= 500 {
+				severity = "P1"
+			}
+			items = append(items, model.OpsErrorLog{UsageLogID: row.ID, RequestID: row.RequestID, ClientRequestID: row.ClientRequestID, UserID: row.UserID, APIKeyID: row.APIKeyID, AccountID: row.AccountID, GroupID: row.GroupID, Platform: platforms[row.GroupID], Model: row.Model, RequestPath: row.RequestPath, ClientIP: row.ClientIP, IPLocation: row.IPLocation, UserAgent: row.UserAgent, StatusCode: row.StatusCode, ErrorPhase: phase, ErrorType: errorType, ErrorSource: source, Severity: severity, BusinessLimited: row.StatusCode == 429, Retryable: row.StatusCode == 429 || row.StatusCode >= 500, ErrorMessage: row.ErrorMessage, UpstreamErrorChain: row.ErrorMessage, DurationMs: row.DurationMs, FirstTokenMs: row.FirstTokenMs, CreatedAt: row.CreatedAt})
+			lastID = row.ID
+		}
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(items, pageSize).Error; err != nil {
+			return err
+		}
+	}
 }
 
 // backfillPaymentLedger makes the ledger complete on the first upgraded boot.

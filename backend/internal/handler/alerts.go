@@ -26,25 +26,66 @@ func NewAlertHandler(db *gorm.DB, audit *service.AuditService) *AlertHandler {
 }
 
 type alertRuleRequest struct {
-	Name        string `json:"name"`
-	Enabled     bool   `json:"enabled"`
-	Condition   string `json:"condition"`
-	Platform    string `json:"platform"`
-	GroupID     int64  `json:"group_id"`
-	AccountID   int64  `json:"account_id"`
-	NotifyEmail string `json:"notify_email"`
+	Name             string  `json:"name"`
+	Enabled          bool    `json:"enabled"`
+	Condition        string  `json:"condition"`
+	Platform         string  `json:"platform"`
+	GroupID          int64   `json:"group_id"`
+	AccountID        int64   `json:"account_id"`
+	NotifyEmail      string  `json:"notify_email"`
+	MetricType       string  `json:"metric_type"`
+	Operator         string  `json:"operator"`
+	Threshold        float64 `json:"threshold"`
+	WindowMinutes    int     `json:"window_minutes"`
+	SustainedMinutes int     `json:"sustained_minutes"`
+	CooldownMinutes  int     `json:"cooldown_minutes"`
+	Severity         string  `json:"severity"`
+	Description      string  `json:"description"`
 }
 
 func normalizeAlertRule(req alertRuleRequest) (model.AlertRule, error) {
 	rule := model.AlertRule{
 		Name: strings.TrimSpace(req.Name), Enabled: req.Enabled, Condition: strings.TrimSpace(req.Condition),
 		Platform: strings.TrimSpace(req.Platform), GroupID: req.GroupID, AccountID: req.AccountID, NotifyEmail: strings.TrimSpace(req.NotifyEmail),
+		MetricType: strings.TrimSpace(req.MetricType), Operator: strings.TrimSpace(req.Operator), Threshold: req.Threshold,
+		WindowMinutes: req.WindowMinutes, SustainedMinutes: req.SustainedMinutes, CooldownMinutes: req.CooldownMinutes,
+		Severity: strings.TrimSpace(req.Severity), Description: strings.TrimSpace(req.Description),
 	}
 	if rule.Name == "" || len(rule.Name) > 120 {
 		return rule, gin.Error{Err: http.ErrNotSupported, Type: gin.ErrorTypePublic}.Err
 	}
-	if rule.Condition != "down" && rule.Condition != "degraded_or_down" && rule.Condition != "not_healthy" {
+	if rule.MetricType == "" && rule.Condition != "down" && rule.Condition != "degraded_or_down" && rule.Condition != "not_healthy" {
 		return rule, errText("condition must be down, degraded_or_down or not_healthy")
+	}
+	validMetrics := map[string]bool{"success_rate": true, "error_rate": true, "upstream_error_rate": true, "cpu_percent": true, "memory_percent": true, "queue_depth": true, "qps": true, "tps": true, "available_account_ratio": true, "available_account_count": true, "rate_limited_account_count": true, "error_account_count": true}
+	if rule.MetricType != "" && !validMetrics[rule.MetricType] {
+		return rule, errText("invalid metric_type")
+	}
+	if rule.MetricType != "" {
+		if rule.Operator == "" {
+			rule.Operator = "gte"
+		}
+		if rule.Operator != "gt" && rule.Operator != "gte" && rule.Operator != "lt" && rule.Operator != "lte" {
+			return rule, errText("invalid operator")
+		}
+		if rule.WindowMinutes <= 0 {
+			rule.WindowMinutes = 5
+		}
+		if rule.SustainedMinutes <= 0 {
+			rule.SustainedMinutes = 1
+		}
+		if rule.CooldownMinutes <= 0 {
+			rule.CooldownMinutes = 10
+		}
+		if rule.WindowMinutes > 1440 || rule.SustainedMinutes > 1440 || rule.CooldownMinutes > 10080 {
+			return rule, errText("alert timing is too large")
+		}
+		if rule.Severity == "" {
+			rule.Severity = "warning"
+		}
+		if rule.Severity != "info" && rule.Severity != "warning" && rule.Severity != "critical" {
+			return rule, errText("invalid severity")
+		}
 	}
 	if rule.Platform != "" && !validPlatform(rule.Platform) {
 		return rule, errText("invalid platform")
@@ -114,7 +155,7 @@ func (h *AlertHandler) UpdateRule(c *gin.Context) {
 		util.Fail(c, 400, err.Error())
 		return
 	}
-	if err := h.db.Model(&existing).Updates(map[string]any{"name": next.Name, "enabled": next.Enabled, "condition": next.Condition, "platform": next.Platform, "group_id": next.GroupID, "account_id": next.AccountID, "notify_email": next.NotifyEmail}).Error; err != nil {
+	if err := h.db.Model(&existing).Updates(map[string]any{"name": next.Name, "enabled": next.Enabled, "condition": next.Condition, "platform": next.Platform, "group_id": next.GroupID, "account_id": next.AccountID, "notify_email": next.NotifyEmail, "metric_type": next.MetricType, "operator": next.Operator, "threshold": next.Threshold, "window_minutes": next.WindowMinutes, "sustained_minutes": next.SustainedMinutes, "cooldown_minutes": next.CooldownMinutes, "severity": next.Severity, "description": next.Description}).Error; err != nil {
 		util.Fail(c, 500, "update alert rule failed")
 		return
 	}
@@ -194,6 +235,66 @@ func (h *AlertHandler) AcknowledgeEvent(c *gin.Context) {
 	var event model.AlertEvent
 	h.db.First(&event, id)
 	util.OK(c, h.decorateEvents([]model.AlertEvent{event})[0])
+}
+
+func (h *AlertHandler) ListSilences(c *gin.Context) {
+	var items []model.OpsAlertSilence
+	if err := h.db.Where("deleted_at IS NULL").Order("ends_at DESC").Limit(300).Find(&items).Error; err != nil {
+		util.Fail(c, 500, "load alert silences failed")
+		return
+	}
+	util.OK(c, items)
+}
+
+func (h *AlertHandler) CreateSilence(c *gin.Context) {
+	var req struct {
+		RuleID   int64      `json:"rule_id"`
+		Reason   string     `json:"reason"`
+		StartsAt *time.Time `json:"starts_at"`
+		EndsAt   time.Time  `json:"ends_at"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.RuleID < 0 {
+		util.Fail(c, 400, "invalid alert silence")
+		return
+	}
+	now := time.Now().UTC()
+	starts := now
+	if req.StartsAt != nil {
+		starts = req.StartsAt.UTC()
+	}
+	ends := req.EndsAt.UTC()
+	if !ends.After(starts) || ends.Sub(starts) > 31*24*time.Hour {
+		util.Fail(c, 400, "silence end must be within 31 days after start")
+		return
+	}
+	actor := middleware.CurrentUser(c)
+	item := model.OpsAlertSilence{RuleID: req.RuleID, Reason: strings.TrimSpace(req.Reason), CreatedBy: actor.Email, StartsAt: starts, EndsAt: ends, CreatedAt: now}
+	if err := h.db.Create(&item).Error; err != nil {
+		util.Fail(c, 500, "create alert silence failed")
+		return
+	}
+	_ = h.audit.Record(actor, "alert_silence.created", "alert_silence", strconv.FormatInt(item.ID, 10), item.Reason, c.ClientIP())
+	util.OK(c, item)
+}
+
+func (h *AlertHandler) DeleteSilence(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		util.Fail(c, 400, "invalid alert silence id")
+		return
+	}
+	now := time.Now().UTC()
+	result := h.db.Model(&model.OpsAlertSilence{}).Where("id = ? AND deleted_at IS NULL", id).Update("deleted_at", now)
+	if result.Error != nil {
+		util.Fail(c, 500, "delete alert silence failed")
+		return
+	}
+	if result.RowsAffected == 0 {
+		util.Fail(c, 404, "alert silence not found")
+		return
+	}
+	_ = h.audit.Record(middleware.CurrentUser(c), "alert_silence.deleted", "alert_silence", strconv.FormatInt(id, 10), "", c.ClientIP())
+	util.OK(c, gin.H{"deleted": true})
 }
 
 type channelProbeView struct {

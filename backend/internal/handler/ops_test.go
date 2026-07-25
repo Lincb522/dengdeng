@@ -44,7 +44,7 @@ func TestBuildOpsSnapshotAggregatesLedgerAndHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := []model.UsageLog{
-		{UserID: user.ID, APIKeyID: key.ID, GroupID: group.ID, AccountID: ready.ID, Model: "gpt-test", InputTokens: 100, OutputTokens: 50, CacheReadTokens: 20, CacheWriteTokens: 10, CacheWrite5mTokens: 7, CacheWrite1hTokens: 3, CostMicro: 1000, DurationMs: 120, StatusCode: 200, CreatedAt: now.Add(-3 * time.Minute)},
+		{UserID: user.ID, APIKeyID: key.ID, GroupID: group.ID, AccountID: ready.ID, Model: "gpt-test", InputTokens: 100, OutputTokens: 50, CacheReadTokens: 20, CacheWriteTokens: 10, CacheWrite5mTokens: 7, CacheWrite1hTokens: 3, CostMicro: 1000, FirstTokenMs: 45, DurationMs: 120, AttemptCount: 2, StatusCode: 200, CreatedAt: now.Add(-3 * time.Minute)},
 		{UserID: user.ID, APIKeyID: key.ID, GroupID: group.ID, AccountID: cooling.ID, Model: "gpt-test", InputTokens: 20, OutputTokens: 10, CostMicro: 200, DurationMs: 400, StatusCode: 429, ErrorMessage: "upstream limited", CreatedAt: now.Add(-2 * time.Minute)},
 		{UserID: user.ID, APIKeyID: key.ID, GroupID: group.ID, AccountID: cooling.ID, Model: "gpt-second", InputTokens: 5, OutputTokens: 5, CostMicro: 50, DurationMs: 900, StatusCode: 503, ErrorMessage: "unavailable", CreatedAt: now.Add(-time.Minute)},
 	}
@@ -66,13 +66,19 @@ func TestBuildOpsSnapshotAggregatesLedgerAndHealth(t *testing.T) {
 	if snapshot.Overview.AccountTotal != 2 || snapshot.Overview.AccountAvailable != 1 || snapshot.Overview.AccountCooling != 1 {
 		t.Fatalf("unexpected account health: %#v", snapshot.Overview)
 	}
+	if snapshot.Overview.P50LatencyMs != 120 || snapshot.Overview.P99LatencyMs != 120 || snapshot.Overview.P50TTFTMs != 45 || snapshot.Overview.SwitchCount != 1 {
+		t.Fatalf("unexpected latency/switch metrics: %#v", snapshot.Overview)
+	}
+	if len(snapshot.LatencyHistogram) == 0 || len(snapshot.StatusDistribution) != 2 {
+		t.Fatalf("missing histogram/error distribution: histogram=%#v statuses=%#v", snapshot.LatencyHistogram, snapshot.StatusDistribution)
+	}
 	if len(snapshot.RecentErrors) != 2 || snapshot.RecentErrors[0].AccountName != "cooling-account" {
 		t.Fatalf("unexpected decorated errors: %#v", snapshot.RecentErrors)
 	}
 	if len(snapshot.TopModels) != 2 || snapshot.TopModels[0].Name != "gpt-test" {
 		t.Fatalf("unexpected model ranks: %#v", snapshot.TopModels)
 	}
-	if len(snapshot.ModelUsage) != 2 || snapshot.ModelUsage[0].Name != "gpt-test" || snapshot.ModelUsage[0].CacheWrite5mTokens != 7 || snapshot.ModelUsage[0].CacheWrite1hTokens != 3 {
+	if len(snapshot.ModelUsage) != 2 || snapshot.ModelUsage[0].Name != "gpt-test" || snapshot.ModelUsage[0].CacheWrite5mTokens != 7 || snapshot.ModelUsage[0].CacheWrite1hTokens != 3 || snapshot.ModelUsage[0].AverageTTFTMs != 45 || snapshot.ModelUsage[0].TTFTSamples != 1 {
 		t.Fatalf("unexpected detailed model usage: %#v", snapshot.ModelUsage)
 	}
 	if len(snapshot.RateProfiles) != 1 || snapshot.RateProfiles[0].Name != "openai-pool" {

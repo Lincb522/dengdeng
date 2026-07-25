@@ -16,15 +16,19 @@ type RuntimeMetrics struct {
 	waitingGroup    map[int64]int
 	account         map[int64]int
 	user            map[int64]int
+	waitingUser     map[int64]int
 }
 
 type RuntimeSnapshot struct {
-	InFlight int
-	Waiting  int
-	Platform map[string]int
-	Group    map[int64]int
-	Account  map[int64]int
-	User     map[int64]int
+	InFlight        int
+	Waiting         int
+	Platform        map[string]int
+	Group           map[int64]int
+	Account         map[int64]int
+	User            map[int64]int
+	WaitingPlatform map[string]int
+	WaitingGroup    map[int64]int
+	WaitingUser     map[int64]int
 }
 
 type RuntimeRequest struct {
@@ -39,7 +43,7 @@ type RuntimeRequest struct {
 
 func NewRuntimeMetrics() *RuntimeMetrics {
 	return &RuntimeMetrics{
-		platform: map[string]int{}, waitingPlatform: map[string]int{}, group: map[int64]int{}, waitingGroup: map[int64]int{}, account: map[int64]int{}, user: map[int64]int{},
+		platform: map[string]int{}, waitingPlatform: map[string]int{}, group: map[int64]int{}, waitingGroup: map[int64]int{}, account: map[int64]int{}, user: map[int64]int{}, waitingUser: map[int64]int{},
 	}
 }
 
@@ -112,12 +116,14 @@ func (r *RuntimeRequest) SetWaiting(waiting bool) {
 		m.waiting++
 		m.waitingPlatform[r.platform]++
 		m.waitingGroup[r.groupID]++
+		m.waitingUser[r.userID]++
 	} else {
 		if m.waiting > 0 {
 			m.waiting--
 		}
 		decrement(m.waitingPlatform, r.platform)
 		decrement(m.waitingGroup, r.groupID)
+		decrement(m.waitingUser, r.userID)
 	}
 	m.mu.Unlock()
 }
@@ -140,6 +146,7 @@ func (r *RuntimeRequest) Finish() {
 		}
 		decrement(m.waitingPlatform, r.platform)
 		decrement(m.waitingGroup, r.groupID)
+		decrement(m.waitingUser, r.userID)
 	}
 	if m.all > 0 {
 		m.all--
@@ -176,12 +183,12 @@ func (m *RuntimeMetrics) Snapshot(platform string, groupID int64) RuntimeSnapsho
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if platform == "" && groupID == 0 {
-		return RuntimeSnapshot{InFlight: m.all, Waiting: m.waiting, Platform: copyCounts(m.platform), Group: copyCounts(m.group), Account: copyCounts(m.account), User: copyCounts(m.user)}
+		return RuntimeSnapshot{InFlight: m.all, Waiting: m.waiting, Platform: copyCounts(m.platform), Group: copyCounts(m.group), Account: copyCounts(m.account), User: copyCounts(m.user), WaitingPlatform: copyCounts(m.waitingPlatform), WaitingGroup: copyCounts(m.waitingGroup), WaitingUser: copyCounts(m.waitingUser)}
 	}
 	// A filtered page must not claim it knows account-level values which cannot
 	// be safely reconstructed from independent maps. Group is exact; the
 	// platform count is exact only when no group filter is selected.
-	filtered := RuntimeSnapshot{Platform: map[string]int{}, Group: map[int64]int{}, Account: map[int64]int{}, User: map[int64]int{}}
+	filtered := RuntimeSnapshot{Platform: map[string]int{}, Group: map[int64]int{}, Account: map[int64]int{}, User: map[int64]int{}, WaitingPlatform: map[string]int{}, WaitingGroup: map[int64]int{}, WaitingUser: map[int64]int{}}
 	if groupID > 0 {
 		filtered.InFlight = m.group[groupID]
 		filtered.Waiting = m.waitingGroup[groupID]

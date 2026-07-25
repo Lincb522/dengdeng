@@ -2,6 +2,8 @@ package service
 
 import (
 	"log"
+	"net/http"
+	"strings"
 	"time"
 
 	"dengdeng/internal/model"
@@ -16,20 +18,28 @@ import (
 type BillingService struct {
 	db      *gorm.DB
 	pricing *PricingService
+	geo     *IPGeoResolver
 }
 
 func NewBillingService(db *gorm.DB, pricing *PricingService) *BillingService {
 	return &BillingService{db: db, pricing: pricing}
 }
 
+func (s *BillingService) SetIPGeoResolver(resolver *IPGeoResolver) { s.geo = resolver }
+
 type BillContext struct {
-	RequestID string
-	UserID    int64
-	APIKeyID  int64
-	AccountID int64
-	GroupID   int64
-	Model     string
-	Stream    bool
+	RequestID       string
+	ClientRequestID string
+	UserID          int64
+	APIKeyID        int64
+	AccountID       int64
+	GroupID         int64
+	Model           string
+	Platform        string
+	RequestPath     string
+	ClientIP        string
+	UserAgent       string
+	Stream          bool
 	// Effort is recorded for auditability: the per-effort multiplier is
 	// already folded into Rates by the gateway before Record is called.
 	Effort       string
@@ -54,11 +64,15 @@ func (s *BillingService) Record(bc BillContext) {
 	cost := breakdown.TotalMicro
 	entry := model.UsageLog{
 		RequestID:             bc.RequestID,
+		ClientRequestID:       bc.ClientRequestID,
 		UserID:                bc.UserID,
 		APIKeyID:              bc.APIKeyID,
 		AccountID:             bc.AccountID,
 		GroupID:               bc.GroupID,
 		Model:                 bc.Model,
+		RequestPath:           bc.RequestPath,
+		ClientIP:              bc.ClientIP,
+		UserAgent:             bc.UserAgent,
 		Stream:                bc.Stream,
 		ReasoningEffort:       bc.Effort,
 		InputTokens:           bc.Usage.InputTokens,
@@ -97,9 +111,20 @@ func (s *BillingService) Record(bc BillContext) {
 		// recent rows on non-UTC hosts.
 		CreatedAt: time.Now().UTC(),
 	}
+	var errorLogID int64
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&entry).Error; err != nil {
 			return err
+		}
+		if entry.StatusCode < http.StatusOK || entry.StatusCode >= http.StatusBadRequest {
+			errorLog := opsErrorFromUsage(entry, bc.Platform)
+			if err := tx.Create(&errorLog).Error; err == nil {
+				errorLogID = errorLog.ID
+			} else {
+				// Usage and balance settlement are authoritative. A monitoring
+				// sidecar must not roll them back during a rolling schema upgrade.
+				log.Printf("[billing] ops error sidecar unavailable for request %s: %v", entry.RequestID, err)
+			}
 		}
 		if cost > 0 && !bc.SkipBalance {
 			if err := tx.Model(&model.User{}).Where("id = ?", bc.UserID).
@@ -124,6 +149,41 @@ func (s *BillingService) Record(bc BillContext) {
 		return nil
 	}); err != nil {
 		log.Printf("[billing] failed to settle usage for user %d: %v", bc.UserID, err)
+		return
+	}
+	if s.geo != nil && entry.ClientIP != "" {
+		s.geo.Enrich(entry.ID, errorLogID, entry.ClientIP)
+	}
+}
+
+func opsErrorFromUsage(entry model.UsageLog, platform string) model.OpsErrorLog {
+	phase, errorType, source := "response", "upstream", "provider"
+	businessLimited := entry.StatusCode == http.StatusTooManyRequests
+	retryable := businessLimited || entry.StatusCode == http.StatusBadGateway || entry.StatusCode == http.StatusServiceUnavailable || entry.StatusCode == 529
+	switch {
+	case entry.StatusCode == http.StatusUnauthorized || entry.StatusCode == http.StatusForbidden:
+		phase, errorType = "authentication", "authentication"
+	case entry.StatusCode == http.StatusBadRequest || entry.StatusCode == http.StatusRequestEntityTooLarge:
+		phase, errorType, source = "request", "invalid_request", "client"
+	case entry.StatusCode == http.StatusTooManyRequests:
+		phase, errorType = "routing", "rate_limit"
+	case entry.StatusCode == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(entry.ErrorMessage), "no available upstream"):
+		phase, errorType, source = "routing", "no_available_account", "scheduler"
+	case entry.StatusCode >= http.StatusInternalServerError && entry.StatusCode < 600:
+		phase, errorType = "upstream", "upstream_error"
+	}
+	severity := "P2"
+	if entry.StatusCode >= 500 {
+		severity = "P1"
+	}
+	return model.OpsErrorLog{
+		UsageLogID: entry.ID, RequestID: entry.RequestID, ClientRequestID: entry.ClientRequestID,
+		UserID: entry.UserID, APIKeyID: entry.APIKeyID, AccountID: entry.AccountID, GroupID: entry.GroupID,
+		Platform: platform, Model: entry.Model, RequestPath: entry.RequestPath, ClientIP: entry.ClientIP,
+		UserAgent: entry.UserAgent, StatusCode: entry.StatusCode, ErrorPhase: phase, ErrorType: errorType,
+		ErrorSource: source, Severity: severity, BusinessLimited: businessLimited, Retryable: retryable,
+		ErrorMessage: entry.ErrorMessage, UpstreamErrorChain: entry.ErrorMessage, DurationMs: entry.DurationMs, FirstTokenMs: entry.FirstTokenMs,
+		CreatedAt: entry.CreatedAt,
 	}
 }
 

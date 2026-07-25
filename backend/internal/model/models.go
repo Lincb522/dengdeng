@@ -478,16 +478,28 @@ type AccountProbe struct {
 // AlertRule describes a health condition attached to an upstream account
 // pool. Filters are optional; a zero ID / empty platform means "all".
 type AlertRule struct {
-	ID          int64     `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:120;not null" json:"name"`
-	Enabled     bool      `gorm:"not null;default:true" json:"enabled"`
-	Condition   string    `gorm:"size:32;not null" json:"condition"` // down | degraded_or_down | not_healthy
-	Platform    string    `gorm:"size:16;index" json:"platform"`
-	GroupID     int64     `gorm:"index;not null;default:0" json:"group_id"`
-	AccountID   int64     `gorm:"index;not null;default:0" json:"account_id"`
-	NotifyEmail string    `gorm:"size:255" json:"notify_email"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int64  `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:120;not null" json:"name"`
+	Enabled     bool   `gorm:"not null;default:true" json:"enabled"`
+	Condition   string `gorm:"size:32;not null" json:"condition"` // down | degraded_or_down | not_healthy
+	Platform    string `gorm:"size:16;index" json:"platform"`
+	GroupID     int64  `gorm:"index;not null;default:0" json:"group_id"`
+	AccountID   int64  `gorm:"index;not null;default:0" json:"account_id"`
+	NotifyEmail string `gorm:"size:255" json:"notify_email"`
+	// MetricType switches the rule from account-probe mode to metric mode.
+	// Empty keeps the legacy probe semantics above. Metric rules are evaluated
+	// by the minute collector and support the same platform/group scoping.
+	MetricType       string     `gorm:"size:64;index" json:"metric_type,omitempty"`
+	Operator         string     `gorm:"size:8;not null;default:gte" json:"operator,omitempty"`
+	Threshold        float64    `gorm:"not null;default:0" json:"threshold,omitempty"`
+	WindowMinutes    int        `gorm:"not null;default:5" json:"window_minutes,omitempty"`
+	SustainedMinutes int        `gorm:"not null;default:1" json:"sustained_minutes,omitempty"`
+	CooldownMinutes  int        `gorm:"not null;default:10" json:"cooldown_minutes,omitempty"`
+	Severity         string     `gorm:"size:16;not null;default:warning" json:"severity,omitempty"`
+	Description      string     `gorm:"size:512" json:"description,omitempty"`
+	LastTriggeredAt  *time.Time `gorm:"index" json:"last_triggered_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 // AlertEvent is one continuous incident for a rule/account pair. Repeated
@@ -510,6 +522,9 @@ type AlertEvent struct {
 	AcknowledgedBy string     `gorm:"size:255" json:"acknowledged_by"`
 	DeliveryStatus string     `gorm:"size:16" json:"delivery_status"` // console | sent | failed
 	DeliveryError  string     `gorm:"size:512" json:"delivery_error"`
+	MetricValue    float64    `gorm:"not null;default:0" json:"metric_value,omitempty"`
+	ThresholdValue float64    `gorm:"not null;default:0" json:"threshold_value,omitempty"`
+	Dimensions     string     `gorm:"type:text" json:"dimensions,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
@@ -616,12 +631,23 @@ type UsageLog struct {
 	// lets a user or operator locate one completed/failed relay call without
 	// exposing payloads, API keys or upstream credentials.
 	RequestID string `gorm:"size:32;index" json:"request_id"`
-	UserID    int64  `gorm:"index" json:"user_id"`
-	APIKeyID  int64  `gorm:"index" json:"api_key_id"`
-	AccountID int64  `gorm:"index" json:"account_id"`
-	GroupID   int64  `gorm:"index" json:"group_id"`
-	Model     string `gorm:"size:128" json:"model"`
-	Stream    bool   `json:"stream"`
+	// ClientRequestID preserves a caller supplied correlation ID separately
+	// from the trusted server generated RequestID.
+	ClientRequestID string `gorm:"size:64;index" json:"client_request_id,omitempty"`
+	UserID          int64  `gorm:"index" json:"user_id"`
+	APIKeyID        int64  `gorm:"index" json:"api_key_id"`
+	AccountID       int64  `gorm:"index" json:"account_id"`
+	GroupID         int64  `gorm:"index" json:"group_id"`
+	Model           string `gorm:"size:128" json:"model"`
+	RequestPath     string `gorm:"size:256;index" json:"request_path,omitempty"`
+	ClientIP        string `gorm:"size:64;index" json:"client_ip,omitempty"`
+	IPCountry       string `gorm:"size:96" json:"ip_country,omitempty"`
+	IPRegion        string `gorm:"size:128" json:"ip_region,omitempty"`
+	IPCity          string `gorm:"size:128" json:"ip_city,omitempty"`
+	IPLocation      string `gorm:"size:320;index" json:"ip_location,omitempty"`
+	IPISP           string `gorm:"size:160" json:"ip_isp,omitempty"`
+	UserAgent       string `gorm:"size:512" json:"user_agent,omitempty"`
+	Stream          bool   `json:"stream"`
 	// ReasoningEffort is the effective OpenAI-wire reasoning effort of this
 	// call (client value first, key default otherwise). It is stored so the
 	// per-effort billing multiplier applied to CostMicro stays auditable.
@@ -675,6 +701,140 @@ type UsageLog struct {
 	KeyName     string `gorm:"-" json:"key_name,omitempty"`
 	GroupName   string `gorm:"-" json:"group_name,omitempty"`
 	AccountName string `gorm:"-" json:"account_name,omitempty"`
+}
+
+// OpsSystemMetric is the durable minute-level runtime snapshot. Usage data is
+// still authoritative in UsageLog; this table keeps system/dependency facts
+// and precomputed latency percentiles that cannot be reconstructed later.
+type OpsSystemMetric struct {
+	ID                   int64     `gorm:"primaryKey" json:"id"`
+	BucketAt             time.Time `gorm:"uniqueIndex:idx_ops_metric_bucket_scope;index" json:"bucket_at"`
+	WindowMinutes        int       `gorm:"not null;default:1" json:"window_minutes"`
+	Platform             string    `gorm:"size:16;uniqueIndex:idx_ops_metric_bucket_scope" json:"platform,omitempty"`
+	GroupID              int64     `gorm:"not null;default:0;uniqueIndex:idx_ops_metric_bucket_scope" json:"group_id,omitempty"`
+	SuccessCount         int64     `gorm:"not null;default:0" json:"success_count"`
+	ErrorCount           int64     `gorm:"not null;default:0" json:"error_count"`
+	BusinessLimitedCount int64     `gorm:"not null;default:0" json:"business_limited_count"`
+	Upstream429Count     int64     `gorm:"column:upstream_429_count;not null;default:0" json:"upstream_429_count"`
+	Upstream529Count     int64     `gorm:"column:upstream_529_count;not null;default:0" json:"upstream_529_count"`
+	UpstreamOtherErrors  int64     `gorm:"not null;default:0" json:"upstream_other_errors"`
+	TokenConsumed        int64     `gorm:"not null;default:0" json:"token_consumed"`
+	SwitchCount          int64     `gorm:"not null;default:0" json:"switch_count"`
+	QPS                  float64   `gorm:"not null;default:0" json:"qps"`
+	TPS                  float64   `gorm:"not null;default:0" json:"tps"`
+	DurationP50Ms        int64     `gorm:"not null;default:0" json:"duration_p50_ms"`
+	DurationP90Ms        int64     `gorm:"not null;default:0" json:"duration_p90_ms"`
+	DurationP95Ms        int64     `gorm:"not null;default:0" json:"duration_p95_ms"`
+	DurationP99Ms        int64     `gorm:"not null;default:0" json:"duration_p99_ms"`
+	DurationAvgMs        float64   `gorm:"not null;default:0" json:"duration_avg_ms"`
+	DurationMaxMs        int64     `gorm:"not null;default:0" json:"duration_max_ms"`
+	TTFTP50Ms            int64     `gorm:"column:ttft_p50_ms;not null;default:0" json:"ttft_p50_ms"`
+	TTFTP90Ms            int64     `gorm:"column:ttft_p90_ms;not null;default:0" json:"ttft_p90_ms"`
+	TTFTP95Ms            int64     `gorm:"column:ttft_p95_ms;not null;default:0" json:"ttft_p95_ms"`
+	TTFTP99Ms            int64     `gorm:"column:ttft_p99_ms;not null;default:0" json:"ttft_p99_ms"`
+	TTFTAvgMs            float64   `gorm:"not null;default:0" json:"ttft_avg_ms"`
+	TTFTMaxMs            int64     `gorm:"not null;default:0" json:"ttft_max_ms"`
+	CPUPercent           float64   `gorm:"not null;default:0" json:"cpu_percent"`
+	MemoryUsedBytes      uint64    `gorm:"not null;default:0" json:"memory_used_bytes"`
+	MemoryTotalBytes     uint64    `gorm:"not null;default:0" json:"memory_total_bytes"`
+	MemoryPercent        float64   `gorm:"not null;default:0" json:"memory_percent"`
+	DBOK                 bool      `gorm:"column:db_ok;not null;default:true" json:"db_ok"`
+	DBOpenConnections    int       `gorm:"not null;default:0" json:"db_open_connections"`
+	DBInUse              int       `gorm:"not null;default:0" json:"db_in_use"`
+	DBIdle               int       `gorm:"not null;default:0" json:"db_idle"`
+	DBWaitCount          int64     `gorm:"not null;default:0" json:"db_wait_count"`
+	Goroutines           int       `gorm:"not null;default:0" json:"goroutines"`
+	InFlight             int       `gorm:"not null;default:0" json:"in_flight"`
+	QueueDepth           int       `gorm:"not null;default:0" json:"queue_depth"`
+	CreatedAt            time.Time `json:"created_at"`
+}
+
+// OpsMetricAggregate stores completed usage buckets for long-range queries.
+type OpsMetricAggregate struct {
+	ID            int64     `gorm:"primaryKey" json:"id"`
+	Granularity   string    `gorm:"size:8;uniqueIndex:idx_ops_aggregate_scope" json:"granularity"`
+	BucketAt      time.Time `gorm:"uniqueIndex:idx_ops_aggregate_scope;index" json:"bucket_at"`
+	Platform      string    `gorm:"size:16;uniqueIndex:idx_ops_aggregate_scope" json:"platform,omitempty"`
+	GroupID       int64     `gorm:"not null;default:0;uniqueIndex:idx_ops_aggregate_scope" json:"group_id,omitempty"`
+	Requests      int64     `gorm:"not null;default:0" json:"requests"`
+	SuccessCount  int64     `gorm:"not null;default:0" json:"success_count"`
+	ErrorCount    int64     `gorm:"not null;default:0" json:"error_count"`
+	InputTokens   int64     `gorm:"not null;default:0" json:"input_tokens"`
+	OutputTokens  int64     `gorm:"not null;default:0" json:"output_tokens"`
+	CacheTokens   int64     `gorm:"not null;default:0" json:"cache_tokens"`
+	CostMicro     int64     `gorm:"not null;default:0" json:"cost_micro"`
+	DurationTotal int64     `gorm:"not null;default:0" json:"duration_total"`
+	DurationMax   int64     `gorm:"not null;default:0" json:"duration_max"`
+	TTFTTotal     int64     `gorm:"not null;default:0" json:"ttft_total"`
+	TTFTSamples   int64     `gorm:"not null;default:0" json:"ttft_samples"`
+	SwitchCount   int64     `gorm:"not null;default:0" json:"switch_count"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type OpsErrorLog struct {
+	ID                 int64      `gorm:"primaryKey" json:"id"`
+	UsageLogID         int64      `gorm:"uniqueIndex" json:"usage_log_id"`
+	RequestID          string     `gorm:"size:32;index" json:"request_id"`
+	ClientRequestID    string     `gorm:"size:64;index" json:"client_request_id,omitempty"`
+	UserID             int64      `gorm:"index" json:"user_id"`
+	APIKeyID           int64      `gorm:"index" json:"api_key_id"`
+	AccountID          int64      `gorm:"index" json:"account_id"`
+	GroupID            int64      `gorm:"index" json:"group_id"`
+	Platform           string     `gorm:"size:16;index" json:"platform"`
+	Model              string     `gorm:"size:128;index" json:"model"`
+	RequestPath        string     `gorm:"size:256;index" json:"request_path"`
+	ClientIP           string     `gorm:"size:64;index" json:"client_ip"`
+	IPLocation         string     `gorm:"size:320;index" json:"ip_location"`
+	UserAgent          string     `gorm:"size:512" json:"user_agent"`
+	StatusCode         int        `gorm:"index" json:"status_code"`
+	ErrorPhase         string     `gorm:"size:32;index" json:"error_phase"`
+	ErrorType          string     `gorm:"size:64;index" json:"error_type"`
+	ErrorSource        string     `gorm:"size:64;index" json:"error_source"`
+	Severity           string     `gorm:"size:8;index" json:"severity"`
+	BusinessLimited    bool       `gorm:"not null;default:false;index" json:"business_limited"`
+	Retryable          bool       `gorm:"not null;default:false" json:"retryable"`
+	ErrorMessage       string     `gorm:"size:2048" json:"error_message"`
+	UpstreamErrorChain string     `gorm:"type:text" json:"upstream_error_chain,omitempty"`
+	DurationMs         int64      `json:"duration_ms"`
+	FirstTokenMs       int64      `json:"first_token_ms"`
+	ResolvedAt         *time.Time `gorm:"index" json:"resolved_at,omitempty"`
+	ResolvedBy         string     `gorm:"size:255" json:"resolved_by,omitempty"`
+	CreatedAt          time.Time  `gorm:"index" json:"created_at"`
+}
+
+type OpsJobHeartbeat struct {
+	JobName        string     `gorm:"primaryKey;size:64" json:"job_name"`
+	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
+	LastSuccessAt  *time.Time `json:"last_success_at,omitempty"`
+	LastErrorAt    *time.Time `json:"last_error_at,omitempty"`
+	LastError      string     `gorm:"size:2048" json:"last_error,omitempty"`
+	LastDurationMs int64      `json:"last_duration_ms"`
+	UpdatedAt      time.Time  `gorm:"index" json:"updated_at"`
+}
+
+type OpsAlertSilence struct {
+	ID        int64      `gorm:"primaryKey" json:"id"`
+	RuleID    int64      `gorm:"index;not null;default:0" json:"rule_id"`
+	Reason    string     `gorm:"size:512" json:"reason"`
+	CreatedBy string     `gorm:"size:255" json:"created_by"`
+	StartsAt  time.Time  `gorm:"index" json:"starts_at"`
+	EndsAt    time.Time  `gorm:"index" json:"ends_at"`
+	CreatedAt time.Time  `json:"created_at"`
+	DeletedAt *time.Time `gorm:"index" json:"deleted_at,omitempty"`
+}
+
+type OpsSystemLog struct {
+	ID        int64     `gorm:"primaryKey" json:"id"`
+	Level     string    `gorm:"size:16;index" json:"level"`
+	Component string    `gorm:"size:64;index" json:"component"`
+	Message   string    `gorm:"size:2048" json:"message"`
+	RequestID string    `gorm:"size:32;index" json:"request_id,omitempty"`
+	UserID    int64     `gorm:"index" json:"user_id,omitempty"`
+	APIKeyID  int64     `gorm:"index" json:"api_key_id,omitempty"`
+	AccountID int64     `gorm:"index" json:"account_id,omitempty"`
+	Platform  string    `gorm:"size:16;index" json:"platform,omitempty"`
+	Model     string    `gorm:"size:128;index" json:"model,omitempty"`
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
 }
 
 type RedeemCode struct {

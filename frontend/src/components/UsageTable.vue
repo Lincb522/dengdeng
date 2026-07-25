@@ -35,6 +35,7 @@ function formatLatency(milliseconds: number) {
           <th v-if="showUser">用户</th>
           <th>模型</th>
           <th>分组</th>
+			<th>请求 IP / 地区</th>
           <th class="text-right">输入</th>
           <th class="text-right">输出</th>
           <th class="text-right">缓存读</th>
@@ -63,6 +64,10 @@ function formatLatency(milliseconds: number) {
             <div class="text-xs text-slate-400">{{ l.group_name || '—' }}</div>
             <div v-if="showUser && l.account_name" class="mt-0.5 text-[10px] text-slate-500">{{ l.account_name }}</div>
           </td>
+			<td>
+				<div class="font-mono text-xs text-slate-300">{{ l.client_ip || '—' }}</div>
+				<div class="mt-0.5 max-w-56 overflow-x-auto whitespace-nowrap text-[10px] text-slate-500" :title="[l.ip_location, l.ip_isp].filter(Boolean).join(' · ')">{{ l.ip_location || (l.client_ip ? '地区解析中' : '未记录') }}<span v-if="l.ip_isp"> · {{ l.ip_isp }}</span></div>
+			</td>
           <td class="num text-right text-xs">{{ formatTokens(l.input_tokens) }}</td>
           <td class="num text-right text-xs">{{ formatTokens(l.output_tokens) }}</td>
           <td class="num text-right text-xs text-slate-500">{{ formatTokens(l.cache_read_tokens) }}</td>
@@ -88,7 +93,7 @@ function formatLatency(milliseconds: number) {
 			</td>
         </tr>
         <tr v-if="!items.length">
-				<td :colspan="showUser ? 14 : 13" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
+				<td :colspan="showUser ? 15 : 14" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
         </tr>
       </tbody>
     </table>
