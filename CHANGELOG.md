@@ -12,6 +12,7 @@
 - 用量明细新增入站端点，明确请求来自 Responses、Chat、Messages、生图或 Gemini GenerateContent。
 - OpenAI 兼容用量解析补齐缓存创建字段别名，兼容嵌套与顶层的 cache write / cache creation 数据。
 - 版本更新器在构建前自动读取提交标题和正文，生成包含具体变更条目的完整更新日志并保留到本次发布状态。
+- 管理员用量明细的用户列改为头像、用户简称和密钥摘要；悬浮卡展示完整邮箱、用户 ID、密钥名称及密钥 ID。
 
 ### Grok 与通用凭证导入
 

@@ -8,6 +8,7 @@ import UsageLocationDetail from './UsageLocationDetail.vue'
 import UsageLatencyDetail from './UsageLatencyDetail.vue'
 import UsageModelDetail from './UsageModelDetail.vue'
 import UsageTokenDetail from './UsageTokenDetail.vue'
+import UsageUserDetail from './UsageUserDetail.vue'
 
 const props = defineProps<{ items: UsageLog[]; showUser?: boolean }>()
 
@@ -126,10 +127,7 @@ function billingModeLabel(mode?: string) {
       <tbody>
         <tr v-for="l in items" :key="l.id">
           <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(l.created_at).toLocaleString() }}</td>
-          <td v-if="showUser">
-            <div class="text-xs text-slate-300">{{ l.user_email || '—' }}</div>
-            <div class="mt-0.5 text-[10px] text-slate-500">{{ l.key_name || '未命名密钥' }}</div>
-          </td>
+			<td v-if="showUser"><UsageUserDetail :log="l" /></td>
           <td><UsageModelDetail :log="l" /></td>
 			<td><code class="usage-endpoint" :title="l.request_path || '未记录入站端点'">{{ endpointLabel(l.request_path) }}</code></td>
           <td>
