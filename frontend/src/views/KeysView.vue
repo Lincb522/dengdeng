@@ -303,6 +303,15 @@ function onSetupEffortUpdated(value: string) {
 
     <div class="card overflow-x-auto">
       <table v-responsive-table class="table-base key-table">
+        <colgroup>
+          <col class="key-col-name" />
+          <col class="key-col-secret" />
+          <col class="key-col-groups" />
+          <col class="key-col-quota" />
+          <col class="key-col-status" />
+          <col class="key-col-used" />
+          <col class="key-col-actions" />
+        </colgroup>
         <thead>
           <tr>
             <th>名称</th>

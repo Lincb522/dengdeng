@@ -547,8 +547,16 @@ func (h *AdminHandler) UpdateGroup(c *gin.Context) {
 			util.Fail(c, http.StatusBadRequest, err.Error())
 			return
 		}
+		encodedMappings, err := json.Marshal(normalizedMappings)
+		if err != nil {
+			util.Fail(c, http.StatusInternalServerError, "encode reasoning effort mappings failed")
+			return
+		}
 		updates["max_reasoning_effort"] = normalizedMax
-		updates["reasoning_effort_mappings"] = normalizedMappings
+		// GORM serializers are applied when a struct field is saved, but map-based
+		// Updates bypass that serializer. Store the JSON text explicitly so SQLite
+		// and MySQL never receive a raw Go map as a driver argument.
+		updates["reasoning_effort_mappings"] = string(encodedMappings)
 	}
 	if req.IsPublic != nil {
 		updates["is_public"] = *req.IsPublic
