@@ -3,10 +3,10 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { UsageLog } from '../api/types'
 import { formatTokens } from '../api/types'
 import { copyText } from '../api/client'
-import { reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import UsageLocationDetail from './UsageLocationDetail.vue'
+import UsageModelDetail from './UsageModelDetail.vue'
 
 const props = defineProps<{ items: UsageLog[]; showUser?: boolean }>()
 
@@ -118,11 +118,7 @@ function formatLatency(milliseconds: number) {
             <div class="text-xs text-slate-300">{{ l.user_email || '—' }}</div>
             <div class="mt-0.5 text-[10px] text-slate-500">{{ l.key_name || '未命名密钥' }}</div>
           </td>
-          <td>
-            <span class="font-mono text-xs text-slate-200">{{ l.model || '-' }}</span>
-            <span v-if="l.stream" class="ml-1 text-[10px] text-signal-cyan">SSE</span>
-            <div v-if="l.reasoning_effort" class="mt-0.5 text-[10px] text-slate-500">思考强度 Reasoning Effort · {{ reasoningLabel(l.reasoning_effort) }}</div>
-          </td>
+          <td><UsageModelDetail :log="l" /></td>
           <td>
             <div class="text-xs text-slate-400">{{ l.group_name || '—' }}</div>
             <div v-if="showUser && l.account_name" class="mt-0.5 text-[10px] text-slate-500">{{ l.account_name }}</div>

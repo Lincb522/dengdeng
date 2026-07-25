@@ -941,7 +941,8 @@ body {
 	.usage-cost-trigger svg { width: .86rem; height: .86rem; flex: 0 0 auto; }
 	.usage-cost-trigger circle,
 	.usage-cost-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
-	.usage-location-trigger {
+	.usage-location-trigger,
+	.usage-model-trigger {
 		display: inline-flex;
 		max-width: 11.5rem;
 		align-items: center;
@@ -953,17 +954,32 @@ body {
 		white-space: nowrap;
 		transition: color .16s ease, background .16s ease;
 	}
-	.usage-location-trigger span {
+	.usage-location-trigger span,
+	.usage-model-trigger span {
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
 	.usage-location-trigger:hover,
-	.usage-location-trigger[aria-expanded='true'] { color: var(--ink); }
-	.usage-location-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.usage-location-trigger svg { width: .86rem; height: .86rem; flex: 0 0 auto; }
+	.usage-location-trigger[aria-expanded='true'],
+	.usage-model-trigger:hover,
+	.usage-model-trigger[aria-expanded='true'] { color: var(--ink); }
+	.usage-location-trigger:focus-visible,
+	.usage-model-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.usage-location-trigger svg,
+	.usage-model-trigger svg { width: .86rem; height: .86rem; flex: 0 0 auto; }
 	.usage-location-trigger circle,
-	.usage-location-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
+	.usage-location-trigger path,
+	.usage-model-trigger circle,
+	.usage-model-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
+	.usage-model-trigger { max-width: 13rem; color: var(--ink); }
+	.usage-model-trigger small {
+		flex: 0 0 auto;
+		color: rgb(var(--dd-signal-cyan));
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: .58rem;
+		font-weight: 800;
+	}
 	.usage-cost-popover {
 		position: fixed;
 		z-index: 120;
@@ -1021,6 +1037,7 @@ body {
 	.usage-cost-summary dd.is-rate { color: rgb(var(--dd-signal-cyan)); }
 	.usage-cost-summary dd.is-total { color: rgb(var(--dd-signal-green)); font-weight: 850; }
 	.usage-location-popover { width: min(19rem, calc(100vw - 1.25rem)); }
+	.usage-model-popover { width: min(21rem, calc(100vw - 1.25rem)); }
 	.usage-location-lines {
 		display: grid;
 		gap: 1px;
@@ -1051,6 +1068,7 @@ body {
 		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 		font-variant-numeric: tabular-nums;
 	}
+	.usage-model-lines > div { grid-template-columns: 5.2rem minmax(0, 1fr); }
 	.usage-cost-legacy {
 		margin: .05rem .82rem .65rem;
 		padding: .56rem .62rem;
@@ -2367,7 +2385,8 @@ body {
 
 @media (max-width: 767px) {
 	.usage-table-floating-scroll { display: none !important; }
-	.usage-location-trigger { max-width: 100%; }
+	.usage-location-trigger,
+	.usage-model-trigger { max-width: 100%; }
 	.payment-tabs { width: 100%; }
 	.payment-tabs button { flex: 1 0 auto; }
 	.payment-cashflow { grid-template-columns: minmax(0, 1fr); }
