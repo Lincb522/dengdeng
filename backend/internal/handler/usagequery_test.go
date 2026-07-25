@@ -40,6 +40,36 @@ func TestQueryUsageFiltersByRequestID(t *testing.T) {
 	}
 }
 
+func TestDecorateUsageIncludesUpstreamPlatform(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Group{}, &model.UpstreamAccount{}, &model.UsageLog{}); err != nil {
+		t.Fatal(err)
+	}
+	group := model.Group{Name: "Anthropic", Platform: model.PlatformAnthropic}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	account := model.UpstreamAccount{Name: "account", Platform: model.PlatformAnthropic, GroupID: group.ID}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := model.UsageLog{GroupID: group.ID, AccountID: account.ID, Model: "claude-test", CreatedAt: time.Now().UTC()}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, _, err := queryUsage(db, usageQuery{Page: 1, Size: 20, Sort: "created_at", Order: "desc"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Platform != model.PlatformAnthropic {
+		t.Fatalf("platform decoration = %#v, want anthropic", items)
+	}
+}
+
 func TestUsageCSVIncludesFirstTokenAndTotalDuration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

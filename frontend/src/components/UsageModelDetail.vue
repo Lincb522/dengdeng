@@ -49,7 +49,12 @@ function modelShortName(model?: string) {
 	return output.join(' ')
 }
 
-function providerLabel(model?: string) {
+function providerLabel(model?: string, platform?: string) {
+	const normalizedPlatform = (platform || '').toLowerCase()
+	if (normalizedPlatform === 'anthropic') return 'Anthropic'
+	if (normalizedPlatform === 'gemini') return 'Google'
+	if (normalizedPlatform === 'openai') return 'OpenAI'
+	if (normalizedPlatform === 'grok') return 'xAI'
 	const normalized = (model || '').toLowerCase()
 	if (normalized.startsWith('claude-')) return 'Anthropic'
 	if (normalized.startsWith('gemini-')) return 'Google'
@@ -104,7 +109,7 @@ const shortName = computed(() => modelShortName(props.log.model))
 			>
 				<header>
 					<strong>模型详情</strong>
-					<span>{{ providerLabel(log.model) }}</span>
+					<span>{{ providerLabel(log.model, log.platform) }}</span>
 				</header>
 
 				<dl class="usage-location-lines usage-model-lines">
@@ -118,7 +123,7 @@ const shortName = computed(() => modelShortName(props.log.model))
 					</div>
 					<div>
 						<dt>平台</dt>
-						<dd>{{ providerLabel(log.model) }}</dd>
+						<dd>{{ providerLabel(log.model, log.platform) }}</dd>
 					</div>
 					<div>
 						<dt>思考强度</dt>

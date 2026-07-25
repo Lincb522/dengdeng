@@ -1069,6 +1069,74 @@ body {
 		font-variant-numeric: tabular-nums;
 	}
 	.usage-model-lines > div { grid-template-columns: 5.2rem minmax(0, 1fr); }
+	.usage-token-trigger {
+		position: relative;
+		display: grid;
+		grid-template-columns: repeat(2, auto);
+		gap: .24rem .62rem;
+		min-width: 7.6rem;
+		padding-right: 1.05rem;
+		border-radius: .42rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: .69rem;
+		font-variant-numeric: tabular-nums;
+		font-weight: 740;
+		white-space: nowrap;
+		transition: background .16s ease;
+	}
+	.usage-token-trigger:hover,
+	.usage-token-trigger[aria-expanded='true'] { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+	.usage-token-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+	.usage-token-value { display: inline-flex; align-items: center; gap: .18rem; }
+	.usage-token-value svg { width: .75rem; height: .75rem; flex: 0 0 auto; }
+	.usage-token-value path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.25; }
+	.usage-token-value.is-input { color: rgb(var(--dd-signal-green)); }
+	.usage-token-value.is-output { color: #8b72d8; }
+	.usage-token-value.is-cache-read { color: rgb(var(--dd-signal-cyan)); }
+	.usage-token-value.is-cache-write { color: rgb(var(--dd-amber-dim)); }
+	.usage-token-info {
+		position: absolute;
+		top: 50%;
+		right: 0;
+		width: .8rem;
+		height: .8rem;
+		transform: translateY(-50%);
+		color: var(--ink-faint);
+	}
+	.usage-token-info circle,
+	.usage-token-info path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.4; }
+	.usage-token-popover { width: min(18rem, calc(100vw - 1.25rem)); }
+	.usage-token-lines { padding: 0 .82rem .5rem; }
+	.usage-token-lines > div,
+	.usage-token-total {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: .9rem;
+		min-height: 1.55rem;
+	}
+	.usage-token-lines span,
+	.usage-token-total span { color: #cbbdb0; font-size: .68rem; }
+	.usage-token-lines b,
+	.usage-token-total b {
+		color: #fffaf1;
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: .7rem;
+		font-variant-numeric: tabular-nums;
+		font-weight: 780;
+	}
+	.usage-token-total {
+		margin: 0 .82rem;
+		padding: .48rem 0 .58rem;
+		border-top: 1px solid rgba(255, 250, 241, .14);
+	}
+	.usage-token-total b { color: rgb(var(--dd-signal-cyan)); font-size: .76rem; }
+	.usage-token-note {
+		margin: 0 .82rem .68rem;
+		color: #a99a8c;
+		font-size: .62rem;
+		line-height: 1.45;
+	}
 	.usage-cost-legacy {
 		margin: .05rem .82rem .65rem;
 		padding: .56rem .62rem;

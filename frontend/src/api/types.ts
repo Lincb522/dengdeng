@@ -504,9 +504,10 @@ export interface UsageLog {
 	client_request_id?: string
   user_id: number
   api_key_id: number
-  account_id: number
-  group_id: number
-  model: string
+	account_id: number
+	group_id: number
+	platform?: string
+	model: string
 	request_path?: string
 	client_ip?: string
 	ip_country?: string

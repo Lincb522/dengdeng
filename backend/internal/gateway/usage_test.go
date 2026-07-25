@@ -45,3 +45,34 @@ func TestOpenAIUsageMarksCachedTokensAsIncludedInInput(t *testing.T) {
 		t.Fatalf("OpenAI usage = %+v, want input=100 cached=80 included=true", u)
 	}
 }
+
+func TestOpenAIUsageAcceptsCacheCreationAliases(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want int64
+	}{
+		{name: "prompt details", body: `{"usage":{"prompt_tokens_details":{"cache_write_tokens":41}}}`, want: 41},
+		{name: "input creation details", body: `{"usage":{"input_tokens_details":{"cache_creation_tokens":42}}}`, want: 42},
+		{name: "anthropic alias", body: `{"usage":{"cache_creation_input_tokens":43}}`, want: 43},
+		{name: "generic alias", body: `{"usage":{"cache_creation_tokens":44}}`, want: 44},
+		{name: "responses stream", body: `{"response":{"usage":{"input_tokens_details":{"cache_write_tokens":45}}}}`, want: 45},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			e := newUsageExtractor(model.PlatformOpenAI, false)
+			e.feedJSON([]byte(test.body))
+			if got := e.usage().CacheWriteTokens; got != test.want {
+				t.Fatalf("CacheWriteTokens = %d, want %d", got, test.want)
+			}
+		})
+	}
+}
+
+func TestOpenAIUsageCanonicalNestedZeroOverridesAlias(t *testing.T) {
+	e := newUsageExtractor(model.PlatformOpenAI, false)
+	e.feedJSON([]byte(`{"usage":{"input_tokens_details":{"cache_write_tokens":0},"cache_creation_input_tokens":99}}`))
+	if got := e.usage().CacheWriteTokens; got != 0 {
+		t.Fatalf("CacheWriteTokens = %d, want canonical nested zero", got)
+	}
+}

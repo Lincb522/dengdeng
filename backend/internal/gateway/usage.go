@@ -80,6 +80,58 @@ type anthropicUsage struct {
 	} `json:"cache_creation"`
 }
 
+type openAITokenDetails struct {
+	CachedTokens        int64  `json:"cached_tokens"`
+	CacheWriteTokens    *int64 `json:"cache_write_tokens"`
+	CacheCreationTokens *int64 `json:"cache_creation_tokens"`
+	ImageTokens         int64  `json:"image_tokens"`
+}
+
+type openAIUsage struct {
+	PromptTokens             int64               `json:"prompt_tokens"`
+	CompletionTokens         int64               `json:"completion_tokens"`
+	InputTokens              int64               `json:"input_tokens"`
+	OutputTokens             int64               `json:"output_tokens"`
+	PromptTokensDetails      *openAITokenDetails `json:"prompt_tokens_details"`
+	InputTokensDetails       *openAITokenDetails `json:"input_tokens_details"`
+	OutputTokensDetails      *openAITokenDetails `json:"output_tokens_details"`
+	CacheWriteTokens         *int64              `json:"cache_write_tokens"`
+	CacheCreationInputTokens *int64              `json:"cache_creation_input_tokens"`
+	CacheWriteInputTokens    *int64              `json:"cache_write_input_tokens"`
+	CacheCreationTokens      *int64              `json:"cache_creation_tokens"`
+}
+
+func openAICacheCreationTokens(usage *openAIUsage) (int64, bool) {
+	if usage == nil {
+		return 0, false
+	}
+	var inputWrite, promptWrite, inputCreation, promptCreation *int64
+	if usage.InputTokensDetails != nil {
+		inputWrite = usage.InputTokensDetails.CacheWriteTokens
+		inputCreation = usage.InputTokensDetails.CacheCreationTokens
+	}
+	if usage.PromptTokensDetails != nil {
+		promptWrite = usage.PromptTokensDetails.CacheWriteTokens
+		promptCreation = usage.PromptTokensDetails.CacheCreationTokens
+	}
+	for _, nested := range []*int64{inputWrite, promptWrite, inputCreation, promptCreation} {
+		if nested != nil {
+			return max(*nested, 0), true
+		}
+	}
+	for _, alias := range []*int64{
+		usage.CacheWriteTokens,
+		usage.CacheCreationInputTokens,
+		usage.CacheWriteInputTokens,
+		usage.CacheCreationTokens,
+	} {
+		if alias != nil && *alias > 0 {
+			return *alias, true
+		}
+	}
+	return 0, false
+}
+
 func (e *usageExtractor) feedAnthropic(doc []byte) {
 	var evt struct {
 		Usage   *anthropicUsage `json:"usage"`
@@ -131,37 +183,18 @@ func (e *usageExtractor) feedOpenAI(doc []byte) {
 			URL     string `json:"url"`
 			B64JSON string `json:"b64_json"`
 		} `json:"data"`
-		Usage *struct {
-			PromptTokens        int64 `json:"prompt_tokens"`
-			CompletionTokens    int64 `json:"completion_tokens"`
-			InputTokens         int64 `json:"input_tokens"`  // Responses API naming
-			OutputTokens        int64 `json:"output_tokens"` // Responses API naming
-			PromptTokensDetails *struct {
-				CachedTokens int64 `json:"cached_tokens"`
-			} `json:"prompt_tokens_details"`
-			InputTokensDetails *struct {
-				CachedTokens     int64 `json:"cached_tokens"`
-				CacheWriteTokens int64 `json:"cache_write_tokens"`
-				ImageTokens      int64 `json:"image_tokens"`
-			} `json:"input_tokens_details"`
-			OutputTokensDetails *struct {
-				ImageTokens int64 `json:"image_tokens"`
-			} `json:"output_tokens_details"`
-		} `json:"usage"`
+		Usage    *openAIUsage `json:"usage"`
 		Response *struct {
-			Usage *struct {
-				InputTokens        int64 `json:"input_tokens"`
-				OutputTokens       int64 `json:"output_tokens"`
-				InputTokensDetails *struct {
-					CachedTokens int64 `json:"cached_tokens"`
-				} `json:"input_tokens_details"`
-			} `json:"usage"`
+			Usage *openAIUsage `json:"usage"`
 		} `json:"response"` // Responses API stream: response.completed event
 	}
 	if err := json.Unmarshal(doc, &evt); err != nil {
 		return
 	}
-	if u := evt.Usage; u != nil {
+	applyUsage := func(u *openAIUsage) {
+		if u == nil {
+			return
+		}
 		if u.PromptTokens > 0 {
 			e.u.InputTokens = u.PromptTokens
 		}
@@ -181,20 +214,18 @@ func (e *usageExtractor) feedOpenAI(doc []byte) {
 		if u.InputTokensDetails != nil {
 			e.u.CacheReadTokens = u.InputTokensDetails.CachedTokens
 			e.u.InputIncludesCacheRead = true
-			e.u.CacheWriteTokens = u.InputTokensDetails.CacheWriteTokens
 			e.u.ImageInputTokens = u.InputTokensDetails.ImageTokens
+		}
+		if cacheWrite, ok := openAICacheCreationTokens(u); ok {
+			e.u.CacheWriteTokens = cacheWrite
 		}
 		if u.OutputTokensDetails != nil {
 			e.u.ImageOutputTokens = u.OutputTokensDetails.ImageTokens
 		}
 	}
-	if r := evt.Response; r != nil && r.Usage != nil {
-		e.u.InputTokens = r.Usage.InputTokens
-		e.u.OutputTokens = r.Usage.OutputTokens
-		if r.Usage.InputTokensDetails != nil {
-			e.u.CacheReadTokens = r.Usage.InputTokensDetails.CachedTokens
-			e.u.InputIncludesCacheRead = true
-		}
+	applyUsage(evt.Usage)
+	if evt.Response != nil {
+		applyUsage(evt.Response.Usage)
 	}
 	if e.image {
 		count := int64(0)

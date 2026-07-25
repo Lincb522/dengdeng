@@ -248,22 +248,30 @@ func decorateUsage(db *gorm.DB, logs []model.UsageLog) {
 		keyNames[k.ID] = k.Name
 	}
 	groupNames := map[int64]string{}
+	groupPlatforms := map[int64]string{}
 	var gs []model.Group
 	db.Where("id IN ?", keys(groupIDs)).Find(&gs)
 	for _, g := range gs {
 		groupNames[g.ID] = g.Name
+		groupPlatforms[g.ID] = g.Platform
 	}
 	accountNames := map[int64]string{}
+	accountPlatforms := map[int64]string{}
 	var accounts []model.UpstreamAccount
 	db.Where("id IN ?", keys(accountIDs)).Find(&accounts)
 	for _, account := range accounts {
 		accountNames[account.ID] = account.Name
+		accountPlatforms[account.ID] = account.Platform
 	}
 	for i := range logs {
 		logs[i].UserEmail = users[logs[i].UserID]
 		logs[i].KeyName = keyNames[logs[i].APIKeyID]
 		logs[i].GroupName = groupNames[logs[i].GroupID]
 		logs[i].AccountName = accountNames[logs[i].AccountID]
+		logs[i].Platform = accountPlatforms[logs[i].AccountID]
+		if logs[i].Platform == "" {
+			logs[i].Platform = groupPlatforms[logs[i].GroupID]
+		}
 	}
 }
 

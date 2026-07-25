@@ -701,6 +701,7 @@ type UsageLog struct {
 	KeyName     string `gorm:"-" json:"key_name,omitempty"`
 	GroupName   string `gorm:"-" json:"group_name,omitempty"`
 	AccountName string `gorm:"-" json:"account_name,omitempty"`
+	Platform    string `gorm:"-" json:"platform,omitempty"`
 }
 
 // OpsSystemMetric is the durable minute-level runtime snapshot. Usage data is
