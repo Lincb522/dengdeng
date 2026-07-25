@@ -28,10 +28,10 @@ const wxPayAPIBase = "https://api.mch.weixin.qq.com"
 // verifies the platform signature and decrypts the AEAD resource before an
 // order can be credited.
 type WxPay struct {
-	appID, mchID, serialNo, apiV3Key, apiBase, mode string
-	privateKey                                      *rsa.PrivateKey
-	platformKey                                     *rsa.PublicKey
-	client                                          *http.Client
+	appID, mchID, serialNo, platformSerial, apiV3Key, apiBase, mode string
+	privateKey                                                      *rsa.PrivateKey
+	platformKey                                                     *rsa.PublicKey
+	client                                                          *http.Client
 }
 
 func NewWxPay(config map[string]string) (*WxPay, error) {
@@ -63,7 +63,14 @@ func NewWxPay(config map[string]string) (*WxPay, error) {
 	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
 		return nil, fmt.Errorf("wxpay apiBase must be an HTTPS URL")
 	}
-	return &WxPay{appID: appID, mchID: mchID, serialNo: serialNo, apiV3Key: apiKey, apiBase: strings.TrimRight(base, "/"), mode: strings.TrimSpace(config["paymentMode"]), privateKey: privateKey, platformKey: platformKey, client: &http.Client{Timeout: 15 * time.Second}}, nil
+	platformSerial := strings.TrimSpace(config["platformPublicKeyId"])
+	if platformSerial == "" {
+		platformSerial = strings.TrimSpace(config["publicKeyId"])
+	}
+	if platformSerial == "" {
+		platformSerial = strings.TrimSpace(config["platformSerialNo"])
+	}
+	return &WxPay{appID: appID, mchID: mchID, serialNo: serialNo, platformSerial: platformSerial, apiV3Key: apiKey, apiBase: strings.TrimRight(base, "/"), mode: strings.TrimSpace(config["paymentMode"]), privateKey: privateKey, platformKey: platformKey, client: &http.Client{Timeout: 15 * time.Second}}, nil
 }
 func (w *WxPay) Key() string { return payment.ProviderWxPay }
 
@@ -236,6 +243,117 @@ func (w *WxPay) Cancel(ctx context.Context, tradeNo string) error {
 	return err
 }
 
+// CreateMerchantTransfer implements the current WeChat Pay "merchant
+// transfer" API. The caller owns idempotency and must query the same out bill
+// number after a transport/API error instead of creating a new one.
+func (w *WxPay) CreateMerchantTransfer(ctx context.Context, req payment.MerchantTransferRequest) (*payment.MerchantTransferResponse, error) {
+	if len(req.OutBillNo) < 6 || len(req.OutBillNo) > 32 {
+		return nil, fmt.Errorf("wxpay out_bill_no must be 6-32 characters")
+	}
+	for _, char := range req.OutBillNo {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') {
+			return nil, fmt.Errorf("wxpay out_bill_no must be alphanumeric")
+		}
+	}
+	if strings.TrimSpace(req.OpenID) == "" || req.AmountMinor <= 0 || strings.TrimSpace(req.SceneID) == "" || strings.TrimSpace(req.Remark) == "" || len(req.SceneReportInfo) == 0 {
+		return nil, fmt.Errorf("wxpay transfer requires openid, amount, scene, remark and scene report info")
+	}
+	payload := map[string]any{
+		"appid": w.appID, "out_bill_no": req.OutBillNo, "transfer_scene_id": req.SceneID,
+		"openid": req.OpenID, "transfer_amount": req.AmountMinor, "transfer_remark": req.Remark,
+		"transfer_scene_report_infos": req.SceneReportInfo,
+	}
+	if req.NotifyURL != "" {
+		payload["notify_url"] = req.NotifyURL
+	}
+	if req.UserPerception != "" {
+		payload["user_recv_perception"] = req.UserPerception
+	}
+	body, err := w.request(ctx, http.MethodPost, "/v3/fund-app/mch-transfer/transfer-bills", payload)
+	if err != nil {
+		return nil, fmt.Errorf("wxpay merchant transfer: %w", err)
+	}
+	var response struct {
+		OutBillNo      string `json:"out_bill_no"`
+		TransferBillNo string `json:"transfer_bill_no"`
+		State          string `json:"state"`
+		PackageInfo    string `json:"package_info"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("wxpay merchant transfer response: %w", err)
+	}
+	return &payment.MerchantTransferResponse{OutBillNo: response.OutBillNo, ProviderBillNo: response.TransferBillNo, State: response.State, PackageInfo: response.PackageInfo, AmountMinor: req.AmountMinor, OpenID: req.OpenID, AppID: w.appID, MerchantID: w.mchID}, nil
+}
+
+func (w *WxPay) QueryMerchantTransfer(ctx context.Context, outBillNo string) (*payment.MerchantTransferResponse, error) {
+	body, err := w.request(ctx, http.MethodGet, "/v3/fund-app/mch-transfer/transfer-bills/out-bill-no/"+url.PathEscape(outBillNo), nil)
+	if err != nil {
+		return nil, fmt.Errorf("wxpay merchant transfer query: %w", err)
+	}
+	var response struct {
+		OutBillNo      string `json:"out_bill_no"`
+		TransferBillNo string `json:"transfer_bill_no"`
+		State          string `json:"state"`
+		TransferAmount int64  `json:"transfer_amount"`
+		FailReason     string `json:"fail_reason"`
+		OpenID         string `json:"openid"`
+		AppID          string `json:"appid"`
+		MchID          string `json:"mch_id"`
+	}
+	if err := json.Unmarshal(body, &response); err != nil {
+		return nil, fmt.Errorf("wxpay merchant transfer query response: %w", err)
+	}
+	return &payment.MerchantTransferResponse{OutBillNo: response.OutBillNo, ProviderBillNo: response.TransferBillNo, State: response.State, FailureReason: response.FailReason, AmountMinor: response.TransferAmount, OpenID: response.OpenID, AppID: response.AppID, MerchantID: response.MchID}, nil
+}
+
+func (w *WxPay) VerifyMerchantTransfer(_ context.Context, raw []byte, headers map[string]string) (*payment.MerchantTransferResponse, error) {
+	timestamp, nonce, signature := headers["wechatpay-timestamp"], headers["wechatpay-nonce"], headers["wechatpay-signature"]
+	if timestamp == "" || nonce == "" || signature == "" {
+		return nil, fmt.Errorf("wxpay transfer webhook missing signature headers")
+	}
+	seconds, err := strconv.ParseInt(timestamp, 10, 64)
+	if err != nil || time.Since(time.Unix(seconds, 0)).Abs() > 5*time.Minute {
+		return nil, fmt.Errorf("wxpay transfer webhook timestamp outside tolerance")
+	}
+	if !verifyWxSignature(w.platformKey, timestamp+"\n"+nonce+"\n"+string(raw)+"\n", signature) {
+		return nil, fmt.Errorf("invalid wxpay transfer webhook signature")
+	}
+	var envelope struct {
+		EventType string `json:"event_type"`
+		Resource  struct {
+			Nonce          string `json:"nonce"`
+			AssociatedData string `json:"associated_data"`
+			Ciphertext     string `json:"ciphertext"`
+		} `json:"resource"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.EventType != "MCHTRANSFER.BILL.FINISHED" {
+		return nil, nil
+	}
+	plain, err := decryptWxResource(w.apiV3Key, envelope.Resource.Nonce, envelope.Resource.AssociatedData, envelope.Resource.Ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		OutBillNo      string `json:"out_bill_no"`
+		TransferBillNo string `json:"transfer_bill_no"`
+		State          string `json:"state"`
+		MchID          string `json:"mch_id"`
+		TransferAmount int64  `json:"transfer_amount"`
+		OpenID         string `json:"openid"`
+		FailReason     string `json:"fail_reason"`
+	}
+	if err := json.Unmarshal(plain, &result); err != nil {
+		return nil, err
+	}
+	if result.MchID != "" && result.MchID != w.mchID {
+		return nil, fmt.Errorf("wxpay transfer webhook merchant mismatch")
+	}
+	return &payment.MerchantTransferResponse{OutBillNo: result.OutBillNo, ProviderBillNo: result.TransferBillNo, State: result.State, AmountMinor: result.TransferAmount, OpenID: result.OpenID, FailureReason: result.FailReason, MerchantID: result.MchID}, nil
+}
+
 func (w *WxPay) request(ctx context.Context, method, path string, payload any) ([]byte, error) {
 	body := []byte{}
 	if payload != nil {
@@ -261,6 +379,9 @@ func (w *WxPay) request(ctx context.Context, method, path string, payload any) (
 	req.Header.Set("Authorization", authorization)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
+	if w.platformSerial != "" {
+		req.Header.Set("Wechatpay-Serial", w.platformSerial)
+	}
 	resp, err := w.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -272,6 +393,15 @@ func (w *WxPay) request(ctx context.Context, method, path string, payload any) (
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return nil, fmt.Errorf("remote HTTP %d: %s", resp.StatusCode, sanitizeRemoteMessage(string(result)))
+	}
+	responseTimestamp := resp.Header.Get("Wechatpay-Timestamp")
+	responseNonce := resp.Header.Get("Wechatpay-Nonce")
+	responseSignature := resp.Header.Get("Wechatpay-Signature")
+	if responseTimestamp == "" || responseNonce == "" || responseSignature == "" {
+		return nil, fmt.Errorf("wxpay response missing signature headers")
+	}
+	if !verifyWxSignature(w.platformKey, responseTimestamp+"\n"+responseNonce+"\n"+string(result)+"\n", responseSignature) {
+		return nil, fmt.Errorf("invalid wxpay response signature")
 	}
 	return result, nil
 }

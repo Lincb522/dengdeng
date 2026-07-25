@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, copyText, withToast } from '../api/client'
-import type { ReferralDashboard } from '../api/types'
+import type { ReferralDashboard, ReferralPayout } from '../api/types'
 import { formatMoney } from '../api/types'
 import { useToast } from '../stores/toast'
 
@@ -9,10 +9,13 @@ const toast = useToast()
 const data = ref<ReferralDashboard | null>(null)
 const loading = ref(true)
 const bindCode = ref('')
+const payoutOpenID = ref('')
+const payoutBusy = ref(false)
 
 const referralCodes = computed(() => Array.isArray(data.value?.codes) ? data.value.codes : [])
 const commissions = computed(() => Array.isArray(data.value?.commissions) ? data.value.commissions : [])
 const primaryCode = computed(() => referralCodes.value[0] || null)
+const payouts = computed(() => Array.isArray(data.value?.payouts) ? data.value.payouts : [])
 const referralLink = computed(() => primaryCode.value
   ? `${window.location.origin}/login?ref=${encodeURIComponent(primaryCode.value.code)}`
   : '')
@@ -27,10 +30,46 @@ async function load() {
       codes: Array.isArray(payload?.codes) ? payload.codes : [],
       commissions: Array.isArray(payload?.commissions) ? payload.commissions : [],
       total_commission_micro: Number(payload?.total_commission_micro) || 0,
+		cash: payload.cash || { pending_micro: 0, available_micro: 0, locked_micro: 0, paid_micro: 0, currency: 'CNY', total_minor: 0, pending_minor: 0, available_minor: 0, locked_minor: 0, paid_minor: 0, min_payout_minor: 100, enabled: false },
+		payout_account: payload.payout_account || null,
+		payouts: Array.isArray(payload.payouts) ? payload.payouts : [],
     }
   } finally {
     loading.value = false
   }
+}
+
+function cashMoney(minor: number, currency = 'CNY') {
+	const symbol = currency === 'CNY' ? '¥' : `${currency} `
+	return `${symbol}${(minor / 100).toFixed(2)}`
+}
+
+function payoutStatus(value: string) {
+	return ({ REVIEW_PENDING: '待审核', QUEUED: '待提交', SUBMITTING: '提交中', AWAITING_CONFIRMATION: '待确认收款', PROCESSING: '转账中', STATUS_UNCERTAIN: '待核验', SUCCESS: '已到账', FAILED: '失败', CANCELLED: '已取消' } as Record<string, string>)[value] || value
+}
+
+async function savePayoutAccount() {
+	if (!payoutOpenID.value.trim()) return
+	payoutBusy.value = true
+	const saved = await withToast(() => api.post('/api/user/referrals/payout-account', { openid: payoutOpenID.value.trim() }), '微信收款账户已提交审核')
+	payoutBusy.value = false
+	if (saved) { payoutOpenID.value = ''; await load() }
+}
+
+async function requestPayout() {
+	payoutBusy.value = true
+	const saved = await withToast(() => api.post('/api/user/referrals/payouts', {}), '提现申请已提交')
+	payoutBusy.value = false
+	if (saved) await load()
+}
+
+function confirmInWeChat(item: ReferralPayout) {
+	const bridge = (window as any).WeixinJSBridge
+	if (!bridge || !item.package_info || !item.app_id || !item.merchant_id) {
+		toast.show('请在微信内打开本页确认收款', 'error')
+		return
+	}
+	bridge.invoke('requestMerchantTransfer', { mchId: item.merchant_id, appId: item.app_id, package: item.package_info }, () => load())
 }
 
 async function createCode() {
@@ -67,17 +106,29 @@ onMounted(load)
     <div class="console-page-head">
       <div>
         <h1>推广中心 Referral</h1>
-        <p class="mt-1 text-sm text-slate-500">佣金按被推广用户实际从余额扣除的 API 费用结算。</p>
+        <p class="mt-1 text-sm text-slate-500">实际 Token 消费计提，现金结算，不进入 API 余额。</p>
       </div>
     </div>
 
     <div v-if="loading" class="card p-8 text-sm text-slate-500">正在读取…</div>
     <template v-else-if="data">
-      <section class="mb-6 grid gap-4 md:grid-cols-3">
+      <section class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <article class="card p-5">
           <div class="label">累计佣金 Commission</div>
-          <div class="mt-2 num text-2xl font-semibold text-signal-green">{{ formatMoney(data.total_commission_micro) }}</div>
+          <div class="mt-2 num text-2xl font-semibold text-signal-green">{{ cashMoney(data.cash.total_minor, data.cash.currency) }}</div>
         </article>
+		<article class="card p-5">
+			<div class="label">可提现 Available</div>
+			<div class="mt-2 num text-2xl font-semibold text-signal-green">{{ cashMoney(data.cash.available_minor, data.cash.currency) }}</div>
+		</article>
+		<article class="card p-5">
+			<div class="label">结算中 Pending</div>
+			<div class="mt-2 num text-2xl font-semibold text-slate-200">{{ cashMoney(data.cash.pending_minor, data.cash.currency) }}</div>
+		</article>
+		<article class="card p-5">
+			<div class="label">提现中 Locked</div>
+			<div class="mt-2 num text-2xl font-semibold text-amber">{{ cashMoney(data.cash.locked_minor, data.cash.currency) }}</div>
+		</article>
         <article class="card p-5">
           <div class="label">推广用户 Referrals</div>
           <div class="mt-2 num text-2xl font-semibold text-slate-200">{{ primaryCode?.referred_users || 0 }}</div>
@@ -87,6 +138,31 @@ onMounted(load)
           <div class="mt-2 num text-2xl font-semibold text-amber">{{ primaryCode ? `${(primaryCode.commission_bps / 100).toFixed(2)}%` : '—' }}</div>
         </article>
       </section>
+
+	  <section class="card mb-6 p-6">
+		<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+			<div><h2 class="text-sm font-semibold text-slate-200">现金结算 Cash Payout</h2><p class="mt-1 text-xs text-slate-500">微信 OpenID 必须属于本站商户绑定的 AppID，审核通过后才可提现。</p></div>
+			<button v-if="data.payout_account?.status === 'verified'" class="btn-primary" :disabled="payoutBusy || !data.cash.enabled || data.cash.available_minor < data.cash.min_payout_minor" @click="requestPayout">{{ payoutBusy ? '处理中…' : `提现 ${cashMoney(data.cash.available_minor, data.cash.currency)}` }}</button>
+		</div>
+		<div v-if="data.payout_account" class="flex flex-wrap items-center gap-3 text-sm">
+			<span class="tag-gray font-mono">{{ data.payout_account.openid_hint }}</span>
+			<span :class="data.payout_account.status === 'verified' ? 'tag-green' : data.payout_account.status === 'disabled' ? 'tag-red' : 'tag-gray'">{{ data.payout_account.status === 'verified' ? '已验证' : data.payout_account.status === 'disabled' ? '已停用' : '待审核' }}</span>
+			<span v-if="data.payout_account.note" class="text-xs text-slate-500">{{ data.payout_account.note }}</span>
+		</div>
+		<div v-else class="flex flex-col gap-2 sm:flex-row">
+			<input v-model.trim="payoutOpenID" class="input flex-1 font-mono" maxlength="64" placeholder="微信收款 OpenID" />
+			<button class="btn-primary" :disabled="payoutBusy || payoutOpenID.length < 8" @click="savePayoutAccount">提交审核</button>
+		</div>
+		<p v-if="!data.cash.enabled" class="mt-3 text-xs text-amber">管理员尚未启用现金提现。</p>
+	  </section>
+
+	  <section v-if="payouts.length" class="card mb-6 overflow-x-auto">
+		<div class="border-b border-slate-800 px-5 py-4"><h2 class="text-sm font-semibold text-slate-200">提现记录 Payouts</h2></div>
+		<table v-responsive-table class="table-base">
+			<thead><tr><th>时间</th><th>单号</th><th>收款账户</th><th>状态</th><th class="text-right">金额</th><th class="text-right">操作</th></tr></thead>
+			<tbody><tr v-for="item in payouts" :key="item.id"><td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(item.requested_at).toLocaleString() }}</td><td><code class="font-mono text-xs">{{ item.out_bill_no }}</code></td><td class="font-mono text-xs">{{ item.openid_hint }}</td><td><span :class="item.status === 'SUCCESS' ? 'tag-green' : item.status === 'FAILED' || item.status === 'CANCELLED' ? 'tag-red' : 'tag-gray'">{{ payoutStatus(item.status) }}</span><p v-if="item.failure_message" class="mt-1 max-w-xs text-xs text-signal-red">{{ item.failure_message }}</p></td><td class="num text-right">{{ cashMoney(item.amount_minor, item.currency) }}</td><td class="text-right"><button v-if="item.status === 'AWAITING_CONFIRMATION'" class="btn-primary !px-3 !py-1.5 text-xs" @click="confirmInWeChat(item)">确认收款</button></td></tr></tbody>
+		</table>
+	  </section>
 
       <section class="card mb-6 p-6">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -129,17 +205,18 @@ onMounted(load)
           <h2 class="text-sm font-semibold text-slate-200">佣金明细 Commission Ledger</h2>
         </div>
         <table v-responsive-table class="table-base">
-          <thead><tr><th>时间</th><th>用户</th><th>推广码</th><th class="text-right">用户消费</th><th class="text-right">比例</th><th class="text-right">佣金</th></tr></thead>
+          <thead><tr><th>时间</th><th>用户</th><th>推广码</th><th>状态</th><th class="text-right">用户消费</th><th class="text-right">比例</th><th class="text-right">佣金</th></tr></thead>
           <tbody>
             <tr v-for="item in commissions" :key="item.id">
               <td class="whitespace-nowrap text-xs text-slate-500">{{ new Date(item.created_at).toLocaleString() }}</td>
               <td class="text-xs text-slate-300">{{ item.referred_email || `#${item.referred_user_id}` }}</td>
               <td><span class="tag-gray font-mono">{{ item.code }}</span></td>
+			  <td><span class="tag-gray">{{ item.status === 'pending' ? '结算中' : item.status === 'available' ? '可提现' : item.status === 'legacy_balance' ? '历史余额结算' : '已冲正' }}</span></td>
               <td class="num text-right text-xs">{{ formatMoney(item.base_cost_micro) }}</td>
               <td class="num text-right text-xs">{{ (item.commission_bps / 100).toFixed(2) }}%</td>
               <td class="num text-right text-xs text-signal-green">+{{ formatMoney(item.amount_micro) }}</td>
             </tr>
-            <tr v-if="!commissions.length"><td colspan="6" class="py-10 text-center text-sm text-slate-500">暂无佣金记录</td></tr>
+            <tr v-if="!commissions.length"><td colspan="7" class="py-10 text-center text-sm text-slate-500">暂无佣金记录</td></tr>
           </tbody>
         </table>
       </section>

@@ -43,6 +43,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	pricing := service.NewPricingService(db)
 	payments := service.NewPaymentService(db, cfg)
 	payments.StartReconciler()
+	referralCash := service.NewReferralCashService(db, cfg)
+	referralCash.StartReconciler()
 	runtimePolicy := service.NewRuntimePolicyService(db)
 	audit := service.NewAuditService(db)
 	alertService := service.NewAlertService(db, service.NewSMTPMailer(cfg.SMTP, cfg.Site.Name, cfg.Site.PublicURL), cfg.Admin.Email)
@@ -92,6 +94,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	updateH := handler.NewUpdateHandler(updateService, backupService, audit)
 	paymentH := handler.NewPaymentHandler(payments)
 	adminPaymentH := handler.NewAdminPaymentHandler(payments)
+	referralCashH := handler.NewReferralCashHandler(referralCash)
 
 	r.GET("/health", func(c *gin.Context) {
 		build := version.Info()
@@ -107,6 +110,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		// Payment providers authenticate their own signed callbacks; they must
 		// not carry a console JWT. The handler enforces a 1 MB body cap again.
 		api.POST("/payment/webhook/:provider", paymentH.Webhook)
+		api.POST("/referrals/payout/webhook/wxpay", referralCashH.WxPayWebhook)
 		// The public model plaza is intentionally available without a console
 		// account and has a read-oriented limit separate from login attempts.
 		api.GET("/models", middleware.RateLimit(120, time.Minute), userH.PublicModelCatalogue)
@@ -140,6 +144,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			user.GET("/referrals", userH.ReferralDashboard)
 			user.POST("/referrals/code", userH.CreateMyReferralCode)
 			user.POST("/referrals/bind", userH.BindReferralCode)
+			user.POST("/referrals/payout-account", referralCashH.SaveMyPayoutAccount)
+			user.GET("/referrals/payouts", referralCashH.ListMyPayouts)
+			user.POST("/referrals/payouts", referralCashH.RequestPayout)
 			user.POST("/redeem", userH.Redeem)
 			user.GET("/payment/config", paymentH.Config)
 			user.POST("/payment/orders", paymentH.CreateOrder)
@@ -219,6 +226,14 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/referral-codes", adminH.CreateReferralCode)
 			admin.PUT("/referral-codes/:id", adminH.UpdateReferralCode)
 			admin.DELETE("/referral-codes/:id", adminH.DeleteReferralCode)
+			admin.GET("/referral-payout/config", referralCashH.GetConfig)
+			admin.PUT("/referral-payout/config", referralCashH.UpdateConfig)
+			admin.GET("/referral-payout/accounts", referralCashH.ListAccounts)
+			admin.PUT("/referral-payout/accounts/:user_id", referralCashH.SaveAccount)
+			admin.GET("/referral-payouts", referralCashH.ListPayouts)
+			admin.POST("/referral-payouts/:id/approve", referralCashH.ApprovePayout)
+			admin.POST("/referral-payouts/:id/reject", referralCashH.RejectPayout)
+			admin.POST("/referral-payouts/:id/query", referralCashH.QueryPayout)
 			admin.GET("/payment/config", adminPaymentH.GetConfig)
 			admin.PUT("/payment/config", adminPaymentH.UpdateConfig)
 			admin.GET("/payment/providers", adminPaymentH.ListProviders)

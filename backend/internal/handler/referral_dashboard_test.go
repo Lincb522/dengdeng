@@ -21,7 +21,7 @@ func TestReferralDashboardSerializesEmptyCollectionsAsArrays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.PaymentConfig{}); err != nil {
 		t.Fatal(err)
 	}
 	user := model.User{Email: "referral-empty@example.test", PasswordHash: "x", Status: model.StatusActive, RateMultiplier: 1}

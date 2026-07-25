@@ -73,6 +73,34 @@ type RefundResponse struct {
 	Status   string
 }
 
+type MerchantTransferSceneInfo struct {
+	InfoType    string `json:"info_type"`
+	InfoContent string `json:"info_content"`
+}
+
+type MerchantTransferRequest struct {
+	OutBillNo       string
+	OpenID          string
+	AmountMinor     int64
+	SceneID         string
+	Remark          string
+	NotifyURL       string
+	UserPerception  string
+	SceneReportInfo []MerchantTransferSceneInfo
+}
+
+type MerchantTransferResponse struct {
+	OutBillNo      string `json:"out_bill_no"`
+	ProviderBillNo string `json:"provider_bill_no,omitempty"`
+	State          string `json:"state"`
+	PackageInfo    string `json:"package_info,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
+	AmountMinor    int64  `json:"amount_minor,omitempty"`
+	OpenID         string `json:"openid,omitempty"`
+	AppID          string `json:"app_id,omitempty"`
+	MerchantID     string `json:"merchant_id,omitempty"`
+}
+
 // Provider is intentionally small. Its config is decrypted only for the
 // lifetime of one operation and is not returned through any console API.
 type Provider interface {
@@ -90,4 +118,13 @@ type Provider interface {
 type RefundQueryProvider interface {
 	Provider
 	QueryRefund(context.Context, string, string, string) (*RefundResponse, error)
+}
+
+// MerchantTransferProvider is deliberately separate from Provider. Charging a
+// customer and paying a promoter have different risk and state machines, so a
+// channel cannot become a payout channel by accident.
+type MerchantTransferProvider interface {
+	CreateMerchantTransfer(context.Context, MerchantTransferRequest) (*MerchantTransferResponse, error)
+	QueryMerchantTransfer(context.Context, string) (*MerchantTransferResponse, error)
+	VerifyMerchantTransfer(context.Context, []byte, map[string]string) (*MerchantTransferResponse, error)
 }

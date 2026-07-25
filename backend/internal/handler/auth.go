@@ -385,9 +385,10 @@ func (h *AuthHandler) PublicSettings(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{
-		"site_name":      settings.SiteName,
-		"site_subtitle":  settings.SiteSubtitle,
-		"allow_register": settings.AllowRegister,
+		"site_name":               settings.SiteName,
+		"site_subtitle":           settings.SiteSubtitle,
+		"allow_register":          settings.AllowRegister,
+		"key_multi_group_enabled": settings.KeyMultiGroupEnabled,
 		// Verification is only demanded when the deployment can send codes.
 		"registration_verification": h.mailer != nil && h.mailer.Configured(),
 		"login_agreement": gin.H{

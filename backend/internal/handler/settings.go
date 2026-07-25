@@ -38,7 +38,13 @@ func (h *SystemSettingsHandler) Get(c *gin.Context) {
 }
 
 func (h *SystemSettingsHandler) Update(c *gin.Context) {
-	var req service.SystemSettings
+	// Start from the persisted value so older cached frontends that do not yet
+	// send a newly introduced field cannot accidentally reset it to a zero value.
+	req, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load system settings failed")
+		return
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		util.Fail(c, http.StatusBadRequest, "invalid system settings")
 		return

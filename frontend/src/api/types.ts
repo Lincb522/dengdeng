@@ -33,6 +33,7 @@ export interface PublicSettings {
 	site_name: string
 	site_subtitle: string
 	allow_register: boolean
+	key_multi_group_enabled: boolean
 	registration_verification: boolean
 	login_agreement: LoginAgreement
 }
@@ -41,6 +42,7 @@ export interface SystemSettings {
 	site_name: string
 	site_subtitle: string
 	allow_register: boolean
+	key_multi_group_enabled: boolean
 	registration_email_suffixes: string[]
 	init_balance_micro: number
 	trusted_proxies: string[]
@@ -214,7 +216,64 @@ export interface ReferralCommission {
 	base_cost_micro: number
 	commission_bps: number
 	amount_micro: number
+	status: 'legacy_balance' | 'pending' | 'available' | 'reversed'
+	available_at?: string | null
 	created_at: string
+}
+
+export interface ReferralCashSnapshot {
+	pending_micro: number
+	available_micro: number
+	locked_micro: number
+	paid_micro: number
+	currency: string
+	total_minor: number
+	pending_minor: number
+	available_minor: number
+	locked_minor: number
+	paid_minor: number
+	min_payout_minor: number
+	enabled: boolean
+}
+
+export interface ReferralPayoutAccount {
+	id: number
+	user_id: number
+	user_email?: string
+	channel: string
+	openid_hint: string
+	status: 'pending' | 'verified' | 'disabled'
+	note?: string
+	verified_at?: string | null
+	created_at: string
+	updated_at: string
+}
+
+export interface ReferralPayout {
+	id: number
+	out_bill_no: string
+	user_id: number
+	user_email?: string
+	payout_account_id: number
+	provider_id: number
+	channel: string
+	status: string
+	currency: string
+	amount_minor: number
+	commission_micro: number
+	exchange_micro: number
+	provider_bill_no?: string
+	app_id?: string
+	merchant_id?: string
+	package_info?: string
+	failure_code?: string
+	failure_message?: string
+	openid_hint?: string
+	requested_at: string
+	submitted_at?: string | null
+	completed_at?: string | null
+	created_at: string
+	updated_at: string
 }
 
 export interface ReferralDashboard {
@@ -222,6 +281,9 @@ export interface ReferralDashboard {
 	codes: ReferralCodeStats[]
 	commissions: ReferralCommission[]
 	total_commission_micro: number
+	cash: ReferralCashSnapshot
+	payout_account: ReferralPayoutAccount | null
+	payouts: ReferralPayout[]
 }
 
 export interface Group {
@@ -726,6 +788,7 @@ export interface PaymentLedgerItem {
   credit_micro: number
   provider_key: string
   payment_method: string
+  category?: string
   occurred_at: string
 }
 

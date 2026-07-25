@@ -38,6 +38,7 @@ const form = ref<SystemSettings>({
   site_name: 'DengDeng AI · 蹬蹬ai',
   site_subtitle: '统一管理模型接入与用量',
   allow_register: true,
+	key_multi_group_enabled: true,
 	registration_email_suffixes: [],
 	trusted_proxies: [],
 	forwarded_client_ip_headers: ['X-Forwarded-For', 'X-Real-IP'],
@@ -86,6 +87,7 @@ async function load() {
       site_name: data.site_name,
       site_subtitle: data.site_subtitle,
       allow_register: data.allow_register,
+			key_multi_group_enabled: data.key_multi_group_enabled !== false,
 			registration_email_suffixes: data.registration_email_suffixes || [],
 			trusted_proxies: data.trusted_proxies || [],
 			forwarded_client_ip_headers: data.forwarded_client_ip_headers || ['X-Forwarded-For', 'X-Real-IP'],
@@ -275,6 +277,20 @@ onMounted(load)
                 <small>注册时仍需完成邮箱验证码验证。</small>
               </span>
               <input v-model="form.allow_register" type="checkbox" role="switch" />
+            </label>
+          </section>
+
+          <section class="settings-section">
+            <header>
+              <h2>密钥分组策略</h2>
+              <p>控制普通用户创建和编辑 API 密钥时能否同时绑定多个分组。</p>
+            </header>
+            <label class="settings-toggle-row">
+              <span>
+                <strong>允许密钥绑定多个分组</strong>
+                <small>关闭后会立即保留每把密钥的主分组并移除额外绑定，新建和编辑都改为单选。</small>
+              </span>
+              <input v-model="form.key_multi_group_enabled" type="checkbox" role="switch" />
             </label>
           </section>
 

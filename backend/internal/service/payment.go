@@ -690,6 +690,7 @@ func recordPaymentLedger(tx *gorm.DB, order model.PaymentOrder, kind string, occ
 		CreditMicro:   credit,
 		ProviderKey:   order.ProviderKey,
 		PaymentMethod: order.PaymentMethod,
+		Category:      map[bool]string{true: "refund", false: "recharge"}[kind == model.PaymentLedgerExpense],
 		OccurredAt:    occurredAt.UTC(),
 	}
 	return tx.Clauses(clause.OnConflict{

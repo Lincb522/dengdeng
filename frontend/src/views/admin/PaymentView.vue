@@ -65,6 +65,14 @@ function money(minor: number, currency = 'CNY') {
 function status(order: PaymentOrder) {
   return ({ PENDING: '待支付', COMPLETED: '已到账', FAILED: '失败', EXPIRED: '已过期', CANCELLED: '已取消', REFUND_REQUESTED: '退款申请', REFUNDING: '退款处理中', REFUNDED: '已退款' } as Record<string, string>)[order.status] || order.status
 }
+function ledgerLabel(item: PaymentLedgerPage['items'][number]) {
+	if (item.category === 'referral_payout') return '推广佣金'
+	return item.kind === 'income' ? '收入' : '退款'
+}
+function creditLabel(item: PaymentLedgerPage['items'][number]) {
+	if (item.category === 'referral_payout') return '现金佣金'
+	return item.kind === 'income' ? '发放' : '收回'
+}
 function localTime(value: string) { return new Date(value).toLocaleString() }
 function shortDate(value: string) {
   const date = new Date(`${value}T00:00:00Z`)
@@ -198,13 +206,13 @@ onMounted(load)
         <div class="payment-net">
           <span>{{ periodLabel }}净收入</span>
           <strong>{{ money(ledger.summary.net_minor, ledger.summary.currency) }}</strong>
-          <small>{{ ledger.summary.income_count }} 笔收入 · {{ ledger.summary.expense_count }} 笔退款</small>
+          <small>{{ ledger.summary.income_count }} 笔收入 · {{ ledger.summary.expense_count }} 笔支出</small>
         </div>
         <dl class="payment-summary">
           <div><dt>收入</dt><dd class="is-income">+{{ money(ledger.summary.income_minor, ledger.summary.currency) }}</dd></div>
-          <div><dt>退款支出</dt><dd class="is-expense">-{{ money(ledger.summary.expense_minor, ledger.summary.currency) }}</dd></div>
+          <div><dt>现金支出</dt><dd class="is-expense">-{{ money(ledger.summary.expense_minor, ledger.summary.currency) }}</dd></div>
           <div><dt>发放额度</dt><dd>{{ formatMoney(ledger.summary.income_credit_micro) }}</dd></div>
-          <div><dt>收回额度</dt><dd>{{ formatMoney(ledger.summary.expense_credit_micro) }}</dd></div>
+          <div><dt>支出对应额度</dt><dd>{{ formatMoney(ledger.summary.expense_credit_micro) }}</dd></div>
         </dl>
       </section>
 
@@ -228,21 +236,21 @@ onMounted(load)
             </div>
           </div>
         </div>
-        <div v-else class="payment-empty">所选时间内暂无已到账或退款流水</div>
+        <div v-else class="payment-empty">所选时间内暂无收支流水</div>
       </section>
 
       <section class="card payment-recent">
         <div class="payment-section-head">
-          <div><h3>最近流水</h3><p>充值到账与退款成功后自动记账。</p></div>
+          <div><h3>最近流水</h3><p>充值、退款与推广佣金打款均自动记账。</p></div>
           <button class="btn-ghost text-xs" @click="activeTab = 'ledger'">查看全部</button>
         </div>
         <div v-if="ledger.items.length" class="payment-ledger-list">
           <div v-for="item in ledger.items.slice(0, 6)" :key="item.id" class="payment-ledger-row">
-            <span class="payment-ledger-kind" :class="`is-${item.kind}`">{{ item.kind === 'income' ? '收入' : '退款' }}</span>
+            <span class="payment-ledger-kind" :class="`is-${item.kind}`">{{ ledgerLabel(item) }}</span>
             <div class="payment-ledger-user"><strong>{{ item.user_email || `用户 #${item.user_id}` }}</strong><small>用户 ID {{ item.user_id }}</small></div>
             <div class="payment-ledger-order"><code>{{ item.order_no }}</code><small>{{ item.provider_key }} · {{ item.payment_method || '默认方式' }}</small></div>
             <time>{{ localTime(item.occurred_at) }}</time>
-            <div class="payment-ledger-amount" :class="`is-${item.kind}`"><strong>{{ item.kind === 'income' ? '+' : '-' }}{{ money(item.amount_minor, item.currency) }}</strong><small>{{ item.kind === 'income' ? '发放' : '收回' }} {{ formatMoney(item.credit_micro) }}</small></div>
+            <div class="payment-ledger-amount" :class="`is-${item.kind}`"><strong>{{ item.kind === 'income' ? '+' : '-' }}{{ money(item.amount_minor, item.currency) }}</strong><small>{{ creditLabel(item) }} {{ formatMoney(item.credit_micro) }}</small></div>
           </div>
         </div>
         <div v-else class="payment-empty">暂无账本流水</div>
@@ -251,23 +259,23 @@ onMounted(load)
 
     <section v-else-if="activeTab === 'ledger'" class="card payment-ledger">
       <div class="payment-section-head">
-        <div><h3>记账本</h3><p>每次充值到账和退款成功都会生成一条不可重复的流水。</p></div>
+        <div><h3>记账本</h3><p>每次真实资金收入和支出都会生成不可重复的流水。</p></div>
         <span class="payment-ledger-balance">净收入 {{ money(ledger.summary.net_minor, ledger.summary.currency) }}</span>
       </div>
       <div class="payment-ledger-filters">
         <select v-model="ledgerFilters.period" class="input" @change="applyLedgerFilters"><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="90d">近 90 天</option><option value="all">全部时间</option></select>
         <select v-model="ledgerFilters.currency" class="input" @change="applyLedgerFilters"><option v-for="currency in (ledger.currencies.length ? ledger.currencies : [config.currency])" :key="currency">{{ currency }}</option></select>
-        <select v-model="ledgerFilters.kind" class="input" @change="applyLedgerFilters"><option value="">全部收支</option><option value="income">仅收入</option><option value="expense">仅退款</option></select>
+        <select v-model="ledgerFilters.kind" class="input" @change="applyLedgerFilters"><option value="">全部收支</option><option value="income">仅收入</option><option value="expense">仅支出</option></select>
         <select v-model="ledgerFilters.provider" class="input" @change="applyLedgerFilters"><option value="">全部渠道</option><option v-for="provider in ledger.providers" :key="provider" :value="provider">{{ provider }}</option></select>
         <div class="payment-ledger-search"><input v-model="ledgerFilters.user" class="input" placeholder="用户邮箱或 ID" @keyup.enter="applyLedgerFilters" /><button class="btn-ghost" @click="applyLedgerFilters">查询</button></div>
       </div>
       <div v-if="ledger.items.length" class="payment-ledger-list">
         <div v-for="item in ledger.items" :key="item.id" class="payment-ledger-row">
-          <span class="payment-ledger-kind" :class="`is-${item.kind}`">{{ item.kind === 'income' ? '收入' : '退款' }}</span>
+          <span class="payment-ledger-kind" :class="`is-${item.kind}`">{{ ledgerLabel(item) }}</span>
           <div class="payment-ledger-user"><strong>{{ item.user_email || `用户 #${item.user_id}` }}</strong><small>用户 ID {{ item.user_id }}</small></div>
           <div class="payment-ledger-order"><code>{{ item.order_no }}</code><small>{{ item.provider_key }} · {{ item.payment_method || '默认方式' }}</small></div>
           <time>{{ localTime(item.occurred_at) }}</time>
-          <div class="payment-ledger-amount" :class="`is-${item.kind}`"><strong>{{ item.kind === 'income' ? '+' : '-' }}{{ money(item.amount_minor, item.currency) }}</strong><small>{{ item.kind === 'income' ? '发放' : '收回' }} {{ formatMoney(item.credit_micro) }}</small></div>
+          <div class="payment-ledger-amount" :class="`is-${item.kind}`"><strong>{{ item.kind === 'income' ? '+' : '-' }}{{ money(item.amount_minor, item.currency) }}</strong><small>{{ creditLabel(item) }} {{ formatMoney(item.credit_micro) }}</small></div>
         </div>
       </div>
       <div v-else class="payment-empty">没有符合条件的流水</div>
