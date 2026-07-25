@@ -7,6 +7,8 @@ import { PLATFORM_LABELS } from '../../api/types'
 const groups = ref<Group[]>([])
 const showForm = ref(false)
 const editing = ref<Group | null>(null)
+const saving = ref(false)
+const backdropPointerStarted = ref(false)
 const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 const form = ref({
@@ -62,7 +64,25 @@ function openEdit(g: Group) {
   showForm.value = true
 }
 
+function closeForm() {
+  if (saving.value) return
+  backdropPointerStarted.value = false
+  showForm.value = false
+}
+
+function handleBackdropPointerDown(event: PointerEvent) {
+  backdropPointerStarted.value = event.target === event.currentTarget
+}
+
+function handleBackdropPointerUp(event: PointerEvent) {
+  const shouldClose = backdropPointerStarted.value && event.target === event.currentTarget
+  backdropPointerStarted.value = false
+  if (shouldClose) closeForm()
+}
+
 async function save() {
+  if (saving.value) return
+  saving.value = true
   const body = {
     ...form.value,
     rate_multiplier: Number(form.value.rate_multiplier),
@@ -74,12 +94,16 @@ async function save() {
 			Object.entries(form.value.reasoning_effort_mappings).filter(([source, target]) => target && source !== target),
 		),
   }
-  const ok = editing.value
-    ? await withToast(() => api.put(`/api/admin/groups/${editing.value!.id}`, body), '已保存')
-    : await withToast(() => api.post('/api/admin/groups', body), '分组已创建')
-  if (ok !== null) {
-    showForm.value = false
-    await load()
+  try {
+    const ok = editing.value
+      ? await withToast(() => api.put(`/api/admin/groups/${editing.value!.id}`, body), '已保存')
+      : await withToast(() => api.post('/api/admin/groups', body), '分组已创建')
+    if (ok !== null) {
+      showForm.value = false
+      await load()
+    }
+  } finally {
+    saving.value = false
   }
 }
 
@@ -157,9 +181,16 @@ async function togglePublic(g: Group) {
     </div>
 
     <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
-        <div class="card max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto p-5 sm:p-6">
-          <h3 class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑分组' : '新建分组' }}</h3>
+      <div
+        v-if="showForm"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+        @keydown.esc="closeForm"
+        @pointercancel="backdropPointerStarted = false"
+        @pointerdown="handleBackdropPointerDown"
+        @pointerup="handleBackdropPointerUp"
+      >
+        <div class="card max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto p-5 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="group-form-title">
+          <h3 id="group-form-title" class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑分组' : '新建分组' }}</h3>
           <div class="space-y-4">
             <div>
               <label class="label">名称</label>
@@ -257,8 +288,8 @@ async function togglePublic(g: Group) {
               对普通用户开放(可自助创建密钥)
             </label>
             <div class="flex justify-end gap-3 pt-2">
-              <button class="btn-ghost" @click="showForm = false">取消</button>
-              <button class="btn-primary" :disabled="!form.name" @click="save">保存</button>
+              <button class="btn-ghost" :disabled="saving" @click="closeForm">取消</button>
+              <button class="btn-primary" :disabled="saving || !form.name" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
             </div>
           </div>
         </div>

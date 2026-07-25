@@ -90,6 +90,37 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ?", created.Data.Key.ID).Count(&bindingCount).Error; err != nil || bindingCount != 2 {
 		t.Fatalf("updated binding count=%d err=%v", bindingCount, err)
 	}
+
+	settings.KeyMultiGroupEnabled = false
+	if _, err := service.NewSystemSettingsService(db, cfg).Update(settings); err != nil {
+		t.Fatalf("disable multi-group keys: %v", err)
+	}
+	if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ?", created.Data.Key.ID).Count(&bindingCount).Error; err != nil || bindingCount != 1 {
+		t.Fatalf("collapsed binding count=%d err=%v", bindingCount, err)
+	}
+	var primaryBinding model.APIKeyGroup
+	if err := db.Where("api_key_id = ?", created.Data.Key.ID).First(&primaryBinding).Error; err != nil || primaryBinding.GroupID != groups[2].ID {
+		t.Fatalf("unexpected primary binding=%#v err=%v", primaryBinding, err)
+	}
+
+	rejectedCreate := callJSON(t, router, http.MethodPost, "/api/user/keys", map[string]any{
+		"name": "rejected-multi", "group_ids": []int64{groups[0].ID, groups[1].ID},
+	}, loginBody.Data.Token)
+	if rejectedCreate.Code != http.StatusBadRequest {
+		t.Fatalf("disabled multi-group create status=%d body=%s", rejectedCreate.Code, rejectedCreate.Body.String())
+	}
+	rejectedUpdate := callJSON(t, router, http.MethodPut, "/api/user/keys/"+jsonNumber(created.Data.Key.ID), map[string]any{
+		"group_ids": []int64{groups[0].ID, groups[1].ID},
+	}, loginBody.Data.Token)
+	if rejectedUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("disabled multi-group update status=%d body=%s", rejectedUpdate.Code, rejectedUpdate.Body.String())
+	}
+	acceptedSingle := callJSON(t, router, http.MethodPost, "/api/user/keys", map[string]any{
+		"name": "single", "group_ids": []int64{groups[0].ID},
+	}, loginBody.Data.Token)
+	if acceptedSingle.Code != http.StatusOK {
+		t.Fatalf("single-group create status=%d body=%s", acceptedSingle.Code, acceptedSingle.Body.String())
+	}
 }
 
 func jsonNumber(value int64) string {

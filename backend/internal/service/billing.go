@@ -7,6 +7,7 @@ import (
 	"dengdeng/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // BillingService turns extracted usage into a ledger entry and balance
@@ -154,15 +155,37 @@ func settleReferralCommission(tx *gorm.DB, usageLogID, referredUserID, costMicro
 	if amount <= 0 {
 		return nil
 	}
+	now := time.Now().UTC()
+	settlementDays := 7
+	var cashConfig model.ReferralPayoutConfig
+	if err := tx.First(&cashConfig, 1).Error; err == nil {
+		settlementDays = cashConfig.SettlementDays
+	} else if err != gorm.ErrRecordNotFound {
+		return err
+	}
+	if settlementDays < 0 {
+		settlementDays = 0
+	}
+	availableAt := now.Add(time.Duration(settlementDays) * 24 * time.Hour)
+	status := model.ReferralCommissionPending
+	accountColumn := "pending_micro"
+	if settlementDays == 0 {
+		status = model.ReferralCommissionAvailable
+		accountColumn = "available_micro"
+	}
 	commission := model.ReferralCommission{
 		UsageLogID: usageLogID, ReferralCodeID: settlement.ReferralCodeID,
 		ReferrerUserID: settlement.ReferrerUserID, ReferredUserID: referredUserID,
 		BaseCostMicro: costMicro, CommissionBps: settlement.CommissionBps,
-		AmountMicro: amount, CreatedAt: time.Now().UTC(),
+		AmountMicro: amount, Status: status, AvailableAt: &availableAt, CreatedAt: now,
 	}
 	if err := tx.Create(&commission).Error; err != nil {
 		return err
 	}
-	return tx.Model(&model.User{}).Where("id = ?", settlement.ReferrerUserID).
-		Update("balance_micro", gorm.Expr("balance_micro + ?", amount)).Error
+	account := model.ReferralCashAccount{UserID: settlement.ReferrerUserID, CreatedAt: now, UpdatedAt: now}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&account).Error; err != nil {
+		return err
+	}
+	return tx.Model(&model.ReferralCashAccount{}).Where("user_id = ?", settlement.ReferrerUserID).
+		Updates(map[string]any{accountColumn: gorm.Expr(accountColumn+" + ?", amount), "updated_at": now}).Error
 }

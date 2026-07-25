@@ -11,6 +11,7 @@ import (
 	"dengdeng/internal/crypto"
 	"dengdeng/internal/middleware"
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 	"dengdeng/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -24,6 +25,14 @@ type UserHandler struct {
 
 func NewUserHandler(db *gorm.DB, cfg *config.Config) *UserHandler {
 	return &UserHandler{db: db, cfg: cfg}
+}
+
+func (h *UserHandler) multipleKeyGroupsEnabled() (bool, error) {
+	settings, err := service.NewSystemSettingsService(h.db, h.cfg).Get()
+	if err != nil {
+		return false, err
+	}
+	return settings.KeyMultiGroupEnabled, nil
 }
 
 func (h *UserHandler) Me(c *gin.Context) {
@@ -195,6 +204,17 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "at least one group is required")
 		return
 	}
+	if len(groupIDs) > 1 {
+		enabled, settingsErr := h.multipleKeyGroupsEnabled()
+		if settingsErr != nil {
+			util.Fail(c, http.StatusInternalServerError, "load key group policy failed")
+			return
+		}
+		if !enabled {
+			util.Fail(c, http.StatusBadRequest, "multiple groups per API key are disabled by the administrator")
+			return
+		}
+	}
 	if req.QuotaMicro < 0 || req.DailyQuotaMicro < 0 {
 		util.Fail(c, http.StatusBadRequest, "key quotas cannot be negative")
 		return
@@ -299,6 +319,17 @@ func (h *UserHandler) UpdateKey(c *gin.Context) {
 		if len(selectedGroupIDs) == 0 {
 			util.Fail(c, http.StatusBadRequest, "at least one group is required")
 			return
+		}
+		if len(selectedGroupIDs) > 1 {
+			enabled, settingsErr := h.multipleKeyGroupsEnabled()
+			if settingsErr != nil {
+				util.Fail(c, http.StatusInternalServerError, "load key group policy failed")
+				return
+			}
+			if !enabled {
+				util.Fail(c, http.StatusBadRequest, "multiple groups per API key are disabled by the administrator")
+				return
+			}
 		}
 		_, status, message := h.resolveKeyGroups(user, selectedGroupIDs)
 		if status != 0 {

@@ -16,7 +16,7 @@ func TestBillingSettlesReferralCommissionFromPaidUsage(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.APIKey{}, &model.ModelPrice{}, &model.UsageLog{},
-		&model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{},
+		&model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutConfig{},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +59,8 @@ func TestBillingSettlesReferralCommissionFromPaidUsage(t *testing.T) {
 	if err := db.First(&referrer, referrer.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if referrer.BalanceMicro != 75_000 {
-		t.Fatalf("referrer balance = %d, want 75000", referrer.BalanceMicro)
+	if referrer.BalanceMicro != 0 {
+		t.Fatalf("referrer API balance = %d, want 0", referrer.BalanceMicro)
 	}
 	var commission model.ReferralCommission
 	if err := db.First(&commission).Error; err != nil {
@@ -68,6 +68,16 @@ func TestBillingSettlesReferralCommissionFromPaidUsage(t *testing.T) {
 	}
 	if commission.BaseCostMicro != 1_000_000 || commission.AmountMicro != 75_000 || commission.CommissionBps != 750 {
 		t.Fatalf("unexpected commission: %#v", commission)
+	}
+	if commission.Status != model.ReferralCommissionPending || commission.AvailableAt == nil {
+		t.Fatalf("commission cash status = %#v", commission)
+	}
+	var cash model.ReferralCashAccount
+	if err := db.First(&cash, referrer.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if cash.PendingMicro != 75_000 || cash.AvailableMicro != 0 {
+		t.Fatalf("cash account = %#v", cash)
 	}
 }
 
@@ -78,7 +88,7 @@ func TestBillingDoesNotCommissionSponsoredUsage(t *testing.T) {
 	}
 	if err := db.AutoMigrate(
 		&model.User{}, &model.ModelPrice{}, &model.UsageLog{},
-		&model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{},
+		&model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutConfig{},
 	); err != nil {
 		t.Fatal(err)
 	}

@@ -53,6 +53,25 @@ const (
 
 	PaymentLedgerIncome  = "income"
 	PaymentLedgerExpense = "expense"
+
+	ReferralCommissionLegacyBalance = "legacy_balance"
+	ReferralCommissionPending       = "pending"
+	ReferralCommissionAvailable     = "available"
+	ReferralCommissionReversed      = "reversed"
+
+	ReferralPayoutAccountPending  = "pending"
+	ReferralPayoutAccountVerified = "verified"
+	ReferralPayoutAccountDisabled = "disabled"
+
+	ReferralPayoutReviewPending   = "REVIEW_PENDING"
+	ReferralPayoutQueued          = "QUEUED"
+	ReferralPayoutSubmitting      = "SUBMITTING"
+	ReferralPayoutAwaitingConfirm = "AWAITING_CONFIRMATION"
+	ReferralPayoutProcessing      = "PROCESSING"
+	ReferralPayoutSuccess         = "SUCCESS"
+	ReferralPayoutFailed          = "FAILED"
+	ReferralPayoutCancelled       = "CANCELLED"
+	ReferralPayoutStatusUncertain = "STATUS_UNCERTAIN"
 )
 
 var AllPlatforms = []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformGrok}
@@ -209,15 +228,100 @@ type ReferralBinding struct {
 // ReferralCommission is a usage-ledger sidecar. UsageLogID is unique, making
 // settlement idempotent even if a billing record is retried.
 type ReferralCommission struct {
-	ID             int64     `gorm:"primaryKey" json:"id"`
-	UsageLogID     int64     `gorm:"uniqueIndex;not null" json:"usage_log_id"`
-	ReferralCodeID int64     `gorm:"index;not null" json:"referral_code_id"`
-	ReferrerUserID int64     `gorm:"index;not null" json:"referrer_user_id"`
-	ReferredUserID int64     `gorm:"index;not null" json:"referred_user_id"`
-	BaseCostMicro  int64     `gorm:"not null" json:"base_cost_micro"`
-	CommissionBps  int       `gorm:"not null" json:"commission_bps"`
-	AmountMicro    int64     `gorm:"not null" json:"amount_micro"`
-	CreatedAt      time.Time `gorm:"index" json:"created_at"`
+	ID             int64 `gorm:"primaryKey" json:"id"`
+	UsageLogID     int64 `gorm:"uniqueIndex;not null" json:"usage_log_id"`
+	ReferralCodeID int64 `gorm:"index;not null" json:"referral_code_id"`
+	ReferrerUserID int64 `gorm:"index;not null" json:"referrer_user_id"`
+	ReferredUserID int64 `gorm:"index;not null" json:"referred_user_id"`
+	BaseCostMicro  int64 `gorm:"not null" json:"base_cost_micro"`
+	CommissionBps  int   `gorm:"not null" json:"commission_bps"`
+	AmountMicro    int64 `gorm:"not null" json:"amount_micro"`
+	// Historical rows default to legacy_balance because older releases credited
+	// them to User.BalanceMicro. New billing writes pending/available explicitly,
+	// preventing an upgrade from paying the same commission twice in cash.
+	Status      string     `gorm:"size:24;index;not null;default:legacy_balance" json:"status"`
+	AvailableAt *time.Time `gorm:"index" json:"available_at,omitempty"`
+	ReversedAt  *time.Time `json:"reversed_at,omitempty"`
+	CreatedAt   time.Time  `gorm:"index" json:"created_at"`
+}
+
+// ReferralCashAccount is a cash-only aggregate. It is intentionally separate
+// from User.BalanceMicro: commissions can be paid out, but cannot be spent as
+// API credit. Every mutation is made in the same transaction as its immutable
+// commission or payout record.
+type ReferralCashAccount struct {
+	UserID         int64     `gorm:"primaryKey;autoIncrement:false" json:"user_id"`
+	PendingMicro   int64     `gorm:"not null;default:0" json:"pending_micro"`
+	AvailableMicro int64     `gorm:"not null;default:0" json:"available_micro"`
+	LockedMicro    int64     `gorm:"not null;default:0" json:"locked_micro"`
+	PaidMicro      int64     `gorm:"not null;default:0" json:"paid_micro"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// ReferralPayoutAccount stores the recipient identifier encrypted at rest.
+// OpenIDHash allows duplicate/fraud checks without exposing the OpenID.
+type ReferralPayoutAccount struct {
+	ID         int64                  `gorm:"primaryKey" json:"id"`
+	UserID     int64                  `gorm:"uniqueIndex;not null" json:"user_id"`
+	Channel    string                 `gorm:"size:16;not null;default:wxpay" json:"channel"`
+	OpenID     crypto.EncryptedString `gorm:"size:1024;not null" json:"-"`
+	OpenIDHash string                 `gorm:"uniqueIndex;size:64;not null" json:"-"`
+	OpenIDHint string                 `gorm:"size:32;not null" json:"openid_hint"`
+	Status     string                 `gorm:"size:16;index;not null;default:pending" json:"status"`
+	Note       string                 `gorm:"size:512" json:"note,omitempty"`
+	VerifiedAt *time.Time             `json:"verified_at,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
+	UpdatedAt  time.Time              `json:"updated_at"`
+}
+
+// ReferralPayoutConfig controls cash settlement and WeChat merchant transfer.
+// Scene report fields are operator supplied because WeChat defines them per
+// approved transfer scene and rejects guessed labels.
+type ReferralPayoutConfig struct {
+	ID                     int64     `gorm:"primaryKey" json:"id"`
+	Enabled                bool      `gorm:"not null;default:false" json:"enabled"`
+	Currency               string    `gorm:"size:8;not null;default:CNY" json:"currency"`
+	SettlementDays         int       `gorm:"not null;default:7" json:"settlement_days"`
+	MinPayoutMinor         int64     `gorm:"not null;default:100" json:"min_payout_minor"`
+	MaxPayoutMinor         int64     `gorm:"not null;default:200000" json:"max_payout_minor"`
+	DailyPayoutMinor       int64     `gorm:"not null;default:500000" json:"daily_payout_minor"`
+	RequireReview          bool      `gorm:"not null;default:true" json:"require_review"`
+	WxProviderID           int64     `gorm:"index;not null;default:0" json:"wx_provider_id"`
+	WxTransferSceneID      string    `gorm:"size:36" json:"wx_transfer_scene_id"`
+	SceneReportInfoType    string    `gorm:"size:15" json:"scene_report_info_type"`
+	SceneReportInfoContent string    `gorm:"size:32" json:"scene_report_info_content"`
+	TransferRemark         string    `gorm:"size:32;not null;default:推广佣金" json:"transfer_remark"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// ReferralPayout is the durable cash transfer state machine. OutBillNo is
+// generated once and never changed; uncertain submissions are queried using
+// that same number so a retry cannot cause duplicate payment.
+type ReferralPayout struct {
+	ID              int64      `gorm:"primaryKey" json:"id"`
+	OutBillNo       string     `gorm:"uniqueIndex;size:32;not null" json:"out_bill_no"`
+	UserID          int64      `gorm:"index;not null" json:"user_id"`
+	PayoutAccountID int64      `gorm:"index;not null" json:"payout_account_id"`
+	ProviderID      int64      `gorm:"index;not null" json:"provider_id"`
+	Channel         string     `gorm:"size:16;not null" json:"channel"`
+	Status          string     `gorm:"size:32;index;not null" json:"status"`
+	Currency        string     `gorm:"size:8;not null" json:"currency"`
+	AmountMinor     int64      `gorm:"not null" json:"amount_minor"`
+	CommissionMicro int64      `gorm:"not null" json:"commission_micro"`
+	ExchangeMicro   int64      `gorm:"not null" json:"exchange_micro"`
+	ProviderBillNo  string     `gorm:"size:64;index" json:"provider_bill_no,omitempty"`
+	AppID           string     `gorm:"size:64" json:"app_id,omitempty"`
+	MerchantID      string     `gorm:"size:64" json:"merchant_id,omitempty"`
+	PackageInfo     string     `gorm:"size:2048" json:"package_info,omitempty"`
+	FailureCode     string     `gorm:"size:128" json:"failure_code,omitempty"`
+	FailureMessage  string     `gorm:"size:512" json:"failure_message,omitempty"`
+	RequestedAt     time.Time  `gorm:"index;not null" json:"requested_at"`
+	SubmittedAt     *time.Time `json:"submitted_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // UpstreamAccount is a credential for an upstream provider. It supports a
@@ -691,6 +795,7 @@ type PaymentLedgerEntry struct {
 	CreditMicro   int64     `gorm:"not null" json:"credit_micro"`
 	ProviderKey   string    `gorm:"size:32;index" json:"provider_key"`
 	PaymentMethod string    `gorm:"size:32" json:"payment_method"`
+	Category      string    `gorm:"size:32;index" json:"category"`
 	OccurredAt    time.Time `gorm:"index;not null" json:"occurred_at"`
 	CreatedAt     time.Time `json:"created_at"`
 }

@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { api, copyText, withToast } from '../api/client'
 import type { ApiKey, Group } from '../api/types'
 import { formatMoney, PLATFORM_LABELS } from '../api/types'
 import { normalizeReasoningEffort, REASONING_OPTIONS, reasoningLabel } from '../api/reasoning'
 import { useToast } from '../stores/toast'
+import { useAuth } from '../stores/auth'
 import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
 
 const toast = useToast()
+const auth = useAuth()
+const keyMultiGroupEnabled = computed(() => auth.keyMultiGroupEnabled)
 const keys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const showCreate = ref(false)
@@ -27,6 +30,19 @@ const settingKey = ref<ApiKey | null>(null)
 const settingsForm = ref({ name: '', group_ids: [] as number[], reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
 const reasoningOptions = REASONING_OPTIONS
+
+function normalizeGroupSelection(groupIDs: number[]) {
+  const unique = [...new Set(groupIDs.filter((id) => id > 0))]
+  return keyMultiGroupEnabled.value ? unique : unique.slice(0, 1)
+}
+
+function selectNewGroup(groupID: number) {
+  newGroupIDs.value = [groupID]
+}
+
+function selectSettingsGroup(groupID: number) {
+  settingsForm.value.group_ids = [groupID]
+}
 
 function selectedGroups(groupIDs: number[]) {
   const selected = new Set(groupIDs)
@@ -120,18 +136,22 @@ function toLocalDateTime(value: string | null | undefined) {
 async function load() {
   keys.value = await api.get<ApiKey[]>('/api/user/keys')
   groups.value = await api.get<Group[]>('/api/user/groups')
+	newGroupIDs.value = normalizeGroupSelection(newGroupIDs.value)
   if (groups.value.length && !newGroupIDs.value.length) {
     newGroupIDs.value = [groups.value[0].id]
   }
 }
-onMounted(load)
+onMounted(async () => {
+	await auth.loadPublicSettings()
+	await load()
+})
 
 async function createKey() {
   if (!newName.value || !newGroupIDs.value.length) return
   const result = await withToast(
     () => api.post<{ key: ApiKey; plain: string }>('/api/user/keys', {
       name: newName.value,
-      group_ids: newGroupIDs.value,
+		group_ids: normalizeGroupSelection(newGroupIDs.value),
 	  reasoning_effort: hasPlatform(newGroupIDs.value, 'openai') ? newReasoningEffort.value : 'auto',
       quota_micro: toMicro(newQuota.value),
       daily_quota_micro: toMicro(newDailyQuota.value),
@@ -170,7 +190,7 @@ function openSettings(key: ApiKey) {
   settingKey.value = key
   settingsForm.value = {
     name: key.name,
-	group_ids: keyGroupIDs(key),
+	group_ids: normalizeGroupSelection(keyGroupIDs(key)),
 	  reasoning_effort: normalizeReasoningEffort(key.reasoning_effort),
     quota: fromMicro(key.quota_micro),
     daily_quota: fromMicro(key.daily_quota_micro),
@@ -187,7 +207,7 @@ async function saveSettings() {
   if (!settingKey.value || !settingsForm.value.name || !settingsForm.value.group_ids.length) return
   const saved = await withToast(() => api.put(`/api/user/keys/${settingKey.value!.id}`, {
     name: settingsForm.value.name,
-    group_ids: settingsForm.value.group_ids,
+		group_ids: normalizeGroupSelection(settingsForm.value.group_ids),
 	  reasoning_effort: hasPlatform(settingsForm.value.group_ids, 'openai') ? settingsForm.value.reasoning_effort : 'auto',
     quota_micro: toMicro(settingsForm.value.quota),
     daily_quota_micro: toMicro(settingsForm.value.daily_quota),
@@ -276,7 +296,7 @@ function onSetupEffortUpdated(value: string) {
     <div class="console-page-head">
       <div>
         <h1>API 密钥</h1>
-        <p class="mt-1 text-sm text-slate-500">一把密钥可绑定多个分组，并独立设置总额度和每日额度；填 0 即不限制。</p>
+		<p class="mt-1 text-sm text-slate-500">{{ keyMultiGroupEnabled ? '一把密钥可绑定多个分组' : '每把密钥绑定一个分组' }}，并可独立设置总额度和每日额度；填 0 即不限制。</p>
       </div>
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
@@ -355,14 +375,15 @@ function onSetupEffortUpdated(value: string) {
                 <input v-model="newName" class="input" placeholder="例如:my-claude-code" maxlength="64" />
               </div>
               <div>
-				<label class="label">选择分组（可多选）</label>
+				<label class="label">{{ keyMultiGroupEnabled ? '选择分组（可多选）' : '选择分组' }}</label>
 				<div class="key-group-picker" role="group" aria-label="选择密钥分组">
 					<label v-for="g in groups" :key="g.id" :class="{ 'is-selected': newGroupIDs.includes(g.id) }">
-						<input v-model="newGroupIDs" type="checkbox" :value="g.id" />
+						<input v-if="keyMultiGroupEnabled" v-model="newGroupIDs" type="checkbox" :value="g.id" />
+						<input v-else type="radio" name="new-key-group" :checked="newGroupIDs[0] === g.id" @change="selectNewGroup(g.id)" />
 						<span><strong>{{ g.name }}</strong><small>{{ PLATFORM_LABELS[g.platform] }} · 倍率 ×{{ g.rate_multiplier }}</small></span>
 					</label>
 				</div>
-				<p v-if="newGroupIDs.length" class="key-group-picker-note">已选 {{ newGroupIDs.length }} 个分组；模型会按平台自动路由，同平台分组不可用时自动切换。</p>
+				<p v-if="newGroupIDs.length && keyMultiGroupEnabled" class="key-group-picker-note">已选 {{ newGroupIDs.length }} 个分组；模型会按平台自动路由，同平台分组不可用时自动切换。</p>
                 <p v-if="!groups.length" class="mt-2 text-xs text-signal-red">暂无开放分组,请联系管理员</p>
               </div>
 					<div v-if="hasPlatform(newGroupIDs, 'openai')" class="rounded-lg border border-amber/20 bg-amber/5 p-3">
@@ -405,7 +426,7 @@ function onSetupEffortUpdated(value: string) {
 					<p class="mb-5 text-xs text-slate-500">预算按实际费用累计；设为 0 表示不设置该层上限。IP 规则和请求速率会在网关鉴权阶段执行。</p>
 					<div class="space-y-4">
 						<label><span class="label">密钥名称</span><input v-model.trim="settingsForm.name" class="input" maxlength="64" /></label>
-						<div><span class="label">分组（可多选）</span><div class="key-group-picker" role="group" aria-label="编辑密钥分组"><label v-for="group in groups" :key="group.id" :class="{ 'is-selected': settingsForm.group_ids.includes(group.id) }"><input v-model="settingsForm.group_ids" type="checkbox" :value="group.id" /><span><strong>{{ group.name }}</strong><small>{{ PLATFORM_LABELS[group.platform] }} · 倍率 ×{{ group.rate_multiplier }}</small></span></label></div><p v-if="settingsForm.group_ids.length" class="key-group-picker-note">已选 {{ settingsForm.group_ids.length }} 个分组；保存后立即生效，不需要重新生成密钥。</p></div>
+						<div><span class="label">{{ keyMultiGroupEnabled ? '分组（可多选）' : '分组' }}</span><div class="key-group-picker" role="group" aria-label="编辑密钥分组"><label v-for="group in groups" :key="group.id" :class="{ 'is-selected': settingsForm.group_ids.includes(group.id) }"><input v-if="keyMultiGroupEnabled" v-model="settingsForm.group_ids" type="checkbox" :value="group.id" /><input v-else type="radio" name="edit-key-group" :checked="settingsForm.group_ids[0] === group.id" @change="selectSettingsGroup(group.id)" /><span><strong>{{ group.name }}</strong><small>{{ PLATFORM_LABELS[group.platform] }} · 倍率 ×{{ group.rate_multiplier }}</small></span></label></div><p v-if="settingsForm.group_ids.length && keyMultiGroupEnabled" class="key-group-picker-note">已选 {{ settingsForm.group_ids.length }} 个分组；保存后立即生效，不需要重新生成密钥。</p></div>
 						<div v-if="hasPlatform(settingsForm.group_ids, 'openai')" class="rounded-lg border border-amber/20 bg-amber/5 p-3"><label><span class="label">默认思考强度 Reasoning Effort</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><p class="mt-2 text-xs leading-5 text-slate-500">客户端显式设置时优先；费用按实际生效档位计算。</p></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label></div>
 						<div class="grid grid-cols-2 gap-3"><label><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label><span class="label">并发上限</span><input v-model.number="settingsForm.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /><small class="mt-1 block text-[11px] text-slate-500">覆盖请求的完整生命周期。</small></label></div>

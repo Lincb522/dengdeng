@@ -47,9 +47,10 @@ func (a LoginAgreementSettings) Revision() string {
 // secrets (database, SMTP credentials, JWT keys) deliberately remain in the
 // environment and are never represented here.
 type SystemSettings struct {
-	SiteName      string `json:"site_name"`
-	SiteSubtitle  string `json:"site_subtitle"`
-	AllowRegister bool   `json:"allow_register"`
+	SiteName             string `json:"site_name"`
+	SiteSubtitle         string `json:"site_subtitle"`
+	AllowRegister        bool   `json:"allow_register"`
+	KeyMultiGroupEnabled bool   `json:"key_multi_group_enabled"`
 	// RegistrationEmailSuffixes is an optional tenant-style allow-list. An
 	// empty list permits all valid email domains; a non-empty list accepts the
 	// listed domains and their subdomains only.
@@ -174,6 +175,7 @@ func (s *SystemSettingsService) defaults() SystemSettings {
 		SiteName:                 name,
 		SiteSubtitle:             "统一管理模型接入与用量",
 		AllowRegister:            allowRegister,
+		KeyMultiGroupEnabled:     true,
 		InitBalanceMicro:         initBalance,
 		TrustedProxies:           trustedProxies,
 		ForwardedClientIPHeaders: forwardedHeaders,
@@ -359,10 +361,40 @@ func (s *SystemSettingsService) Update(next SystemSettings) (SystemSettings, err
 		return SystemSettings{}, errors.New("system settings are too large")
 	}
 	record := model.Setting{Key: systemSettingsKey, Value: string(raw)}
-	if err := s.db.Save(&record).Error; err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Save(&record).Error; err != nil {
+			return err
+		}
+		if !next.KeyMultiGroupEnabled {
+			return collapseAPIKeyGroupBindings(tx)
+		}
+		return nil
+	}); err != nil {
 		return SystemSettings{}, err
 	}
 	return next, nil
+}
+
+// collapseAPIKeyGroupBindings makes disabling the multi-group feature take
+// effect immediately. The legacy group_id column is the stable primary group,
+// so it is preserved while every extra many-to-many binding is removed.
+func collapseAPIKeyGroupBindings(tx *gorm.DB) error {
+	var keys []model.APIKey
+	if err := tx.Select("id", "group_id").Find(&keys).Error; err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if key.GroupID == 0 {
+			continue
+		}
+		if err := tx.Where("api_key_id = ?", key.ID).Delete(&model.APIKeyGroup{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.APIKeyGroup{APIKeyID: key.ID, GroupID: key.GroupID}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *SystemSettingsService) AdminView() (AdminSystemSettings, error) {

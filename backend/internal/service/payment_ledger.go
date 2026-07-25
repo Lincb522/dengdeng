@@ -53,6 +53,7 @@ type PaymentLedgerItem struct {
 	CreditMicro   int64     `json:"credit_micro"`
 	ProviderKey   string    `json:"provider_key"`
 	PaymentMethod string    `json:"payment_method"`
+	Category      string    `json:"category"`
 	OccurredAt    time.Time `json:"occurred_at"`
 }
 

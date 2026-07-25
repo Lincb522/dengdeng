@@ -9,6 +9,7 @@ import (
 
 	"dengdeng/internal/middleware"
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 	"dengdeng/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -141,9 +142,26 @@ func (h *UserHandler) ReferralDashboard(c *gin.Context) {
 	h.db.Model(&model.ReferralCommission{}).Where("referrer_user_id = ?", user.ID).
 		Select("COALESCE(SUM(amount_micro), 0)").Scan(&totalMicro)
 
+	cashService := service.NewReferralCashService(h.db, h.cfg)
+	cash, cashErr := cashService.Snapshot(user.ID)
+	if cashErr != nil {
+		util.Fail(c, http.StatusInternalServerError, "load referral cash account failed")
+		return
+	}
+	payoutAccount, accountErr := cashService.PayoutAccount(user.ID)
+	if accountErr != nil {
+		util.Fail(c, http.StatusInternalServerError, "load payout account failed")
+		return
+	}
+	payouts, payoutsErr := cashService.ListUserPayouts(user.ID)
+	if payoutsErr != nil {
+		util.Fail(c, http.StatusInternalServerError, "load cash payouts failed")
+		return
+	}
+
 	util.OK(c, gin.H{
 		"binding": bindingPayload, "codes": codeStats, "commissions": commissions,
-		"total_commission_micro": totalMicro,
+		"total_commission_micro": totalMicro, "cash": cash, "payout_account": payoutAccount, "payouts": payouts,
 	})
 }
 
