@@ -6,6 +6,8 @@ import { PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
 import { useToast } from '../../stores/toast'
 import Pagination from '../../components/Pagination.vue'
+import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
+import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
 
 const toast = useToast()
 
@@ -843,72 +845,31 @@ async function refreshAccountQuota(account: UpstreamAccount) {
       <div v-if="!sortedAccounts.length" class="account-empty-state">{{ groups.length ? '当前筛选下没有账号' : '请先在「分组管理」创建分组' }}</div>
     </div>
 
-    <div v-else class="card overflow-x-auto">
-      <table v-responsive-table class="table-base">
+    <div v-else class="card account-list-scroll">
+      <table v-responsive-table class="table-base account-list-table">
         <thead>
           <tr>
-            <th>名称</th>
-            <th>分组</th>
-            <th>凭据</th>
-            <th>Base URL</th>
-            <th>代理</th>
-            <th>优先级</th>
-							<th>并发</th>
-			<th>上游额度 / 用量</th>
-            <th>可用度</th>
-            <th>最后使用</th>
+			<th>账号 / 路由</th>
+			<th>额度 / 用量</th>
+			<th>可用度</th>
+			<th>调度</th>
+			<th>最近使用</th>
             <th class="text-right">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="a in sortedAccounts" :key="a.id" :class="{ 'cursor-grab': manualOrderEnabled, 'opacity-55': draggingAccountID === a.id }" :draggable="manualOrderEnabled" @dragstart="beginAccountDrag(a)" @dragend="endAccountDrag" @dragover.prevent @drop="dropAccountAt(a)">
-            <td>
-              <div class="font-medium text-slate-200">{{ a.name }}</div>
-              <div v-if="a.email" class="text-xs text-slate-500">{{ a.email }}</div>
-            </td>
-            <td>
-              <span class="tag-gray group-tag">{{ a.group?.name }}</span>
-              <span class="ml-1 text-xs text-slate-500">{{ PLATFORM_LABELS[a.platform] }}</span>
-            </td>
-            <td>
-              <span :class="authBadge(a).cls">{{ authBadge(a).label }}</span>
-			  <div v-if="subscriptionExpiryInfo(a)" class="mt-1 whitespace-nowrap text-xs" :class="subscriptionExpiryInfo(a)!.cls" title="上游套餐到期时间">
-				套餐到期 {{ subscriptionExpiryInfo(a)!.text }}
-              </div>
-            </td>
-            <td class="max-w-[200px] truncate font-mono text-xs text-slate-400" :title="a.base_url">{{ a.base_url || '官方默认' }}</td>
-            <td class="min-w-[8.5rem] max-w-[11rem] whitespace-nowrap">
-              <span :class="[a.proxy ? 'tag-cyan' : 'tag-gray', 'max-w-full truncate whitespace-nowrap align-middle']" :title="a.proxy?.name || '默认出口'">{{ a.proxy?.name || '默认出口' }}</span>
-            </td>
-            <td class="num">{{ a.priority }}</td>
-							<td class="num">{{ a.concurrency > 0 ? a.concurrency : '不限' }}</td>
-			<td class="min-w-56">
-				<div v-if="a.quota" class="space-y-2">
-					<div class="flex items-center gap-2 whitespace-nowrap"><strong class="text-xs text-slate-200">{{ quotaSourceLabel(a.quota) }}</strong><span :class="quotaState(a.quota).cls">{{ quotaState(a.quota).label }}</span></div>
-					<div v-if="subscriptionExpiryInfo(a)" class="whitespace-nowrap text-[11px]" :class="subscriptionExpiryInfo(a)!.cls">套餐到期 {{ subscriptionExpiryInfo(a)!.text }}</div>
-					<div v-for="window in a.quota.windows || []" :key="window.key" class="min-w-52">
-						<div class="num whitespace-nowrap text-xs text-slate-300">{{ quotaWindowText(window) }}</div>
-						<div v-if="window.used_percent !== undefined" class="mt-1 h-1.5 overflow-hidden rounded-full bg-ink-800"><span class="block h-full rounded-full bg-amber transition-[width] duration-200" :style="{ width: `${quotaPercent(window.used_percent)}%` }"></span></div>
-					</div>
-					<div class="whitespace-nowrap text-[11px] text-slate-500">{{ observedUsageText(primaryObservedUsage(a.quota)) }}</div>
-					<div class="whitespace-nowrap text-[11px] text-slate-500">{{ quotaCheckedAt(a.quota) }}</div>
-				</div>
-				<div v-else class="whitespace-nowrap text-xs text-slate-500">等待后台自动同步</div>
-				<button class="mt-2 whitespace-nowrap text-xs text-amber hover:text-amber-light disabled:opacity-50" :disabled="refreshingQuotaAccountID === a.id" @click="refreshAccountQuota(a)">{{ refreshingQuotaAccountID === a.id ? '刷新中…' : '刷新额度' }}</button>
-			</td>
-            <td class="min-w-[8.5rem] whitespace-nowrap">
-              <span :class="[availability(a).cls, 'whitespace-nowrap']">{{ availability(a).score }}% · {{ availability(a).label }}</span>
-              <div v-if="a.error_count" class="mt-1 text-[11px] text-slate-500 whitespace-nowrap">近期失败 {{ a.error_count }} 次</div>
-            </td>
-            <td class="text-xs text-slate-500">{{ a.last_used_at ? new Date(a.last_used_at).toLocaleString() : '从未' }}</td>
+			<td><AccountRouteDetail :account="a" /></td>
+			<td><AccountQuotaDetail :account="a" :refreshing="refreshingQuotaAccountID === a.id" @refresh="refreshAccountQuota(a)" /></td>
+			<td><div class="account-list-state"><span :class="availability(a).cls">{{ availability(a).score }}% · {{ availability(a).label }}</span><small>{{ a.error_count ? `近期失败 ${a.error_count} 次` : healthState(a).label }}</small></div></td>
+			<td><div class="account-list-schedule"><strong class="num">P{{ a.priority }}</strong><small class="num">并发 {{ a.concurrency > 0 ? a.concurrency : '不限' }}</small></div></td>
+			<td><time class="account-list-time" :datetime="a.last_used_at || undefined"><strong>{{ a.last_used_at ? new Date(a.last_used_at).toLocaleDateString() : '从未使用' }}</strong><small v-if="a.last_used_at">{{ new Date(a.last_used_at).toLocaleTimeString() }}</small></time></td>
             <td class="text-right">
-				<button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openDiagnostic(a)">诊断</button>
-              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openEdit(a)">编辑</button>
-              <button class="btn-danger ml-2 !px-2.5 !py-1 text-xs" @click="remove(a)">删除</button>
+				<div class="account-list-actions"><button class="btn-ghost" @click="openDiagnostic(a)">诊断</button><button class="btn-ghost" @click="openEdit(a)">编辑</button><button class="btn-danger" @click="remove(a)">删除</button></div>
             </td>
           </tr>
           <tr v-if="!sortedAccounts.length">
-			<td colspan="11" class="py-10 text-center text-sm text-slate-500">
+			<td colspan="6" class="py-10 text-center text-sm text-slate-500">
               {{ groups.length ? '暂无账号' : '请先在「分组管理」创建分组' }}
             </td>
           </tr>

@@ -6,7 +6,7 @@ import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS
 import { PLATFORM_LABELS } from '../api/types'
 import { useToast } from '../stores/toast'
 
-type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch'
+type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch' | 'cherry' | 'nextchat' | 'continue'
 type ShellID = 'unix' | 'cmd' | 'powershell' | 'windows'
 
 interface SetupFile {
@@ -15,8 +15,8 @@ interface SetupFile {
   hint?: string
 }
 
-const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; platform: string; platforms: string[]; reasoningEffort: string }>()
-const emit = defineEmits<{ close: []; rotate: []; 'effort-updated': [value: string] }>()
+const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; keyPreview: string; platform: string; platforms: string[]; reasoningEffort: string }>()
+const emit = defineEmits<{ close: []; rotate: []; forget: []; 'effort-updated': [value: string] }>()
 const toast = useToast()
 
 const activeClient = ref<ClientID>('codex')
@@ -31,6 +31,19 @@ const activePlatform = ref(props.platform || 'openai')
 // 创建之后也能直接在这里调整默认思考强度，改动即时保存到该密钥。
 const reasoningEffort = ref('auto')
 const savingEffort = ref(false)
+
+const clientDownloads: Record<ClientID, { label: string; action: string; url: string }> = {
+  claude: { label: 'Claude Code', action: '下载 Claude Code', url: 'https://github.com/anthropics/claude-code/releases/latest' },
+  codex: { label: 'Codex CLI', action: '下载 Codex CLI', url: 'https://github.com/openai/codex/releases/latest' },
+  gemini: { label: 'Gemini CLI', action: '下载 Gemini CLI', url: 'https://github.com/google-gemini/gemini-cli/releases/latest' },
+  chatbox: { label: 'Chatbox', action: '下载 Chatbox', url: 'https://github.com/chatboxai/chatbox/releases/latest' },
+  cline: { label: 'Cline', action: '打开扩展商店', url: 'https://marketplace.visualstudio.com/items?itemName=saoudrizwan.claude-dev' },
+  opencode: { label: 'OpenCode', action: '下载 OpenCode', url: 'https://github.com/anomalyco/opencode/releases/latest' },
+  ccswitch: { label: 'CCSwitch', action: '下载 CCSwitch', url: 'https://github.com/farion1231/cc-switch/releases/latest' },
+  cherry: { label: 'Cherry Studio', action: '下载 Cherry Studio', url: 'https://github.com/CherryHQ/cherry-studio/releases/latest' },
+  nextchat: { label: 'NextChat', action: '下载 NextChat', url: 'https://github.com/ChatGPTNextWeb/NextChat/releases/latest' },
+  continue: { label: 'Continue', action: '打开扩展商店', url: 'https://marketplace.visualstudio.com/items?itemName=Continue.continue' },
+}
 
 const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
@@ -79,11 +92,28 @@ function quickSetupStorageKey() {
   return props.keyId ? `dengdeng.quick-setup.key.${props.keyId}` : ''
 }
 
+function matchesKeyPreview(value: string) {
+	const [prefix, suffix] = (props.keyPreview || '').split('...')
+	return !!value && (!prefix || value.startsWith(prefix)) && (!suffix || value.endsWith(suffix))
+}
+
 function readRememberedApiKey() {
   const storageKey = quickSetupStorageKey()
   if (!storageKey) return ''
   try {
-    return sessionStorage.getItem(storageKey) || ''
+	const persistent = localStorage.getItem(storageKey) || ''
+	if (persistent) {
+		if (matchesKeyPreview(persistent)) return persistent
+		localStorage.removeItem(storageKey)
+	}
+	const legacy = sessionStorage.getItem(storageKey) || ''
+	if (legacy && matchesKeyPreview(legacy)) {
+		localStorage.setItem(storageKey, legacy)
+		sessionStorage.removeItem(storageKey)
+		return legacy
+	}
+	if (legacy) sessionStorage.removeItem(storageKey)
+	return ''
   } catch {
     return ''
   }
@@ -94,11 +124,29 @@ function rememberApiKey(value: string) {
   if (!storageKey) return
   try {
     const normalized = validDengDengApiKey(value)
-    if (normalized) sessionStorage.setItem(storageKey, normalized)
-    else if (!value.trim()) sessionStorage.removeItem(storageKey)
+	if (normalized) {
+		localStorage.setItem(storageKey, normalized)
+		sessionStorage.removeItem(storageKey)
+	} else if (!value.trim()) {
+		localStorage.removeItem(storageKey)
+		sessionStorage.removeItem(storageKey)
+	}
   } catch {
-    // A restricted browser session can still use the pasted key in memory.
+	// A restricted browser can still use the pasted key in memory.
   }
+}
+
+function forgetApiKey() {
+	const storageKey = quickSetupStorageKey()
+	try {
+		if (storageKey) {
+			localStorage.removeItem(storageKey)
+			sessionStorage.removeItem(storageKey)
+		}
+	} catch { /* storage is optional */ }
+	workingApiKey.value = ''
+	emit('forget')
+	toast.show('已清除本机保存的密钥', 'success')
 }
 
 const clientOptions = computed(() => {
@@ -121,7 +169,10 @@ const clientOptions = computed(() => {
     { id: 'codex' as const, label: 'Codex CLI' },
     { id: 'claude' as const, label: 'Claude Code' },
     { id: 'chatbox' as const, label: 'Chatbox' },
+	{ id: 'cherry' as const, label: 'Cherry Studio' },
+	{ id: 'nextchat' as const, label: 'NextChat' },
     { id: 'cline' as const, label: 'Cline' },
+	{ id: 'continue' as const, label: 'Continue' },
     { id: 'opencode' as const, label: 'OpenCode' },
     { id: 'ccswitch' as const, label: 'CCSwitch' },
   ]
@@ -157,6 +208,9 @@ const activeDescription = computed(() => {
     cline: '在 VS Code 的 Cline 设置中选择 OpenAI Compatible，再填入下面三项。',
     opencode: '把 provider 段合并进现有的 opencode.json；不要覆盖已有配置。',
     ccswitch: '通过系统 deeplink 打开 CCSwitch。导入前可先检查下方的配置预览。',
+	cherry: '在 Cherry Studio 中新增 OpenAI 兼容服务商，然后填写接口、密钥和模型。',
+	nextchat: '在 NextChat 的自定义接口设置中填写 OpenAI 兼容地址和当前密钥。',
+	continue: '把 DengDeng AI 模型段合并到 Continue 的 config.yaml，不要覆盖已有模型。',
   }
   return descriptions[activeClient.value]
 })
@@ -335,6 +389,30 @@ const currentFiles = computed<SetupFile[]>(() => {
     }]
   }
 
+	if (activeClient.value === 'cherry') {
+		return [{
+			path: 'Cherry Studio → 设置 → 模型服务 → 添加提供商',
+			hint: '提供商请选择 OpenAI Compatible；API 地址保留 /v1。',
+			content: `提供商: OpenAI Compatible\n名称: DengDeng AI\nAPI 地址: ${apiBase.value}\nAPI 密钥: ${key}\n模型 ID: ${model}`,
+		}]
+	}
+
+	if (activeClient.value === 'nextchat') {
+		return [{
+			path: 'NextChat → 设置 → 自定义接口',
+			hint: '接口地址使用完整 /v1 地址；模型名称与模型列表保持一致。',
+			content: `接口地址: ${apiBase.value}\nAPI Key: ${key}\n自定义模型: ${model}`,
+		}]
+	}
+
+	if (activeClient.value === 'continue') {
+		return [{
+			path: '~/.continue/config.yaml',
+			hint: '将 models 中的这一项合并到现有配置；不要覆盖其他模型。',
+			content: `name: DengDeng AI\nversion: 1.0.0\nschema: v1\nmodels:\n  - name: DengDeng AI · ${model || '选择模型'}\n    provider: openai\n    model: ${model}\n    apiBase: ${apiBase.value}\n    apiKey: ${key}`,
+		}]
+	}
+
   return []
 })
 
@@ -401,6 +479,11 @@ async function copy(value: string, id: string) {
 function openCCSwitch() {
   if (configuredApiKey.value) window.location.assign(ccSwitchLink.value)
 }
+
+function openClientDownload() {
+	const target = clientDownloads[activeClient.value]
+	window.open(target.url, '_blank', 'noopener,noreferrer')
+}
 </script>
 
 <template>
@@ -410,7 +493,7 @@ function openCCSwitch() {
         <div class="key-setup-head"><div><p>密钥快速配置</p><h3>{{ keyName }}</h3></div><button class="btn-ghost !px-2 !py-1 text-xs" @click="emit('close')">关闭</button></div>
 
         <div class="key-setup-summary">
-          <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><button class="btn-ghost !px-2 !py-1 text-xs" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button></div>
+          <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey" class="btn-ghost is-danger" @click="forgetApiKey">清除本机</button></div></div>
           <div class="key-setup-secret"><span>接口地址</span><code>{{ activeEndpoint }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
 			<div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><span class="text-[10px] text-slate-500">{{ availablePlatforms.length }} 个</span></div>
 			<div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" aria-label="思考强度 Effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
@@ -429,6 +512,7 @@ function openCCSwitch() {
           <div v-if="shellOptions.length" class="key-setup-subtabs"><button v-for="item in shellOptions" :key="item.id" :class="{ 'is-active': activeShell === item.id }" @click="activeShell = item.id">{{ item.label }}</button></div>
 
           <p class="key-setup-hint">{{ activeDescription }}</p>
+		  <div class="key-setup-tool-download"><div><strong>{{ clientDownloads[activeClient].label }}</strong><small>官方发布源</small></div><button class="btn-ghost" type="button" @click="openClientDownload">{{ clientDownloads[activeClient].action }}</button></div>
           <template v-if="activeClient !== 'ccswitch'">
             <div v-for="(file, index) in currentFiles" :key="file.path" class="key-setup-code"><div><span>{{ file.path }}</span><button @click="copy(file.content, `${activeClient}-${index}`)">{{ copied === `${activeClient}-${index}` ? '已复制' : '复制配置' }}</button></div><p v-if="file.hint">{{ file.hint }}</p><pre>{{ file.content }}</pre></div>
           </template>
@@ -437,7 +521,7 @@ function openCCSwitch() {
             <div class="key-setup-code"><div><span>导入配置预览</span><button @click="copy(JSON.stringify(ccSwitchConfig, null, 2), 'ccswitch-config')">{{ copied === 'ccswitch-config' ? '已复制' : '复制 JSON' }}</button></div><pre>{{ JSON.stringify(ccSwitchConfig, null, 2) }}</pre></div>
           </template>
         </template>
-        <div v-else class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端不会保存密钥明文。输入后仅暂存在当前浏览器标签页，刷新页面仍可继续配置；关闭标签页后会自动清除。</p><button class="btn-danger !px-3 !py-2 text-xs" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
+		<div v-else class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。输入后会保存在当前浏览器本机，刷新、关闭标签页或重启浏览器后仍可显示和复制；可随时点击“清除本机”。</p><button class="btn-danger !px-3 !py-2 text-xs" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
         <p class="key-setup-warning">配置内容含密钥。请不要截图、转发或提交到代码仓库。</p>
       </div>
     </div>

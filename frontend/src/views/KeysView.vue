@@ -26,6 +26,7 @@ const setupKey = ref<ApiKey | null>(null)
 const setupPlain = ref('')
 const showSetup = ref(false)
 const copiedKeyID = ref<number | null>(null)
+const revealedKeyIDs = ref<Set<number>>(new Set())
 const settingKey = ref<ApiKey | null>(null)
 const settingsForm = ref({ name: '', group_ids: [] as number[], reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
@@ -77,24 +78,49 @@ function quickSetupStorageKey(keyID: number) {
   return `dengdeng.quick-setup.key.${keyID}`
 }
 
-// The API server only stores a one-way hash of each secret. Keep a freshly
-// created secret in this browser tab so a page refresh does not force a key
-// rotation. sessionStorage is cleared when the tab is closed.
+function matchesKeyPreview(key: ApiKey, plain: string) {
+	const [prefix, suffix] = (key.key_preview || '').split('...')
+	return !!plain && (!prefix || plain.startsWith(prefix)) && (!suffix || plain.endsWith(suffix))
+}
+
+// The API server only stores a one-way hash. Keep the secret in this browser's
+// local storage so refreshes and browser restarts do not force a rotation.
 function rememberQuickSetupKey(key: ApiKey, plain: string) {
   if (!plain) return
   try {
-    sessionStorage.setItem(quickSetupStorageKey(key.id), plain)
+    localStorage.setItem(quickSetupStorageKey(key.id), plain)
+	sessionStorage.removeItem(quickSetupStorageKey(key.id))
   } catch {
-    // Privacy modes may deny storage; quick setup still works for this view.
+    // Privacy modes may deny storage; quick setup still works in memory.
   }
 }
 
 function rememberedQuickSetupKey(key: ApiKey) {
   try {
-    return sessionStorage.getItem(quickSetupStorageKey(key.id)) || ''
+	const storageKey = quickSetupStorageKey(key.id)
+	const persistent = localStorage.getItem(storageKey) || ''
+	if (persistent) {
+		if (matchesKeyPreview(key, persistent)) return persistent
+		localStorage.removeItem(storageKey)
+	}
+	const legacy = sessionStorage.getItem(storageKey) || ''
+	if (legacy && matchesKeyPreview(key, legacy)) {
+		localStorage.setItem(storageKey, legacy)
+		sessionStorage.removeItem(storageKey)
+		return legacy
+	}
+	if (legacy) sessionStorage.removeItem(storageKey)
+	return ''
   } catch {
     return ''
   }
+}
+
+function forgetQuickSetupKey(key: ApiKey) {
+	try {
+		localStorage.removeItem(quickSetupStorageKey(key.id))
+		sessionStorage.removeItem(quickSetupStorageKey(key.id))
+	} catch { /* storage is optional */ }
 }
 
 function plainForKey(key: ApiKey) {
@@ -183,7 +209,15 @@ async function toggleKey(k: ApiKey) {
 async function removeKey(k: ApiKey) {
   if (!confirm(`确认删除密钥「${k.name}」?该操作不可恢复。`)) return
   await withToast(() => api.delete(`/api/user/keys/${k.id}`), '已删除')
+	forgetQuickSetupKey(k)
   await load()
+}
+
+function toggleKeyReveal(key: ApiKey) {
+	const next = new Set(revealedKeyIDs.value)
+	if (next.has(key.id)) next.delete(key.id)
+	else next.add(key.id)
+	revealedKeyIDs.value = next
 }
 
 function openSettings(key: ApiKey) {
@@ -289,6 +323,19 @@ function onSetupEffortUpdated(value: string) {
   if (setupKey.value) setupKey.value = { ...setupKey.value, reasoning_effort: value }
   void load()
 }
+
+function onSetupSecretForgot() {
+	if (!setupKey.value) return
+	forgetQuickSetupKey(setupKey.value)
+	setupPlain.value = ''
+	if (createdKey.value?.id === setupKey.value.id) {
+		createdPlain.value = ''
+		createdKey.value = null
+	}
+	const next = new Set(revealedKeyIDs.value)
+	next.delete(setupKey.value.id)
+	revealedKeyIDs.value = next
+}
 </script>
 
 <template>
@@ -327,10 +374,12 @@ function onSetupEffortUpdated(value: string) {
           <tr v-for="k in keys" :key="k.id">
             <td class="whitespace-nowrap font-medium text-slate-200">{{ k.name }}</td>
             <td>
-              <div class="flex items-center gap-2 whitespace-nowrap">
-                <code class="num text-xs text-slate-400">{{ k.key_preview }}</code>
+              <div class="key-secret-cell">
+				<code class="num" :class="{ 'is-revealed': revealedKeyIDs.has(k.id) && plainForKey(k) }">{{ revealedKeyIDs.has(k.id) && plainForKey(k) ? plainForKey(k) : k.key_preview }}</code>
+				<span v-if="plainForKey(k)" class="key-secret-saved">本机已保存</span>
+				<button v-if="plainForKey(k)" class="btn-ghost" @click="toggleKeyReveal(k)">{{ revealedKeyIDs.has(k.id) ? '隐藏' : '显示' }}</button>
                 <button
-                  class="btn-ghost !min-h-0 !px-2 !py-1 text-[11px]"
+				  class="btn-ghost"
                   :title="plainForKey(k) ? '复制完整密钥' : '补入原密钥后即可复制'"
                   @click="copyKey(k)"
                 >
@@ -454,12 +503,14 @@ function onSetupEffortUpdated(value: string) {
 			:api-key="setupPlain"
 			:key-id="setupKey?.id || null"
 			:key-name="setupKey?.name || ''"
+			:key-preview="setupKey?.key_preview || ''"
 			:platform="keyGroups(setupKey)[0]?.platform || 'openai'"
 			:platforms="keyPlatforms(setupKey)"
 			:reasoning-effort="setupKey?.reasoning_effort || 'auto'"
       @close="closeQuickSetup"
 			@rotate="requestRotateForSetup"
 			@effort-updated="onSetupEffortUpdated"
+			@forget="onSetupSecretForgot"
 		/>
   </div>
 </template>
