@@ -44,6 +44,18 @@ const clientDownloads: Record<ClientID, { label: string; action: string; url: st
   nextchat: { label: 'NextChat', action: '下载 NextChat', url: 'https://github.com/ChatGPTNextWeb/NextChat/releases/latest' },
   continue: { label: 'Continue', action: '打开扩展商店', url: 'https://marketplace.visualstudio.com/items?itemName=Continue.continue' },
 }
+const downloadClients: ClientID[] = [
+  'claude',
+  'codex',
+  'gemini',
+  'chatbox',
+  'cherry',
+  'nextchat',
+  'cline',
+  'continue',
+  'opencode',
+  'ccswitch',
+]
 
 const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
@@ -480,10 +492,6 @@ function openCCSwitch() {
   if (configuredApiKey.value) window.location.assign(ccSwitchLink.value)
 }
 
-function openClientDownload() {
-	const target = clientDownloads[activeClient.value]
-	window.open(target.url, '_blank', 'noopener,noreferrer')
-}
 </script>
 
 <template>
@@ -508,11 +516,31 @@ function openClientDownload() {
           <p v-if="modelsState === 'ready'" class="key-setup-status is-ok">密钥验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 分组可用 {{ models.length }} 个模型。</p>
           <p v-else-if="modelsState === 'error'" class="key-setup-status is-error">{{ modelsError }}</p>
 
+          <section class="key-setup-downloads" aria-labelledby="key-setup-downloads-title">
+            <header>
+              <div>
+                <strong id="key-setup-downloads-title">工具下载</strong>
+                <small>下载入口始终完整显示；下方配置模板会按当前分组协议筛选。</small>
+              </div>
+              <span>{{ downloadClients.length }} 个</span>
+            </header>
+            <div class="key-setup-download-list">
+              <a v-for="client in downloadClients" :key="client" :href="clientDownloads[client].url" target="_blank" rel="noopener noreferrer">
+                <strong>{{ clientDownloads[client].label }}</strong>
+                <small>{{ clientDownloads[client].action }}</small>
+                <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+          </section>
+
+          <div class="key-setup-config-head">
+            <div><strong>快速配置</strong><small>仅显示当前 {{ PLATFORM_LABELS[activePlatform] || activePlatform }} 分组可以直接使用的工具。</small></div>
+            <span>{{ clientOptions.length }} 个</span>
+          </div>
           <div class="key-setup-tabs"><button v-for="item in clientOptions" :key="item.id" :class="{ 'is-active': activeClient === item.id }" @click="activeClient = item.id">{{ item.label }}</button></div>
           <div v-if="shellOptions.length" class="key-setup-subtabs"><button v-for="item in shellOptions" :key="item.id" :class="{ 'is-active': activeShell === item.id }" @click="activeShell = item.id">{{ item.label }}</button></div>
 
           <p class="key-setup-hint">{{ activeDescription }}</p>
-		  <div class="key-setup-tool-download"><div><strong>{{ clientDownloads[activeClient].label }}</strong><small>官方发布源</small></div><button class="btn-ghost" type="button" @click="openClientDownload">{{ clientDownloads[activeClient].action }}</button></div>
           <template v-if="activeClient !== 'ccswitch'">
             <div v-for="(file, index) in currentFiles" :key="file.path" class="key-setup-code"><div><span>{{ file.path }}</span><button @click="copy(file.content, `${activeClient}-${index}`)">{{ copied === `${activeClient}-${index}` ? '已复制' : '复制配置' }}</button></div><p v-if="file.hint">{{ file.hint }}</p><pre>{{ file.content }}</pre></div>
           </template>

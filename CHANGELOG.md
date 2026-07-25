@@ -81,6 +81,7 @@
 
 ### 密钥多分组
 
+- 快速配置将“工具下载”和“协议配置”拆分展示：Claude、Codex、Gemini、Chatbox、Cherry Studio、NextChat、Cline、Continue、OpenCode、CCSwitch 的官方下载入口始终完整显示，配置模板仍按当前分组协议筛选。
 - 密钥快速配置新增 Cherry Studio、NextChat 和 Continue，并为 Claude Code、Codex CLI、Gemini CLI、Chatbox、Cline、OpenCode、CCSwitch 等每种工具补充官方下载安装入口。
 - 新创建或手动补入的完整密钥改为保存在当前浏览器本机，刷新、关闭标签页或重启浏览器后仍可显示和复制；列表支持显示、隐藏、复制和清除本机密钥。
 - 本机密钥会与服务端预览前后缀校验，轮换后自动丢弃旧值，避免快速配置继续使用已经失效的密钥。
