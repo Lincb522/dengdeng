@@ -166,6 +166,22 @@ type authedKey struct {
 	RequestReserved bool
 }
 
+func usageBillingMode(ak *authedKey) string {
+	if ak == nil {
+		return "none"
+	}
+	if ak.User.Role == model.RoleAdmin {
+		return "admin"
+	}
+	if ak.AccessActive {
+		return "day"
+	}
+	if ak.RequestReserved {
+		return "request"
+	}
+	return "usage"
+}
+
 func (ak *authedKey) selectGroup(platforms ...string) bool {
 	if ak == nil {
 		return false
@@ -770,6 +786,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				Stream:          streamed,
 				Effort:          req.Effort,
 				ServiceTier:     req.ServiceTier,
+				BillingMode:     usageBillingMode(ak),
 				Usage:           usage,
 				Rates:           g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
 				FirstTokenMs:    timingWriter.firstTokenMs,
@@ -828,6 +845,7 @@ func (g *Gateway) recordRelayFailure(c *gin.Context, ak *authedKey, group model.
 		Stream:          false,
 		Effort:          req.Effort,
 		ServiceTier:     req.ServiceTier,
+		BillingMode:     "none",
 		Rates:           billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
 		DurationMs:      time.Since(started).Milliseconds(),
 		QueueMs:         trace.QueueMs,

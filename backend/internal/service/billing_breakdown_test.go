@@ -31,6 +31,7 @@ func TestBillingPersistsCostBreakdownSnapshot(t *testing.T) {
 		UserID:      user.ID,
 		Model:       "snapshot-model",
 		ServiceTier: "priority",
+		BillingMode: "request",
 		Usage: Usage{
 			InputTokens:     1_000,
 			OutputTokens:    100,
@@ -54,7 +55,7 @@ func TestBillingPersistsCostBreakdownSnapshot(t *testing.T) {
 	if log.InputUnitPrice != 5 || log.OutputUnitPrice != 30 || log.CacheReadUnitPrice != .5 {
 		t.Fatalf("unit prices were not snapshotted: %#v", log)
 	}
-	if log.ServiceTier != "priority" || log.EffectiveMultiplier <= 0 {
+	if log.ServiceTier != "priority" || log.BillingMode != "request" || log.EffectiveMultiplier <= 0 {
 		t.Fatalf("billing metadata was not snapshotted: %#v", log)
 	}
 }

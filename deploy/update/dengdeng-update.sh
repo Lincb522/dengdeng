@@ -172,15 +172,34 @@ if target and target != current:
         ).returncode == 0
         if ancestor:
             revision = current + ".." + target
+    # The updater writes the release log before any build starts. Commit-body
+    # bullet points become structured details in the admin update page, so a
+    # release keeps its full explanation instead of only a terse subject line.
     result = subprocess.run(
-        ["git", "-C", source, "log", "--max-count=30", "--format=%H%x1f%s%x1f%cI", revision],
+        ["git", "-C", source, "log", "--max-count=30", "--format=%H%x1f%s%x1f%cI%x1f%b%x1e", revision],
         check=False, capture_output=True, text=True,
     )
     if result.returncode == 0:
-        for line in result.stdout.splitlines():
-            fields = line.split("\x1f", 2)
-            if len(fields) == 3:
-                changes.append({"commit": fields[0], "title": fields[1], "committed_at": fields[2]})
+        for record in result.stdout.split("\x1e"):
+            fields = record.strip("\r\n").split("\x1f", 3)
+            if len(fields) != 4:
+                continue
+            details = []
+            for raw_line in fields[3].splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                line = line.removeprefix("- ").removeprefix("* ").strip()
+                if line and line not in details:
+                    details.append(line)
+                if len(details) >= 12:
+                    break
+            changes.append({
+                "commit": fields[0],
+                "title": fields[1],
+                "committed_at": fields[2],
+                "details": details,
+            })
 
 temporary = path.with_suffix(".tmp")
 temporary.write_text(json.dumps(changes, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

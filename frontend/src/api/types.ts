@@ -161,6 +161,7 @@ export interface UpdateChange {
 	commit: string
 	title: string
 	committed_at: string
+	details?: string[]
 }
 
 export interface UpdateStatus {
@@ -541,6 +542,7 @@ export interface UsageLog {
 	cache_write_1h_unit_price: number
 	image_unit_price: number
 	service_tier?: string
+	billing_mode?: 'usage' | 'request' | 'day' | 'admin' | 'none' | string
 	first_token_ms: number
   duration_ms: number
 	queue_ms: number

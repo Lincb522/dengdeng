@@ -44,6 +44,7 @@ type BillContext struct {
 	// already folded into Rates by the gateway before Record is called.
 	Effort       string
 	ServiceTier  string
+	BillingMode  string
 	Usage        Usage
 	Rates        RatePlan
 	FirstTokenMs int64
@@ -98,6 +99,7 @@ func (s *BillingService) Record(bc BillContext) {
 		CacheWrite1hUnitPrice: breakdown.CacheWrite1hPrice,
 		ImageUnitPrice:        breakdown.ImageUnitPrice,
 		ServiceTier:           bc.ServiceTier,
+		BillingMode:           bc.BillingMode,
 		FirstTokenMs:          bc.FirstTokenMs,
 		DurationMs:            bc.DurationMs,
 		QueueMs:               bc.QueueMs,

@@ -147,7 +147,12 @@ onBeforeUnmount(() => window.clearTimeout(pollTimer))
         </div>
         <ol v-if="changes.length">
           <li v-for="change in changes" :key="change.commit">
-            <a :href="`${repositoryURL}/commit/${change.commit}`" target="_blank" rel="noreferrer">{{ change.title }}</a>
+			<div class="update-change-copy">
+				<a :href="`${repositoryURL}/commit/${change.commit}`" target="_blank" rel="noreferrer">{{ change.title }}</a>
+				<ul v-if="change.details?.length">
+					<li v-for="detail in change.details" :key="detail">{{ detail }}</li>
+				</ul>
+			</div>
             <div><code>{{ shortCommit(change.commit) }}</code><time>{{ dateTime(change.committed_at) }}</time></div>
           </li>
         </ol>

@@ -5,6 +5,7 @@ import { copyText } from '../api/client'
 import { useToast } from '../stores/toast'
 import UsageCostBreakdown from './UsageCostBreakdown.vue'
 import UsageLocationDetail from './UsageLocationDetail.vue'
+import UsageLatencyDetail from './UsageLatencyDetail.vue'
 import UsageModelDetail from './UsageModelDetail.vue'
 import UsageTokenDetail from './UsageTokenDetail.vue'
 
@@ -81,10 +82,23 @@ async function copyRequestID(id: string) {
 	}
 }
 
-function formatLatency(milliseconds: number) {
-	if (!milliseconds) return '—'
-	if (milliseconds < 1000) return `${milliseconds}ms`
-	return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 2 : 1)}s`
+function endpointLabel(path?: string) {
+	const normalized = (path || '').replace(/\?.*$/, '')
+	if (!normalized) return '—'
+	const labels: Record<string, string> = {
+		'/v1/responses': 'Responses',
+		'/v1/chat/completions': 'Chat',
+		'/v1/messages': 'Messages',
+		'/v1/images/generations': 'Images',
+	}
+	if (labels[normalized]) return labels[normalized]
+	if (/generatecontent$/i.test(normalized)) return 'GenerateContent'
+	const parts = normalized.split('/').filter(Boolean)
+	return parts.slice(-2).join('/') || normalized
+}
+
+function billingModeLabel(mode?: string) {
+	return ({ usage: '按量', request: '按次', day: '按日', admin: '管理端', none: '未计费' } as Record<string, string>)[mode || ''] || '历史'
 }
 </script>
 
@@ -97,13 +111,14 @@ function formatLatency(milliseconds: number) {
           <th>时间</th>
           <th v-if="showUser">用户</th>
           <th>模型</th>
+			<th>入站端点</th>
           <th>分组</th>
 			<th>请求地区</th>
 			<th>Token</th>
 				<th class="text-right">图片</th>
           <th class="text-right">费用</th>
-          <th class="text-right">首字耗时</th>
-          <th class="text-right">总耗时</th>
+			<th>计费模式</th>
+			<th>响应耗时</th>
           <th>状态</th>
 			<th>请求编号</th>
         </tr>
@@ -116,6 +131,7 @@ function formatLatency(milliseconds: number) {
             <div class="mt-0.5 text-[10px] text-slate-500">{{ l.key_name || '未命名密钥' }}</div>
           </td>
           <td><UsageModelDetail :log="l" /></td>
+			<td><code class="usage-endpoint" :title="l.request_path || '未记录入站端点'">{{ endpointLabel(l.request_path) }}</code></td>
           <td>
             <div class="text-xs text-slate-400">{{ l.group_name || '—' }}</div>
             <div v-if="showUser && l.account_name" class="mt-0.5 text-[10px] text-slate-500">{{ l.account_name }}</div>
@@ -124,13 +140,8 @@ function formatLatency(milliseconds: number) {
 			<td><UsageTokenDetail :log="l" /></td>
 				<td class="num text-right text-xs text-signal-cyan">{{ l.image_count || '—' }}</td>
           <td class="num text-right text-xs text-amber"><UsageCostBreakdown :log="l" /></td>
-          <td class="num whitespace-nowrap text-right text-xs text-slate-500">{{ formatLatency(l.first_token_ms) }}</td>
-          <td class="num whitespace-nowrap text-right text-xs text-slate-500">
-				<div>{{ formatLatency(l.duration_ms) }}</div>
-				<div v-if="showUser && (l.queue_ms || l.schedule_ms || l.upstream_ms || l.attempt_count)" class="mt-0.5 text-[10px] text-slate-600" :title="`排队 ${l.queue_ms || 0}ms，调度 ${l.schedule_ms || 0}ms，上游 ${l.upstream_ms || 0}ms，尝试 ${l.attempt_count || 0} 次`">
-					<span v-if="l.queue_ms">排队 {{ l.queue_ms }}ms · </span>路由 {{ l.schedule_ms || 0 }}ms · 上游 {{ l.upstream_ms || 0 }}ms<span v-if="l.attempt_count > 1"> · {{ l.attempt_count }} 次</span>
-				</div>
-			</td>
+			<td><span class="usage-billing-mode" :class="`is-${l.billing_mode || 'legacy'}`">{{ billingModeLabel(l.billing_mode) }}</span></td>
+			<td><UsageLatencyDetail :log="l" /></td>
           <td>
             <span :class="l.status_code < 400 ? 'tag-green' : 'tag-red'" :title="l.error_message">{{ l.status_code }}</span>
           </td>
@@ -140,7 +151,7 @@ function formatLatency(milliseconds: number) {
 			</td>
         </tr>
         <tr v-if="!items.length">
-				<td :colspan="showUser ? 12 : 11" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
+				<td :colspan="showUser ? 13 : 12" class="py-10 text-center text-sm text-slate-500">暂无记录</td>
         </tr>
       </tbody>
       </table>

@@ -44,9 +44,10 @@ type UpdateStatus struct {
 }
 
 type UpdateChange struct {
-	Commit      string `json:"commit"`
-	Title       string `json:"title"`
-	CommittedAt string `json:"committed_at"`
+	Commit      string   `json:"commit"`
+	Title       string   `json:"title"`
+	CommittedAt string   `json:"committed_at"`
+	Details     []string `json:"details,omitempty"`
 }
 
 type updateRequest struct {

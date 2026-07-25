@@ -681,6 +681,9 @@ type UsageLog struct {
 	CacheWrite1hUnitPrice float64 `gorm:"not null;default:0" json:"cache_write_1h_unit_price"`
 	ImageUnitPrice        float64 `gorm:"not null;default:0" json:"image_unit_price"`
 	ServiceTier           string  `gorm:"size:32" json:"service_tier,omitempty"`
+	// BillingMode records the entitlement actually consumed by this request:
+	// usage (cash balance), request, day, admin, or none for failed calls.
+	BillingMode string `gorm:"size:16" json:"billing_mode,omitempty"`
 	// FirstTokenMs measures time from relay admission to the first response
 	// body bytes written to the client. DurationMs covers the whole request,
 	// including queueing and the complete streamed response.
