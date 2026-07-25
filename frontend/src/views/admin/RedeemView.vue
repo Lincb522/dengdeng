@@ -121,7 +121,7 @@ async function remove(cd: RedeemCode) {
     </div>
 
     <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="closeForm">
+      <div v-if="showForm" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="closeForm">
         <div class="card w-full max-w-md p-6">
           <template v-if="!generated.length">
             <h3 class="mb-5 text-base font-semibold text-slate-100">批量生成兑换码</h3>

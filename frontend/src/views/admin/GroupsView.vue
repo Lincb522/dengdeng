@@ -3,12 +3,14 @@ import { onMounted, ref } from 'vue'
 import { api, withToast } from '../../api/client'
 import type { Group } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
+import AppModal from '../../components/AppModal.vue'
 
 const groups = ref<Group[]>([])
 const showForm = ref(false)
 const editing = ref<Group | null>(null)
 const saving = ref(false)
-const backdropPointerStarted = ref(false)
+const cacheOpen = ref(false)
+const advancedOpen = ref(false)
 const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 const form = ref({
@@ -41,6 +43,8 @@ function openCreate() {
 		max_reasoning_effort: 'auto', reasoning_effort_mappings: {} as Record<string, string>,
     is_public: true, status: 'active',
   }
+  cacheOpen.value = false
+  advancedOpen.value = false
   showForm.value = true
 }
 
@@ -61,23 +65,23 @@ function openEdit(g: Group) {
     is_public: g.is_public,
     status: g.status,
   }
+  cacheOpen.value = [g.cache_read_multiplier, g.cache_write_5m_multiplier, g.cache_write_1h_multiplier]
+    .some((value) => Number(value || 1) !== 1)
+  advancedOpen.value = !!g.image_rate_independent
+    || (g.max_reasoning_effort || 'auto') !== 'auto'
+    || Object.keys(g.reasoning_effort_mappings || {}).length > 0
   showForm.value = true
 }
 
 function closeForm() {
   if (saving.value) return
-  backdropPointerStarted.value = false
   showForm.value = false
 }
 
-function handleBackdropPointerDown(event: PointerEvent) {
-  backdropPointerStarted.value = event.target === event.currentTarget
-}
-
-function handleBackdropPointerUp(event: PointerEvent) {
-  const shouldClose = backdropPointerStarted.value && event.target === event.currentTarget
-  backdropPointerStarted.value = false
-  if (shouldClose) closeForm()
+function updateDisclosure(target: 'cache' | 'advanced', event: Event) {
+  const open = (event.currentTarget as HTMLDetailsElement).open
+  if (target === 'cache') cacheOpen.value = open
+  else advancedOpen.value = open
 }
 
 async function save() {
@@ -180,120 +184,67 @@ async function togglePublic(g: Group) {
       </table>
     </div>
 
-    <Teleport to="body">
-      <div
-        v-if="showForm"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
-        @keydown.esc="closeForm"
-        @pointercancel="backdropPointerStarted = false"
-        @pointerdown="handleBackdropPointerDown"
-        @pointerup="handleBackdropPointerUp"
-      >
-        <div class="card max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto p-5 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="group-form-title">
-          <h3 id="group-form-title" class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑分组' : '新建分组' }}</h3>
-          <div class="space-y-4">
-            <div>
-              <label class="label">名称</label>
-              <input v-model="form.name" class="input" placeholder="例如:claude-standard" />
-            </div>
-            <div>
-              <label class="label">平台</label>
+    <AppModal
+      :open="showForm"
+      :title="editing ? '编辑分组' : '新建分组'"
+      description="设置账号池归属、开放范围与计费规则。"
+      width="wide"
+      :busy="saving"
+      initial-focus="input"
+      @close="closeForm"
+    >
+      <div class="modal-form">
+        <section class="modal-section">
+          <div class="modal-section__head"><strong>基本信息</strong></div>
+          <label class="modal-field"><span class="label">名称</span><input v-model.trim="form.name" class="input" placeholder="例如：claude-standard" /></label>
+          <div class="modal-grid modal-grid--two">
+            <label class="modal-field">
+              <span class="label">平台</span>
               <select v-model="form.platform" class="input" :disabled="!!editing">
-                <option value="anthropic">Claude (Anthropic)</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok (xAI)</option>
+                <option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="grok">Grok (xAI)</option>
               </select>
-            </div>
-            <div>
-              <label class="label">描述</label>
-              <input v-model="form.description" class="input" placeholder="可选" />
-            </div>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label class="label">基础倍率</label>
-                <input v-model.number="form.rate_multiplier" type="number" step="0.1" min="0.1" class="input" />
-              </div>
-              <div>
-                <label class="label">状态</label>
-                <select v-model="form.status" class="input">
-                  <option value="active">启用</option>
-                  <option value="disabled">停用</option>
-                </select>
-              </div>
-            </div>
-				<div class="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
-					<div class="mb-1 flex items-center justify-between">
-						<label class="label !mb-0">缓存倍率</label>
-						<span class="text-[11px] text-slate-500">在基础倍率之上叠加</span>
-					</div>
-					<p class="mb-3 text-xs leading-5 text-slate-500">缓存命中、短缓存创建和长缓存创建分开计费；没有 TTL 明细的旧上游响应按 5m 规则处理。</p>
-					<div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-						<div>
-							<label class="label">命中</label>
-							<input v-model.number="form.cache_read_multiplier" type="number" step="0.1" min="0.1" class="input" />
-						</div>
-						<div>
-							<label class="label">短缓存 5m</label>
-							<input v-model.number="form.cache_write_5m_multiplier" type="number" step="0.1" min="0.1" class="input" />
-						</div>
-						<div>
-							<label class="label">长缓存 1h</label>
-							<input v-model.number="form.cache_write_1h_multiplier" type="number" step="0.1" min="0.1" class="input" />
-						</div>
-					</div>
-				</div>
-				<div class="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
-					<div class="flex items-center justify-between gap-4">
-						<div>
-							<label class="label !mb-1">图像独立倍率</label>
-							<p class="text-xs text-slate-500">开启后，单独计费的图像 token 不再继承基础倍率。</p>
-						</div>
-						<label class="flex shrink-0 items-center gap-2 text-sm text-slate-300">
-							<input v-model="form.image_rate_independent" type="checkbox" class="h-4 w-4 accent-amber" />
-							独立
-						</label>
-					</div>
-					<div class="mt-3 max-w-[180px]">
-						<label class="label">图像倍率</label>
-						<input v-model.number="form.image_rate_multiplier" :disabled="!form.image_rate_independent" type="number" step="0.1" min="0.1" class="input disabled:cursor-not-allowed disabled:opacity-50" />
-					</div>
-				</div>
-				<div v-if="form.platform === 'openai' || form.platform === 'grok'" class="rounded-xl border border-slate-800 bg-slate-950/35 p-4">
-					<div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-						<div>
-							<label class="label !mb-1">思考强度策略</label>
-							<p class="text-xs text-slate-500">客户端参数先映射，再按分组上限限制；账单记录实际生效档位。</p>
-						</div>
-						<div class="w-full sm:w-44">
-							<label class="label">最高档位</label>
-							<select v-model="form.max_reasoning_effort" class="input">
-								<option value="auto">不限制</option>
-								<option v-for="effort in reasoningEfforts" :key="effort" :value="effort">{{ effort }}</option>
-							</select>
-						</div>
-					</div>
-					<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-						<div v-for="effort in reasoningEfforts" :key="effort" class="rounded-lg border border-slate-800/80 p-2.5">
-							<label class="label font-mono">{{ effort }} →</label>
-							<select v-model="form.reasoning_effort_mappings[effort]" class="input !py-2 text-xs">
-								<option value="">保持原值</option>
-								<option v-for="target in reasoningEfforts" :key="target" :value="target">{{ target }}</option>
-							</select>
-						</div>
-					</div>
-				</div>
-            <label class="flex items-center gap-2 text-sm text-slate-300">
-              <input v-model="form.is_public" type="checkbox" class="h-4 w-4 accent-amber" />
-              对普通用户开放(可自助创建密钥)
+              <small v-if="editing" class="modal-field__hint">已有账号依赖当前平台，编辑时不可更换。</small>
             </label>
-            <div class="flex justify-end gap-3 pt-2">
-              <button class="btn-ghost" :disabled="saving" @click="closeForm">取消</button>
-              <button class="btn-primary" :disabled="saving || !form.name" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+            <label class="modal-field"><span class="label">基础倍率</span><input v-model.number="form.rate_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+          </div>
+          <label class="modal-field"><span class="label">描述</span><input v-model.trim="form.description" class="input" placeholder="可选" /></label>
+          <div>
+            <label class="modal-switch-row"><span><strong>启用分组</strong><small>停用后不再参与新请求调度。</small></span><input type="checkbox" :checked="form.status === 'active'" @change="form.status = ($event.target as HTMLInputElement).checked ? 'active' : 'disabled'" /></label>
+            <label class="modal-switch-row"><span><strong>对普通用户开放</strong><small>允许用户自行选择此分组创建密钥。</small></span><input v-model="form.is_public" type="checkbox" /></label>
+          </div>
+        </section>
+
+        <details class="modal-disclosure" :open="cacheOpen" @toggle="updateDisclosure('cache', $event)">
+          <summary><span><strong>缓存倍率</strong><small>命中 ×{{ form.cache_read_multiplier }} · 5m ×{{ form.cache_write_5m_multiplier }} · 1h ×{{ form.cache_write_1h_multiplier }}</small></span></summary>
+          <div class="modal-disclosure__body">
+            <p class="modal-field__hint">倍率在基础倍率之上叠加；没有 TTL 明细的旧响应按 5m 规则处理。</p>
+            <div class="modal-grid modal-grid--three">
+              <label class="modal-field"><span class="label">缓存命中</span><input v-model.number="form.cache_read_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+              <label class="modal-field"><span class="label">短缓存 5m</span><input v-model.number="form.cache_write_5m_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+              <label class="modal-field"><span class="label">长缓存 1h</span><input v-model.number="form.cache_write_1h_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
             </div>
           </div>
-        </div>
+        </details>
+
+        <details class="modal-disclosure" :open="advancedOpen" @toggle="updateDisclosure('advanced', $event)">
+          <summary><span><strong>高级计费策略</strong><small>{{ form.image_rate_independent ? `图像 ×${form.image_rate_multiplier}` : '图像继承基础倍率' }}{{ form.platform === 'openai' || form.platform === 'grok' ? ` · 思考上限 ${form.max_reasoning_effort === 'auto' ? '不限' : form.max_reasoning_effort}` : '' }}</small></span></summary>
+          <div class="modal-disclosure__body">
+            <label class="modal-switch-row"><span><strong>图像独立倍率</strong><small>单独计费的图像 token 不继承基础倍率。</small></span><input v-model="form.image_rate_independent" type="checkbox" /></label>
+            <label v-if="form.image_rate_independent" class="modal-field"><span class="label">图像倍率</span><input v-model.number="form.image_rate_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+            <template v-if="form.platform === 'openai' || form.platform === 'grok'">
+              <label class="modal-field"><span class="label">思考强度上限</span><select v-model="form.max_reasoning_effort" class="input"><option value="auto">不限制</option><option v-for="effort in reasoningEfforts" :key="effort" :value="effort">{{ effort }}</option></select></label>
+              <div class="modal-section__head"><strong>Reasoning Effort 映射</strong><p>客户端档位先映射，再按上限限制。</p></div>
+              <div class="modal-grid modal-grid--three">
+                <label v-for="effort in reasoningEfforts" :key="effort" class="modal-field"><span class="label font-mono">{{ effort }} →</span><select v-model="form.reasoning_effort_mappings[effort]" class="input"><option value="">保持原值</option><option v-for="target in reasoningEfforts" :key="target" :value="target">{{ target }}</option></select></label>
+              </div>
+            </template>
+          </div>
+        </details>
       </div>
-    </Teleport>
+      <template #footer>
+        <button type="button" class="btn-ghost" :disabled="saving" @click="closeForm">取消</button>
+        <button type="button" class="btn-primary" :disabled="saving || !form.name" @click="save">{{ saving ? '保存中…' : (editing ? '保存修改' : '创建分组') }}</button>
+      </template>
+    </AppModal>
   </div>
 </template>

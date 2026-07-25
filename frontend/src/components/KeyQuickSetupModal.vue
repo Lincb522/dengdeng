@@ -5,6 +5,7 @@ import { localizedApiError, localizeErrorMessage } from '../api/errors'
 import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS } from '../api/reasoning'
 import { PLATFORM_LABELS } from '../api/types'
 import { useToast } from '../stores/toast'
+import AppModal from './AppModal.vue'
 
 type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch' | 'cherry' | 'nextchat' | 'continue'
 type ShellID = 'unix' | 'cmd' | 'powershell' | 'windows'
@@ -495,63 +496,59 @@ function openCCSwitch() {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="emit('close')">
-      <div class="card key-setup-modal">
-        <div class="key-setup-head"><div><p>密钥快速配置</p><h3>{{ keyName }}</h3></div><button class="btn-ghost !px-2 !py-1 text-xs" @click="emit('close')">关闭</button></div>
-
+  <AppModal
+    :open="show"
+    title="密钥快速配置"
+    :description="keyName"
+    width="setup"
+    :busy="savingEffort"
+    @close="emit('close')"
+  >
+    <div class="key-setup-flow">
+      <section class="key-setup-step">
+        <header><span>1</span><div><strong>确认密钥与平台</strong><small>核对接入信息后再读取模型。</small></div></header>
         <div class="key-setup-summary">
-          <div class="key-setup-secret"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey" class="btn-ghost is-danger" @click="forgetApiKey">清除本机</button></div></div>
-          <div class="key-setup-secret"><span>接口地址</span><code>{{ activeEndpoint }}</code><button class="btn-ghost !px-2 !py-1 text-xs" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
-			<div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><span class="text-[10px] text-slate-500">{{ availablePlatforms.length }} 个</span></div>
-			<div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度 Effort</span><select class="input key-setup-effort" aria-label="思考强度 Effort" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><span v-if="savingEffort" class="text-[10px] text-slate-500">保存中…</span></div>
+          <div class="key-setup-secret key-setup-secret--full"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey" class="btn-ghost is-danger" @click="forgetApiKey">清除本机</button></div></div>
+          <div class="key-setup-secret"><span>接口地址</span><code :title="activeEndpoint">{{ activeEndpoint }}</code><button class="btn-ghost" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
+		  <div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><small>{{ availablePlatforms.length }} 个</small></div>
+		  <div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度</span><select class="input key-setup-effort" aria-label="思考强度" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>{{ savingEffort ? '保存中…' : 'Effort' }}</small></div>
         </div>
-		<p v-if="invalidApiKeyInput" class="key-setup-status is-error">输入内容不是有效的 dd- 密钥；浏览器可能自动填入了登录密码。</p>
+		<p v-if="invalidApiKeyInput" class="key-setup-status is-error" role="alert">输入内容不是有效的 dd- 密钥；浏览器可能自动填入了登录密码。</p>
+      </section>
 
-        <div v-if="configuredApiKey" class="key-setup-model-row">
+      <section v-if="configuredApiKey" class="key-setup-step">
+        <header><span>2</span><div><strong>验证并选择模型</strong><small>模型列表来自当前密钥所属分组。</small></div></header>
+        <div class="key-setup-model-row">
           <label><span>模型</span><select v-model="selectedModel" class="input" :disabled="modelsState === 'loading' || !models.length"><option v-if="!models.length" value="">{{ modelsState === 'loading' ? '正在读取模型…' : '暂无模型' }}</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
-          <button class="btn-ghost !px-3 !py-2 text-xs" :disabled="modelsState === 'loading'" @click="loadModels">{{ modelsState === 'loading' ? '检测中…' : '检测密钥并刷新模型' }}</button>
+          <button class="btn-ghost" :disabled="modelsState === 'loading'" @click="loadModels">{{ modelsState === 'loading' ? '验证中…' : '验证并刷新' }}</button>
         </div>
-        <template v-if="configuredApiKey">
-          <p v-if="modelsState === 'ready'" class="key-setup-status is-ok">密钥验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 分组可用 {{ models.length }} 个模型。</p>
-          <p v-else-if="modelsState === 'error'" class="key-setup-status is-error">{{ modelsError }}</p>
+        <p v-if="modelsState === 'ready' && models.length" class="key-setup-status is-ok" role="status">验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 可用 {{ models.length }} 个模型。</p>
+        <p v-else-if="modelsState === 'ready'" class="key-setup-status is-empty" role="status">密钥有效，但当前分组没有返回模型，请检查分组和模型配置。</p>
+        <p v-else-if="modelsState === 'error'" class="key-setup-status is-error" role="alert">{{ modelsError }}</p>
+        <p v-else-if="modelsState === 'idle'" class="key-setup-status">点击“验证并刷新”读取模型。</p>
+      </section>
 
-          <section class="key-setup-downloads" aria-labelledby="key-setup-downloads-title">
-            <header>
-              <div>
-                <strong id="key-setup-downloads-title">工具下载</strong>
-                <small>下载入口始终完整显示；下方配置模板会按当前分组协议筛选。</small>
-              </div>
-              <span>{{ downloadClients.length }} 个</span>
-            </header>
-            <div class="key-setup-download-list">
-              <a v-for="client in downloadClients" :key="client" :href="clientDownloads[client].url" target="_blank" rel="noopener noreferrer">
-                <strong>{{ clientDownloads[client].label }}</strong>
-                <small>{{ clientDownloads[client].action }}</small>
-                <span aria-hidden="true">↗</span>
-              </a>
-            </div>
-          </section>
-
-          <div class="key-setup-config-head">
-            <div><strong>快速配置</strong><small>仅显示当前 {{ PLATFORM_LABELS[activePlatform] || activePlatform }} 分组可以直接使用的工具。</small></div>
-            <span>{{ clientOptions.length }} 个</span>
-          </div>
-          <div class="key-setup-tabs"><button v-for="item in clientOptions" :key="item.id" :class="{ 'is-active': activeClient === item.id }" @click="activeClient = item.id">{{ item.label }}</button></div>
-          <div v-if="shellOptions.length" class="key-setup-subtabs"><button v-for="item in shellOptions" :key="item.id" :class="{ 'is-active': activeShell === item.id }" @click="activeShell = item.id">{{ item.label }}</button></div>
-
-          <p class="key-setup-hint">{{ activeDescription }}</p>
-          <template v-if="activeClient !== 'ccswitch'">
-            <div v-for="(file, index) in currentFiles" :key="file.path" class="key-setup-code"><div><span>{{ file.path }}</span><button @click="copy(file.content, `${activeClient}-${index}`)">{{ copied === `${activeClient}-${index}` ? '已复制' : '复制配置' }}</button></div><p v-if="file.hint">{{ file.hint }}</p><pre>{{ file.content }}</pre></div>
-          </template>
-          <template v-else>
-            <div class="key-setup-ccswitch"><strong>导入到 CCSwitch</strong><p>将导入 {{ ccSwitchConfig.app }} 配置，模型为 {{ selectedModelLabel }}。CCSwitch 会每 30 分钟查询一次密钥余额、总额度与已用额度；查询不计入 API 调用，也不消耗上游额度。</p><div class="key-setup-ccswitch-actions"><button class="btn-primary" @click="openCCSwitch">打开 CCSwitch 导入</button><button class="btn-ghost text-xs" @click="copy(ccSwitchLink, 'ccswitch-link')">{{ copied === 'ccswitch-link' ? '导入链接已复制' : '复制导入链接' }}</button></div></div>
-            <div class="key-setup-code"><div><span>导入配置预览</span><button @click="copy(JSON.stringify(ccSwitchConfig, null, 2), 'ccswitch-config')">{{ copied === 'ccswitch-config' ? '已复制' : '复制 JSON' }}</button></div><pre>{{ JSON.stringify(ccSwitchConfig, null, 2) }}</pre></div>
-          </template>
+      <section v-if="configuredApiKey" class="key-setup-step">
+        <header><span>3</span><div><strong>选择客户端并复制配置</strong><small>配置会随平台、模型和系统选项实时更新。</small></div></header>
+        <div class="key-setup-tabs" role="tablist" aria-label="客户端"><button v-for="item in clientOptions" :key="item.id" :class="{ 'is-active': activeClient === item.id }" role="tab" :aria-selected="activeClient === item.id" @click="activeClient = item.id">{{ item.label }}</button></div>
+        <div v-if="shellOptions.length" class="key-setup-subtabs"><button v-for="item in shellOptions" :key="item.id" :class="{ 'is-active': activeShell === item.id }" @click="activeShell = item.id">{{ item.label }}</button></div>
+        <p class="key-setup-hint">{{ activeDescription }}</p>
+        <template v-if="activeClient !== 'ccswitch'">
+          <div v-for="(file, index) in currentFiles" :key="file.path" class="key-setup-code"><div><span :title="file.path">{{ file.path }}</span><button @click="copy(file.content, `${activeClient}-${index}`)">{{ copied === `${activeClient}-${index}` ? '已复制' : '复制配置' }}</button></div><p v-if="file.hint">{{ file.hint }}</p><pre>{{ file.content }}</pre></div>
         </template>
-		<div v-else class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。输入后会保存在当前浏览器本机，刷新、关闭标签页或重启浏览器后仍可显示和复制；可随时点击“清除本机”。</p><button class="btn-danger !px-3 !py-2 text-xs" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
-        <p class="key-setup-warning">配置内容含密钥。请不要截图、转发或提交到代码仓库。</p>
-      </div>
+        <template v-else>
+          <div class="key-setup-ccswitch"><strong>导入到 CCSwitch</strong><p>将导入 {{ ccSwitchConfig.app }} 配置，模型为 {{ selectedModelLabel }}；用量查询不消耗上游额度。</p><div class="key-setup-ccswitch-actions"><button class="btn-primary" @click="openCCSwitch">打开 CCSwitch</button><button class="btn-ghost" @click="copy(ccSwitchLink, 'ccswitch-link')">{{ copied === 'ccswitch-link' ? '已复制' : '复制导入链接' }}</button></div></div>
+          <div class="key-setup-code"><div><span>导入配置预览</span><button @click="copy(JSON.stringify(ccSwitchConfig, null, 2), 'ccswitch-config')">{{ copied === 'ccswitch-config' ? '已复制' : '复制 JSON' }}</button></div><pre>{{ JSON.stringify(ccSwitchConfig, null, 2) }}</pre></div>
+        </template>
+      </section>
+
+      <div v-else class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。密钥会保存在当前浏览器本机，可随时清除。</p><button class="btn-danger" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
+
+      <details class="modal-disclosure key-setup-downloads">
+        <summary><span><strong>客户端下载</strong><small>Claude、Codex、Gemini、Chatbox 等 {{ downloadClients.length }} 个工具</small></span></summary>
+        <div class="modal-disclosure__body"><div class="key-setup-download-list"><a v-for="client in downloadClients" :key="client" :href="clientDownloads[client].url" target="_blank" rel="noopener noreferrer"><strong>{{ clientDownloads[client].label }}</strong><small>{{ clientDownloads[client].action }}</small><span aria-hidden="true">↗</span></a></div></div>
+      </details>
     </div>
-  </Teleport>
+    <template #footer><p class="key-setup-footer-note">配置含密钥，请勿转发或提交到仓库。</p><button type="button" class="btn-primary" @click="emit('close')">完成</button></template>
+  </AppModal>
 </template>

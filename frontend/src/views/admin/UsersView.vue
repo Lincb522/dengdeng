@@ -130,7 +130,7 @@ async function save() {
     </div>
 
     <Teleport to="body">
-      <div v-if="editing" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="editing = null">
+      <div v-if="editing" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="editing = null">
         <div class="card w-full max-w-2xl p-6">
           <h3 class="mb-1 text-base font-semibold text-slate-100">管理用户</h3>
           <p class="mb-5 text-xs text-slate-500">{{ editing.email }}</p>

@@ -9,6 +9,7 @@ import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
 import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
 import { useAuth } from '../../stores/auth'
+import AppModal from '../../components/AppModal.vue'
 
 const toast = useToast()
 const auth = useAuth()
@@ -21,6 +22,9 @@ const page = ref(1)
 const pageSize = computed(() => auth.siteCustomization.table_default_page_size || 24)
 const filterGroup = ref<number | 0>(0)
 const showForm = ref(false)
+const savingAccount = ref(false)
+const manualOAuthOpen = ref(false)
+const advancedConnectionOpen = ref(false)
 const editing = ref<UpstreamAccount | null>(null)
 const diagnostic = ref<UpstreamAccount | null>(null)
 const refreshingQuotaAccountID = ref<number | null>(null)
@@ -143,6 +147,8 @@ function openCreate() {
 		priority: 10, concurrency: 0, status: 'active',
   }
 	agentIdentityJSON.value = ''
+  manualOAuthOpen.value = false
+  advancedConnectionOpen.value = false
   showForm.value = true
 }
 
@@ -153,7 +159,13 @@ function openEdit(a: UpstreamAccount) {
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
+  manualOAuthOpen.value = false
+  advancedConnectionOpen.value = !!(a.base_url || a.quota_url || a.proxy_id || a.priority !== 10 || a.concurrency || a.status !== 'active')
   showForm.value = true
+}
+
+function closeAccountForm() {
+  if (!savingAccount.value && !oauthStarting.value) showForm.value = false
 }
 
 const canSave = computed(() => {
@@ -189,11 +201,16 @@ function isAgentIdentityImportContent(content: string): boolean {
 }
 
 async function save() {
+	if (savingAccount.value) return
 	if (!editing.value && form.value.auth_type === 'agent_identity') {
 		if (!isAgentIdentityImportContent(agentIdentityJSON.value.trim())) {
 			toast.show('请输入包含 agent_identity 的 Codex auth.json', 'error')
 			return
 		}
+	}
+	savingAccount.value = true
+	try {
+	if (!editing.value && form.value.auth_type === 'agent_identity') {
 		const result = await withToast(
 			() => api.post<ImportResult>('/api/admin/accounts/import', {
 				group_id: Number(form.value.group_id),
@@ -245,6 +262,9 @@ async function save() {
     showForm.value = false
     await loadAccounts()
   }
+	} finally {
+		savingAccount.value = false
+	}
 }
 
 async function remove(a: UpstreamAccount) {
@@ -881,157 +901,71 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     <Pagination :page="page" :size="pageSize" :total="totalAccounts" @change="changePage" />
 
     <!-- create / edit -->
-    <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
-        <div class="card w-full max-w-md p-6">
-          <h3 class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑账号' : '添加上游账号' }}</h3>
-          <div class="space-y-4">
-            <div v-if="!editing">
-              <label class="label">所属分组</label>
-              <select v-model.number="form.group_id" class="input">
-                <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} ({{ PLATFORM_LABELS[g.platform] }})</option>
-              </select>
-            </div>
-            <div>
-              <label class="label">凭据类型</label>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
-                  :class="form.auth_type === 'api_key' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
-                  :disabled="editing?.auth_type === 'agent_identity'"
-                  @click="form.auth_type = 'api_key'"
-                >API Key</button>
-                <button
-                  type="button"
-                  class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
-                  :class="form.auth_type === 'oauth' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
-                  :disabled="!oauthAvailable || editing?.auth_type === 'agent_identity'"
-                  :title="oauthAvailable ? '' : 'Gemini 暂不支持 OAuth 自动续期'"
-                  @click="form.auth_type = 'oauth'"
-                >OAuth</button>
-				<button
-					type="button"
-					class="flex-1 rounded-lg border px-3 py-2 text-sm transition disabled:opacity-40"
-					:class="form.auth_type === 'agent_identity' ? 'border-amber bg-amber/10 text-amber' : 'border-ink-600 text-slate-400'"
-					:disabled="!agentIdentityAvailable || (!!editing && editing.auth_type !== 'agent_identity')"
-					:title="editing && editing.auth_type !== 'agent_identity' ? '请通过 Agent Identity JSON 导入转换凭证' : '仅 OpenAI 分组支持'"
-					@click="form.auth_type = 'agent_identity'"
-				>Agent Identity</button>
-              </div>
-            </div>
-            <div>
-              <label class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</label>
-              <input v-model="form.name" class="input" placeholder="例如:key-01 或邮箱" />
-            </div>
-            <div>
-              <label class="label">Base URL（留空使用官方地址）</label>
-              <input v-model="form.base_url" class="input font-mono" :placeholder="baseURLPlaceholder" />
-            </div>
-			<div>
-			  <label class="label">单独代理</label>
-			  <select v-model.number="form.proxy_id" class="input">
-				<option :value="0">不使用（默认出口）</option>
-				<option v-for="proxy in proxies.filter((item) => item.status === 'active' || item.id === form.proxy_id)" :key="proxy.id" :value="proxy.id">{{ proxy.name }} · {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}{{ proxy.status !== 'active' ? '（已停用）' : '' }}</option>
-			  </select>
-			  <p class="mt-1 text-xs text-slate-500">代理在「代理配置」中单独维护。</p>
-			</div>
+    <AppModal
+      :open="showForm"
+      :title="editing ? '编辑上游账号' : '添加上游账号'"
+      description="选择凭据方式，并按需配置独立连接策略。"
+      width="wide"
+      :busy="savingAccount || oauthStarting"
+      @close="closeAccountForm"
+    >
+      <div class="modal-form">
+        <section class="modal-section">
+          <div class="modal-section__head"><strong>账号归属</strong></div>
+          <label class="modal-field"><span class="label">所属分组</span><select v-model.number="form.group_id" class="input" :disabled="!!editing"><option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ PLATFORM_LABELS[g.platform] }}</option></select><small v-if="editing" class="modal-field__hint">账号平台由分组决定，编辑时不可迁移。</small></label>
+          <label class="modal-field"><span class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</span><input v-model.trim="form.name" class="input" placeholder="例如：key-01 或邮箱" /></label>
+        </section>
 
-            <template v-if="form.auth_type === 'api_key'">
-              <div>
-                <label class="label">API Key {{ editing ? '(留空保持不变)' : '' }}</label>
-                <input v-model="form.api_key" class="input font-mono" placeholder="sk-..." />
-              </div>
-			  <div>
-				<label class="label">额度查询地址（可选）</label>
-				<input v-model="form.quota_url" class="input font-mono text-xs" placeholder="留空自动识别，或填写 /v1/usage" />
-				<p class="mt-1 text-xs text-slate-500">支持同站路径或与 Base URL 同域的完整地址。</p>
-			  </div>
-            </template>
-            <template v-else-if="form.auth_type === 'oauth'">
-              <div v-if="!editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-medium text-slate-200">直接登录 {{ oauthProviderLabel }}</p>
-                    <p class="mt-0.5 text-xs text-slate-500">在新窗口完成授权后，凭据会自动加密保存。</p>
-                  </div>
-                  <button
-                    type="button"
-                    class="btn-primary shrink-0 !px-3 !py-1.5 text-xs"
-                    :disabled="!oauthAvailable || oauthStarting"
-                    @click="startOAuthLogin"
-                  >{{ oauthStarting ? '正在跳转…' : '去登录' }}</button>
-                </div>
-                <p v-if="!oauthAvailable" class="mt-2 text-xs text-signal-red">请先选择支持 OAuth 的 Claude 或 OpenAI 分组。</p>
-              </div>
-              <div v-if="!editing" class="flex items-center gap-3 text-xs text-slate-600"><span class="h-px flex-1 bg-ink-600"></span><span>或手动录入凭据</span><span class="h-px flex-1 bg-ink-600"></span></div>
-              <div>
-                <label class="label">Access Token {{ editing ? '(留空保持不变)' : '' }}</label>
-                <textarea v-model="form.access_token" rows="2" class="input font-mono text-xs" placeholder="eyJ..."></textarea>
-              </div>
-              <div>
-                <label class="label">Refresh Token(用于自动续期)</label>
-                <textarea v-model="form.refresh_token" rows="2" class="input font-mono text-xs" placeholder="缺失则过期后需重新导入"></textarea>
-              </div>
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="label">Account ID(可选)</label>
-                  <input v-model="form.account_id" class="input font-mono text-xs" placeholder="chatgpt_account_id" />
-                </div>
-                <div>
-                  <label class="label">邮箱(可选)</label>
-                  <input v-model="form.email" class="input text-xs" placeholder="you@example.com" />
-                </div>
-              </div>
-            </template>
-			<template v-else>
-				<div v-if="editing" class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3 text-sm text-slate-300">该账号使用动态 AgentAssertion。编辑时不会展示或覆盖私钥。</div>
-				<template v-else>
-					<div class="rounded-lg border border-signal-cyan/30 bg-signal-cyan/5 p-3">
-						<p class="text-sm font-medium text-slate-200">Codex Agent Identity auth.json</p>
-						<p class="mt-1 text-xs leading-5 text-slate-500">导入 Codex CLI 已生成的身份文件。普通 OAuth Token、Web Session 和 CPA OAuth 文件不是 Agent Identity。</p>
-						<details class="mt-2 text-xs text-slate-500">
-							<summary class="cursor-pointer font-medium text-slate-300">获取方式</summary>
-							<p class="mt-2 leading-5">使用 Codex Access Token 执行 <code class="font-mono text-slate-300">codex login --with-access-token</code>，并将凭据存储设为 <code class="font-mono text-slate-300">file</code>，随后导入 <code class="font-mono text-slate-300">~/.codex/auth.json</code>。</p>
-						</details>
-					</div>
-					<div>
-						<label class="label">Agent Identity auth.json</label>
-						<textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"...","agent_private_key":"...","account_id":"...","chatgpt_user_id":"..."}}'></textarea>
-						<p class="mt-1 text-xs text-slate-500">支持单个对象、JSON 数组和 JSONL；不会保存同文件中的 OAuth Token。缺少 task_id 时会在首次请求前注册。</p>
-					</div>
-				</template>
-			</template>
-
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="label">优先级(大者优先)</label>
-                <input v-model.number="form.priority" type="number" class="input" />
-              </div>
-              <div>
-                <label class="label">状态</label>
-                <select v-model="form.status" class="input">
-                  <option value="active">启用</option>
-                  <option value="disabled">停用</option>
-                </select>
-              </div>
-            </div>
-							<div>
-								<label class="label">账号并发上限</label>
-								<input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" />
-								<p class="mt-1 text-xs text-slate-500">达到上限后请求会等待可用槽位；0 表示不限。</p>
-							</div>
-            <div class="flex justify-end gap-3 pt-2">
-              <button class="btn-ghost" @click="showForm = false">取消</button>
-              <button class="btn-primary" :disabled="!canSave" @click="save">保存</button>
-            </div>
+        <section class="modal-section">
+          <div class="modal-section__head"><strong>凭据方式</strong><p>只显示当前方式需要填写的内容。</p></div>
+          <div class="modal-segmented" role="group" aria-label="凭据方式">
+            <button type="button" :class="{ 'is-active': form.auth_type === 'api_key' }" :disabled="editing?.auth_type === 'agent_identity'" @click="form.auth_type = 'api_key'">API Key</button>
+            <button type="button" :class="{ 'is-active': form.auth_type === 'oauth' }" :disabled="!oauthAvailable || editing?.auth_type === 'agent_identity'" :title="oauthAvailable ? '' : '当前平台不支持浏览器 OAuth'" @click="form.auth_type = 'oauth'">OAuth</button>
+            <button type="button" :class="{ 'is-active': form.auth_type === 'agent_identity' }" :disabled="!agentIdentityAvailable || (!!editing && editing.auth_type !== 'agent_identity')" title="仅 OpenAI 分组支持" @click="form.auth_type = 'agent_identity'">Agent Identity</button>
           </div>
-        </div>
+          <small v-if="!oauthAvailable" class="modal-field__hint">当前平台不支持浏览器 OAuth；可使用 API Key 或从导入入口添加订阅凭据。</small>
+
+          <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">API Key {{ editing ? '（留空保持不变）' : '' }}</span><input v-model="form.api_key" class="input font-mono" autocomplete="off" placeholder="sk-..." /></label>
+
+          <template v-else-if="form.auth_type === 'oauth'">
+            <div v-if="!editing" class="oauth-primary-path"><div><strong>登录 {{ oauthProviderLabel }}</strong><p>在新窗口完成授权，回调后自动加密保存。</p></div><button type="button" class="btn-primary" :disabled="!oauthAvailable || oauthStarting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : '去登录' }}</button></div>
+            <div v-else class="modal-note"><strong>已保存 OAuth 凭据。</strong> 如需替换，可在下方手动凭据中录入新 Token。</div>
+            <details class="modal-disclosure" :open="manualOAuthOpen" @toggle="manualOAuthOpen = ($event.currentTarget as HTMLDetailsElement).open">
+              <summary><span><strong>手动录入 Token</strong><small>仅在无法完成浏览器登录时使用</small></span></summary>
+              <div class="modal-disclosure__body">
+                <label class="modal-field"><span class="label">Access Token {{ editing ? '（留空保持不变）' : '' }}</span><textarea v-model="form.access_token" rows="3" class="input font-mono text-xs" placeholder="eyJ..."></textarea></label>
+                <label class="modal-field"><span class="label">Refresh Token</span><textarea v-model="form.refresh_token" rows="3" class="input font-mono text-xs" placeholder="缺失则过期后需重新导入"></textarea></label>
+                <div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">Account ID（可选）</span><input v-model="form.account_id" class="input font-mono text-xs" /></label><label class="modal-field"><span class="label">邮箱（可选）</span><input v-model="form.email" type="email" class="input" /></label></div>
+              </div>
+            </details>
+          </template>
+
+          <template v-else>
+            <div v-if="editing" class="modal-note"><strong>动态 AgentAssertion 已启用。</strong> 编辑时不会展示或覆盖 Runtime 私钥。</div>
+            <template v-else>
+              <div class="modal-note"><strong>导入 Codex Agent Identity auth.json。</strong> 普通 OAuth Token、Web Session 和 CPA OAuth 文件不属于 Agent Identity。</div>
+              <label class="modal-field"><span class="label">Agent Identity auth.json</span><textarea v-model="agentIdentityJSON" rows="8" class="input resize-y font-mono text-xs" spellcheck="false" placeholder='{"auth_mode":"agentIdentity","agent_identity":{"agent_runtime_id":"..."}}'></textarea><small class="modal-field__hint">支持单个对象、JSON 数组和 JSONL；OAuth Token 不会被保存，缺少 task_id 时首次请求前自动注册。</small></label>
+              <details class="modal-disclosure"><summary><span><strong>获取方式</strong><small>查看 Codex CLI 操作说明</small></span></summary><div class="modal-disclosure__body"><p class="modal-note">使用 Codex Access Token 执行 <code class="font-mono">codex login --with-access-token</code>，凭据存储设为 <code class="font-mono">file</code>，随后导入 <code class="font-mono">~/.codex/auth.json</code>。</p></div></details>
+            </template>
+          </template>
+        </section>
+
+        <details class="modal-disclosure" :open="advancedConnectionOpen" @toggle="advancedConnectionOpen = ($event.currentTarget as HTMLDetailsElement).open">
+          <summary><span><strong>高级连接设置</strong><small>{{ form.base_url || form.proxy_id || form.quota_url ? '已配置自定义连接' : '使用平台默认连接' }}</small></span></summary>
+          <div class="modal-disclosure__body">
+            <label class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
+            <label class="modal-field"><span class="label">单独代理</span><select v-model.number="form.proxy_id" class="input"><option :value="0">不使用（默认出口）</option><option v-for="proxy in proxies.filter((item) => item.status === 'active' || item.id === form.proxy_id)" :key="proxy.id" :value="proxy.id">{{ proxy.name }} · {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}{{ proxy.status !== 'active' ? '（已停用）' : '' }}</option></select></label>
+            <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">额度查询地址</span><input v-model.trim="form.quota_url" class="input font-mono text-xs" placeholder="留空自动识别，或填写 /v1/usage" /><small class="modal-field__hint">支持同站路径或与 Base URL 同域的完整地址。</small></label>
+            <div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">优先级</span><input v-model.number="form.priority" type="number" class="input" /></label><label class="modal-field"><span class="label">并发上限</span><input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /></label></div>
+            <label class="modal-switch-row"><span><strong>启用账号</strong><small>停用后不参与账号调度。</small></span><input type="checkbox" :checked="form.status === 'active'" @change="form.status = ($event.target as HTMLInputElement).checked ? 'active' : 'disabled'" /></label>
+          </div>
+        </details>
       </div>
-    </Teleport>
+      <template #footer><button type="button" class="btn-ghost" :disabled="savingAccount || oauthStarting" @click="closeAccountForm">取消</button><button type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="save">{{ savingAccount ? '保存中…' : (editing ? '保存修改' : (form.auth_type === 'agent_identity' ? '导入账号' : '添加账号')) }}</button></template>
+    </AppModal>
 
 		<Teleport to="body">
-			<div v-if="diagnostic" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="diagnostic = null">
+			<div v-if="diagnostic" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="diagnostic = null">
 				<div class="card max-h-[88vh] w-full max-w-lg overflow-y-auto p-6">
 					<div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ diagnostic.group?.name || '未分组' }}</p></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
 					<div class="grid gap-3 sm:grid-cols-2">
@@ -1068,7 +1002,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 
     <!-- import -->
     <Teleport to="body">
-      <div v-if="showImport" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showImport = false">
+      <div v-if="showImport" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showImport = false">
         <div class="card w-full max-w-xl p-6">
           <h3 class="mb-1 text-base font-semibold text-slate-100">导入账号 JSON</h3>
           <p class="mb-5 text-xs text-slate-500">支持 sub2api 导出与 CPA / Codex auth 格式。平台与目标分组不一致的条目会被跳过。</p>

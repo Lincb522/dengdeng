@@ -140,7 +140,7 @@ async function remove(p: ModelPrice) {
     </div>
 
     <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
+      <div v-if="showForm" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
         <div class="card w-full max-w-2xl p-6">
           <h3 class="mb-5 text-base font-semibold text-slate-100">{{ editing ? '编辑定价' : '新增定价' }}</h3>
           <div class="space-y-4">

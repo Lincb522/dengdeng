@@ -107,7 +107,7 @@ onMounted(load)
     </div>
 
     <Teleport to="body">
-      <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
+      <div v-if="showForm" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="showForm = false">
         <section class="card w-full max-w-lg p-6" role="dialog" aria-modal="true" :aria-label="editing ? '编辑代理' : '添加代理'">
           <h2 class="mb-1 text-base font-semibold text-slate-100">{{ editing ? '编辑代理' : '添加代理' }}</h2>
           <p class="mb-5 text-xs text-slate-500">保存后可在上游账号中选择该代理。修改认证信息时，留空会保留原值。</p>
