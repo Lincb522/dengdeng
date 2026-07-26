@@ -123,8 +123,8 @@ onMounted(load)
               <template v-if="item.kind === 'image' && item.pricing?.image_price_per_image"><span>参考单价</span><strong>{{ pricing(item.pricing.image_price_per_image) }}<em>/ 张</em></strong></template>
               <template v-else><span>每百万 Token 输入 / 输出</span><strong>{{ pricing(item.pricing?.input_price) }} <em>/</em> {{ pricing(item.pricing?.output_price) }}</strong></template>
             </div>
-            <div class="model-groups"><span class="model-groups-label">可选分组</span><div><span v-for="group in item.groups" :key="group.id" :class="group.ready ? 'is-ready' : ''">{{ group.name }} ×{{ item.kind === 'image' && group.image_rate_independent ? group.image_rate_multiplier : group.rate_multiplier }}</span><em v-if="!item.groups.length">暂无可用分组</em></div></div>
           </div>
+          <div class="model-groups"><span class="model-groups-label">可选分组</span><div><span v-for="group in item.groups" :key="group.id" :class="group.ready ? 'is-ready' : ''">{{ group.name }} ×{{ item.kind === 'image' && group.image_rate_independent ? group.image_rate_multiplier : group.rate_multiplier }}</span><em v-if="!item.groups.length">暂无可用分组</em></div></div>
           <RouterLink :to="modelActionTarget" class="model-card-action">{{ modelActionLabel }} <span>→</span></RouterLink>
         </article>
       </section>

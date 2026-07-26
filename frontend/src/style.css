@@ -2054,8 +2054,8 @@ body.has-app-modal { overflow: hidden; }
   .model-price-box span, .model-groups-label { display: block; color: #9a8065; font-size: .62rem; font-weight: 720; letter-spacing: .05em; }
   .model-price-box strong { display: block; margin-top: .3rem; color: #624313; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .91rem; letter-spacing: -.04em; }
   .model-price-box em { color: #9a8065; font-family: inherit; font-size: .68rem; font-style: normal; font-weight: 600; letter-spacing: 0; }
-  .model-groups { margin-top: .82rem; }
-  .model-groups > div { display: flex; width: max-content; min-width: 100%; flex-wrap: nowrap; gap: .3rem; margin-top: .42rem; }
+  .model-groups { min-width: 0; margin-top: .82rem; }
+  .model-groups > div { display: flex; min-width: 0; flex-wrap: wrap; gap: .3rem; margin-top: .42rem; }
   .model-groups > div > span { flex: 0 0 auto; border: 1px solid rgba(198,172,138,.58); border-radius: 999px; padding: .2rem .43rem; color: #90745a; font-size: .62rem; white-space: nowrap; }
   .model-groups > div > span.is-ready { border-color: rgba(95,163,119,.36); background: rgba(95,163,119,.08); color: #477a59; }
   .model-groups em { color: #a48b70; font-size: .65rem; font-style: normal; white-space: nowrap; }
