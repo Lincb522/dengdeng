@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -83,6 +84,35 @@ func TestSystemSettingsExtendedDefaultsAndPersistence(t *testing.T) {
 	}
 	if len(updated.Notifications.AccountQuotaEmails) != 1 || updated.Notifications.AccountQuotaEmails[0] != "ops@example.com" {
 		t.Fatalf("notification emails were not normalized: %#v", updated.Notifications.AccountQuotaEmails)
+	}
+}
+
+func TestSystemSettingsMigratesLegacyInitialBalanceIntoUserDefaults(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:system-settings-balance-migration-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewSystemSettingsService(db, &config.Config{Site: config.SiteConfig{Name: "DengDeng", AllowRegister: true}})
+	settings := svc.defaults()
+	settings.InitBalanceMicro = 2_000_000
+	settings.UserDefaults.BalanceMicro = 0
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Setting{Key: systemSettingsKey, Value: string(raw)}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := svc.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.InitBalanceMicro != 2_000_000 || loaded.UserDefaults.BalanceMicro != 2_000_000 {
+		t.Fatalf("legacy initial balance was not migrated: legacy=%d defaults=%d", loaded.InitBalanceMicro, loaded.UserDefaults.BalanceMicro)
 	}
 }
 

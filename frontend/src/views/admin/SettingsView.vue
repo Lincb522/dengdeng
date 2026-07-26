@@ -653,9 +653,9 @@ onMounted(load)
           </section>
 
 		<section v-if="form.user_defaults.auth_source_defaults.email" class="settings-section settings-section--quiet">
-			<header><h2>邮箱注册专属默认值</h2><p>开启后覆盖上面的全局默认值，只影响之后通过邮箱注册的用户。</p></header>
+			<header><h2>邮箱注册专属默认值</h2><p>{{ form.user_defaults.auth_source_defaults.email.grant_on_signup ? `已启用：邮箱注册将发放 $${sourceBalanceUSD('email').toFixed(2)}` : `未启用：邮箱注册继承全局 $${initialBalanceUSD.toFixed(2)}` }}</p></header>
 			<label class="settings-toggle-row"><span><strong>注册时发放</strong><small>关闭时继续使用全局新用户默认值。</small></span><input v-model="form.user_defaults.auth_source_defaults.email.grant_on_signup" type="checkbox" role="switch" /></label>
-			<div class="settings-form-grid settings-form-grid--three settings-fields-spaced"><label class="settings-field"><span>初始余额（USD）</span><input :value="sourceBalanceUSD('email')" type="number" min="0" step="0.01" class="input" @input="setSourceBalanceUSD('email', $event)" /></label><label class="settings-field"><span>并发</span><input v-model.number="form.user_defaults.auth_source_defaults.email.concurrency" type="number" min="0" class="input" /></label><label class="settings-field"><span>RPM</span><input v-model.number="form.user_defaults.auth_source_defaults.email.rpm_limit" type="number" min="0" class="input" /></label></div>
+			<div class="settings-form-grid settings-form-grid--three settings-fields-spaced"><label class="settings-field"><span>初始余额（USD）</span><input :value="sourceBalanceUSD('email')" :disabled="!form.user_defaults.auth_source_defaults.email.grant_on_signup" type="number" min="0" step="0.01" class="input" @input="setSourceBalanceUSD('email', $event)" /></label><label class="settings-field"><span>并发</span><input v-model.number="form.user_defaults.auth_source_defaults.email.concurrency" :disabled="!form.user_defaults.auth_source_defaults.email.grant_on_signup" type="number" min="0" class="input" /></label><label class="settings-field"><span>RPM</span><input v-model.number="form.user_defaults.auth_source_defaults.email.rpm_limit" :disabled="!form.user_defaults.auth_source_defaults.email.grant_on_signup" type="number" min="0" class="input" /></label></div>
 		</section>
 
 		<section class="settings-section settings-section--quiet">

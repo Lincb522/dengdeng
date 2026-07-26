@@ -52,6 +52,20 @@ function toggleGroupRate(groupID: number, enabled: boolean) {
 	else delete groupRates.value[groupID]
 }
 
+function formatRegisteredAt(value: string) {
+	const date = new Date(value)
+	if (Number.isNaN(date.getTime())) return '—'
+	return date.toLocaleString('zh-CN', {
+		year: 'numeric',
+		month: '2-digit',
+		day: '2-digit',
+		hour: '2-digit',
+		minute: '2-digit',
+		second: '2-digit',
+		hour12: false,
+	})
+}
+
 async function save() {
   if (!editing.value) return
   const body: Record<string, unknown> = {
@@ -117,7 +131,7 @@ async function save() {
             <td class="num text-right">x{{ u.rate_multiplier }}</td>
 						<td class="num text-right">{{ u.concurrency > 0 ? u.concurrency : '不限' }}</td>
             <td class="max-w-[160px] truncate text-xs text-slate-500" :title="u.note">{{ u.note }}</td>
-            <td class="text-xs text-slate-500">{{ new Date(u.created_at).toLocaleDateString() }}</td>
+            <td class="whitespace-nowrap text-xs text-slate-500">{{ formatRegisteredAt(u.created_at) }}</td>
             <td class="text-right">
               <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openEdit(u)">管理</button>
             </td>

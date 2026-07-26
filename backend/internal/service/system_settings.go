@@ -444,6 +444,14 @@ func normalizeDocumentID(raw string) string {
 func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, error) {
 	next.SiteName = strings.TrimSpace(next.SiteName)
 	next.SiteSubtitle = strings.TrimSpace(next.SiteSubtitle)
+	// InitBalanceMicro is the legacy registration-balance field. Keep the two
+	// representations in lockstep so settings saved by an older frontend cannot
+	// leave the newer registration path reading a zero-value UserDefaults field.
+	if next.UserDefaults.BalanceMicro == 0 && next.InitBalanceMicro > 0 {
+		next.UserDefaults.BalanceMicro = next.InitBalanceMicro
+	} else {
+		next.InitBalanceMicro = next.UserDefaults.BalanceMicro
+	}
 	if next.SiteName == "" || len([]rune(next.SiteName)) > 120 {
 		return SystemSettings{}, errors.New("site name must be between 1 and 120 characters")
 	}
