@@ -109,7 +109,7 @@ body.has-app-modal { overflow: hidden; }
 	--modal-width: 31.25rem;
 	display: grid;
 	width: min(calc(100vw - 2rem), var(--modal-width));
-	max-height: min(86dvh, 47.5rem);
+	max-height: min(calc(100dvh - 2rem), 47.5rem);
 	grid-template-rows: auto minmax(0, 1fr) auto;
 	overflow: hidden;
 	border: 1px solid var(--line);
@@ -161,7 +161,7 @@ body.has-app-modal { overflow: hidden; }
 	min-height: 0;
 	overflow-x: hidden;
 	overflow-y: auto;
-	padding: 1rem 1.2rem 1.1rem;
+	padding: .88rem 1.1rem .95rem;
 	overscroll-behavior: contain;
 	scrollbar-gutter: stable;
 }
@@ -180,9 +180,9 @@ body.has-app-modal { overflow: hidden; }
 	outline-offset: 2px;
 }
 
-.modal-form { display: grid; gap: 1rem; }
-.modal-section { display: grid; min-width: 0; gap: .72rem; }
-.modal-section + .modal-section { padding-top: .95rem; border-top: 1px solid var(--line); }
+.modal-form { display: grid; gap: .82rem; }
+.modal-section { display: grid; min-width: 0; gap: .62rem; }
+.modal-section + .modal-section { padding-top: .78rem; border-top: 1px solid var(--line); }
 .modal-section__head { display: grid; gap: .12rem; }
 .modal-section__head strong { color: var(--ink); font-size: .76rem; font-weight: 820; }
 .modal-section__head p { color: var(--ink-soft); font-size: .67rem; line-height: 1.5; }
@@ -1961,6 +1961,8 @@ body.has-app-modal { overflow: hidden; }
   .key-group-tags { display: flex; min-width: 11rem; flex-wrap: nowrap; gap: .3rem; }
   .key-group-tags > * { flex: 0 0 auto; white-space: nowrap; }
   .key-group-picker { display: grid; max-height: 14rem; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .42rem; overflow-y: auto; padding: .18rem; }
+  .key-group-picker--create { max-height: 8.75rem; }
+  .key-group-picker--settings { max-height: 10rem; }
   .key-group-picker > label { display: flex; min-width: 0; align-items: center; gap: .58rem; padding: .62rem .68rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface); color: var(--ink); cursor: pointer; transition: border-color .18s ease, background .18s ease; }
   .key-group-picker > label:hover { border-color: color-mix(in srgb, var(--accent) 62%, var(--line)); }
   .key-group-picker > label.is-selected { border-color: color-mix(in srgb, var(--accent) 74%, var(--line)); background: var(--accent-soft); }
@@ -1969,6 +1971,12 @@ body.has-app-modal { overflow: hidden; }
   .key-group-picker strong { overflow: hidden; color: var(--ink); font-size: .73rem; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
   .key-group-picker small { overflow: hidden; color: var(--ink-soft); font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
   .key-group-picker-note { margin-top: .5rem; color: var(--ink-soft); font-size: .68rem; line-height: 1.55; }
+  .key-group-disclosure { border: 1px solid var(--line); border-radius: .68rem; background: var(--surface-muted); }
+  .key-group-disclosure > summary { padding: .52rem .68rem; }
+  .key-group-disclosure > summary small { max-width: 26rem; }
+  .key-group-disclosure .modal-disclosure__body { padding: 0 .5rem .55rem; }
+  .key-settings-disclosure > summary small { max-width: 26rem; }
+  .key-settings-disclosure__note { color: var(--ink-soft); font-size: .64rem; line-height: 1.45; }
   .key-policy-panel { padding: .75rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--surface-muted); }
   .key-setup-modal { width: min(46rem, 100%); max-height: min(47rem, calc(100vh - 2rem)); overflow: auto; padding: 1.2rem; }
   .key-setup-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
@@ -2055,7 +2063,15 @@ body.has-app-modal { overflow: hidden; }
   .oauth-primary-path p { color: var(--ink-soft); font-size: .64rem; line-height: 1.45; }
   .oauth-primary-path .btn { flex: 0 0 auto; }
 
-  .key-setup-flow { display: grid; gap: 1rem; }
+  .key-setup-flow { display: grid; gap: .82rem; }
+  .key-setup-progress { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; padding-bottom: .72rem; border-bottom: 1px solid var(--line); }
+  .key-setup-progress button { display: flex; min-width: 0; min-height: 2.2rem; align-items: center; justify-content: center; gap: .38rem; border-radius: .55rem; color: var(--ink-soft); font-size: .68rem; font-weight: 760; transition: background .16s ease, color .16s ease; }
+  .key-setup-progress button:hover:not(:disabled) { background: var(--surface-muted); color: var(--ink); }
+  .key-setup-progress button.is-active { background: var(--accent-soft); color: var(--ink); }
+  .key-setup-progress button:disabled { cursor: not-allowed; opacity: .42; }
+  .key-setup-progress button > span { display: grid; width: 1.25rem; height: 1.25rem; flex: 0 0 auto; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .58rem; }
+  .key-setup-progress button.is-active > span, .key-setup-progress button.is-complete > span { border-color: var(--accent); background: var(--accent); color: #fff; }
+  .key-setup-progress button > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .key-setup-step { display: grid; min-width: 0; gap: .7rem; }
   .key-setup-step + .key-setup-step { padding-top: 1rem; border-top: 1px solid var(--line); }
   .key-setup-step > header { display: flex; align-items: flex-start; gap: .58rem; }
@@ -2070,12 +2086,15 @@ body.has-app-modal { overflow: hidden; }
   .key-setup-secret-actions .btn, .key-setup-secret > .btn { min-height: 1.75rem; padding: 0 .42rem; font-size: .61rem; }
   .key-setup-tabs { margin-top: 0; scrollbar-width: thin; }
   .key-setup-hint { margin: 0; }
+  .key-setup-file-tabs { display: flex; gap: .25rem; overflow-x: auto; padding-bottom: .05rem; scrollbar-width: thin; }
+  .key-setup-file-tabs button { max-width: 16rem; min-height: 1.85rem; flex: 0 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: .48rem; padding: 0 .55rem; background: var(--surface); color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .62rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+  .key-setup-file-tabs button.is-active { border-color: color-mix(in srgb, var(--accent) 62%, var(--line)); background: var(--accent-soft); color: var(--ink); }
   .key-setup-model-row { margin-top: 0; }
   .key-setup-status { margin-top: 0; color: var(--ink-soft); }
   .key-setup-code { margin-top: 0; border-radius: .68rem; }
   .key-setup-code + .key-setup-code { margin-top: .55rem; }
   .key-setup-code > div > span { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
-  .key-setup-code pre { max-height: 13rem; }
+  .key-setup-code pre { max-height: 6rem; }
   .key-setup-ccswitch { margin-top: 0; padding: .8rem; border-radius: .68rem; }
   .key-setup-empty { margin-top: 0; }
   .key-setup-downloads { margin-top: 0; border-bottom: 0; }
@@ -2088,6 +2107,8 @@ body.has-app-modal { overflow: hidden; }
 	.key-setup-secret--full { grid-column: auto; }
 	.app-modal__footer .key-setup-footer-note { flex: 1 1 auto; }
 	.app-modal__footer .key-setup-footer-note + .btn { flex: 0 0 auto; }
+	.key-setup-footer-note { display: none; }
+	.key-setup-progress button { min-height: 2.75rem; }
 	.oauth-primary-path { align-items: stretch; flex-direction: column; }
 	.oauth-primary-path .btn { width: 100%; }
   }
@@ -2135,7 +2156,10 @@ body.has-app-modal { overflow: hidden; }
 .legal-document { padding: clamp(1.5rem, 5vw, 3rem); }
 .legal-document__date { color: #967656; font-size: .72rem; font-weight: 750; }
 .legal-document h1 { margin-top: .75rem; color: var(--ink); font-size: 1.7rem; font-weight: 850; letter-spacing: -.025em; text-wrap: balance; }
-.legal-document__content { max-width: 70ch; margin-top: 1.75rem; color: #5d4a3a; font-size: .9rem; line-height: 1.85; white-space: pre-wrap; }
+.legal-document__content { display: grid; max-width: 70ch; gap: 1rem; margin-top: 1.75rem; color: #5d4a3a; font-size: .9rem; line-height: 1.85; }
+.legal-document__content h2 { margin-top: .8rem; color: var(--ink); font-size: 1rem; font-weight: 820; letter-spacing: -.01em; }
+.legal-document__content p { margin: 0; white-space: pre-line; }
+.legal-document__content h2:first-child { margin-top: 0; }
 .legal-loading { display: grid; min-height: 18rem; place-items: center; padding: 1.5rem; color: var(--ink-soft); font-size: .86rem; text-align: center; }
 
 .settings-page-head { align-items: center; }

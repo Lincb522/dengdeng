@@ -716,7 +716,7 @@ onMounted(load)
             <header class="settings-section__with-control">
               <div>
                 <h2>协议文档</h2>
-                <p>内容会以安全的纯文本格式呈现在独立页面。默认包含服务条款、隐私、使用政策、服务特定条款与免责声明。</p>
+                <p>内容会以安全的纯文本格式呈现在独立页面。默认包含用户协议、隐私政策、可接受使用政策、服务特定条款、免责声明与开源软件说明。</p>
               </div>
               <button type="button" class="btn-ghost !px-3 !py-1.5 text-xs" @click="addDocument">添加文档</button>
             </header>
@@ -735,7 +735,7 @@ onMounted(load)
                   <label class="settings-field"><span>标题</span><input v-model="doc.title" class="input" maxlength="64" placeholder="例如：服务条款" /></label>
                   <label class="settings-field"><span>文档 ID</span><input v-model="doc.id" class="input font-mono" maxlength="64" placeholder="terms" @blur="updateDocumentID(doc)" /></label>
                 </div>
-                <label class="settings-field"><span>正文</span><textarea v-model="doc.content_md" rows="9" class="input settings-document-editor__text" placeholder="支持普通文本与 Markdown 结构。"></textarea></label>
+                <label class="settings-field"><span>正文</span><textarea v-model="doc.content_md" rows="12" class="input settings-document-editor__text" placeholder="使用普通文本；章节标题可写成“一、适用范围”，无需输入 Markdown 的井号。"></textarea></label>
               </article>
             </div>
           </section>

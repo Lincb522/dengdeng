@@ -32,6 +32,8 @@ const copiedKeyID = ref<number | null>(null)
 const revealedKeyIDs = ref<Set<number>>(new Set())
 const settingKey = ref<ApiKey | null>(null)
 const savingSettings = ref(false)
+const settingsGroupsOpen = ref(false)
+const settingsQuotaOpen = ref(false)
 const networkSecurityOpen = ref(false)
 const settingsForm = ref({ name: '', group_ids: [] as number[], reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
@@ -53,6 +55,12 @@ function selectSettingsGroup(groupID: number) {
 function selectedGroups(groupIDs: number[]) {
   const selected = new Set(groupIDs)
   return groups.value.filter((group) => selected.has(group.id))
+}
+
+function selectedGroupSummary(groupIDs: number[]) {
+  const names = selectedGroups(groupIDs).map((group) => group.name)
+  if (!names.length) return '尚未选择分组'
+  return `已选 ${names.length} 个 · ${names.join('、')}`
 }
 
 function keyGroups(key: ApiKey | null | undefined) {
@@ -156,6 +164,12 @@ async function copyKey(key: ApiKey) {
 function toMicro(value: number) { return Math.max(0, Math.round((Number(value) || 0) * 1_000_000)) }
 function fromMicro(value: number) { return Number((Math.max(0, value || 0) / 1_000_000).toFixed(6)) }
 function quotaLabel(value: number) { return value > 0 ? formatMoney(value) : '不设上限' }
+function quotaTrafficSummary() {
+  const total = settingsForm.value.quota > 0 ? `总额 $${settingsForm.value.quota}` : '总额不限'
+  const daily = settingsForm.value.daily_quota > 0 ? `每日 $${settingsForm.value.daily_quota}` : '每日不限'
+  const concurrency = settingsForm.value.concurrency > 0 ? `并发 ${settingsForm.value.concurrency}` : '并发不限'
+  return `${total} · ${daily} · ${concurrency}`
+}
 function toLocalDateTime(value: string | null | undefined) {
   if (!value) return ''
   const date = new Date(value)
@@ -245,6 +259,8 @@ function openSettings(key: ApiKey) {
     blocked_ips: key.blocked_ips || '',
     expires_at: toLocalDateTime(key.expires_at),
   }
+  settingsGroupsOpen.value = false
+  settingsQuotaOpen.value = false
   networkSecurityOpen.value = !!(key.allowed_ips || key.blocked_ips)
 }
 
@@ -467,7 +483,7 @@ function onSetupSecretForgot() {
           <label class="modal-field"><span class="label">密钥名称</span><input v-model.trim="newName" class="input" placeholder="例如：my-claude-code" maxlength="64" /></label>
           <div class="modal-field">
             <span class="label">{{ keyMultiGroupEnabled ? '选择分组（可多选）' : '选择分组' }}</span>
-            <div v-if="groups.length" class="key-group-picker" role="group" aria-label="选择密钥分组">
+            <div v-if="groups.length" class="key-group-picker key-group-picker--create" role="group" aria-label="选择密钥分组">
               <label v-for="g in groups" :key="g.id" :class="{ 'is-selected': newGroupIDs.includes(g.id) }">
                 <input v-if="keyMultiGroupEnabled" v-model="newGroupIDs" type="checkbox" :value="g.id" />
                 <input v-else type="radio" name="new-key-group" :checked="newGroupIDs[0] === g.id" @change="selectNewGroup(g.id)" />
@@ -519,15 +535,17 @@ function onSetupSecretForgot() {
 				<section class="modal-section">
 					<div class="modal-section__head"><strong>基本设置</strong></div>
 					<label class="modal-field"><span class="label">密钥名称</span><input v-model.trim="settingsForm.name" class="input" maxlength="64" /></label>
-					<div class="modal-field"><span class="label">{{ keyMultiGroupEnabled ? '分组（可多选）' : '分组' }}</span><div class="key-group-picker" role="group" aria-label="编辑密钥分组"><label v-for="group in groups" :key="group.id" :class="{ 'is-selected': settingsForm.group_ids.includes(group.id) }"><input v-if="keyMultiGroupEnabled" v-model="settingsForm.group_ids" type="checkbox" :value="group.id" /><input v-else type="radio" name="edit-key-group" :checked="settingsForm.group_ids[0] === group.id" @change="selectSettingsGroup(group.id)" /><span><strong>{{ group.name }}</strong><small>{{ PLATFORM_LABELS[group.platform] }} · 倍率 ×{{ group.rate_multiplier }}</small></span></label></div><small v-if="settingsForm.group_ids.length && keyMultiGroupEnabled" class="key-group-picker-note">已选择 {{ settingsForm.group_ids.length }} 个分组</small></div>
+					<details class="modal-disclosure key-group-disclosure" :open="settingsGroupsOpen" @toggle="settingsGroupsOpen = ($event.currentTarget as HTMLDetailsElement).open">
+						<summary><span><strong>{{ keyMultiGroupEnabled ? '分组（可多选）' : '分组' }}</strong><small :title="selectedGroupSummary(settingsForm.group_ids)">{{ selectedGroupSummary(settingsForm.group_ids) }}</small></span></summary>
+						<div class="modal-disclosure__body"><div class="key-group-picker key-group-picker--settings" role="group" aria-label="编辑密钥分组"><label v-for="group in groups" :key="group.id" :class="{ 'is-selected': settingsForm.group_ids.includes(group.id) }"><input v-if="keyMultiGroupEnabled" v-model="settingsForm.group_ids" type="checkbox" :value="group.id" /><input v-else type="radio" name="edit-key-group" :checked="settingsForm.group_ids[0] === group.id" @change="selectSettingsGroup(group.id)" /><span><strong>{{ group.name }}</strong><small>{{ PLATFORM_LABELS[group.platform] }} · 倍率 ×{{ group.rate_multiplier }}</small></span></label></div></div>
+					</details>
 					<label v-if="hasPlatform(settingsForm.group_ids, 'openai')" class="modal-field"><span class="label">默认思考强度</span><select v-model="settingsForm.reasoning_effort" class="input"><option v-for="option in reasoningOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
 					<label class="modal-switch-row"><span><strong>启用密钥</strong><small>停用后所有新请求都会被拒绝。</small></span><input type="checkbox" :checked="settingsForm.status === 'active'" @change="settingsForm.status = ($event.target as HTMLInputElement).checked ? 'active' : 'disabled'" /></label>
 				</section>
-				<section class="modal-section">
-					<div class="modal-section__head"><strong>配额与流量</strong><p>0 表示不限制，预算按实际费用累计。</p></div>
-					<div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label class="modal-field"><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label><label class="modal-field"><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label class="modal-field"><span class="label">并发上限</span><input v-model.number="settingsForm.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /></label></div>
-					<label class="modal-field"><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="modal-field__hint">留空表示永久有效。</small></label>
-				</section>
+				<details class="modal-disclosure key-settings-disclosure" :open="settingsQuotaOpen" @toggle="settingsQuotaOpen = ($event.currentTarget as HTMLDetailsElement).open">
+					<summary><span><strong>配额与流量</strong><small :title="quotaTrafficSummary()">{{ quotaTrafficSummary() }}</small></span></summary>
+					<div class="modal-disclosure__body"><p class="key-settings-disclosure__note">0 表示不限制，预算按实际费用累计。</p><div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">总额度（USD）</span><input v-model.number="settingsForm.quota" type="number" min="0" step="0.01" class="input" /></label><label class="modal-field"><span class="label">每日额度（USD）</span><input v-model.number="settingsForm.daily_quota" type="number" min="0" step="0.01" class="input" /></label><label class="modal-field"><span class="label">每分钟请求数</span><input v-model.number="settingsForm.rpm" type="number" min="0" max="100000" step="1" class="input" placeholder="0 = 不限制" /></label><label class="modal-field"><span class="label">并发上限</span><input v-model.number="settingsForm.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /></label></div><label class="modal-field"><span class="label">到期时间</span><input v-model="settingsForm.expires_at" type="datetime-local" class="input" /><small class="modal-field__hint">留空表示永久有效。</small></label></div>
+				</details>
 				<details class="modal-disclosure" :open="networkSecurityOpen" @toggle="networkSecurityOpen = ($event.currentTarget as HTMLDetailsElement).open">
 					<summary><span><strong>网络安全</strong><small>{{ settingsForm.allowed_ips || settingsForm.blocked_ips ? '已配置 IP 规则' : '未配置' }}</small></span></summary>
 					<div class="modal-disclosure__body"><label class="modal-field"><span class="label">IP 白名单</span><input v-model.trim="settingsForm.allowed_ips" class="input font-mono text-xs" placeholder="203.0.113.8, 2001:db8::/32" /><small class="modal-field__hint">仅允许列出的 IP 或 CIDR，多个规则用逗号或空格分隔。</small></label><label class="modal-field"><span class="label">IP 黑名单</span><input v-model.trim="settingsForm.blocked_ips" class="input font-mono text-xs" placeholder="198.51.100.0/24" /><small class="modal-field__hint">黑名单优先于白名单，用于立即阻断异常来源。</small></label></div>

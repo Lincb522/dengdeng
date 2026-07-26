@@ -25,8 +25,19 @@ func TestSystemSettingsAgreementRevisionChangesWithDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !settings.LoginAgreement.Enabled || len(settings.LoginAgreement.Documents) < 5 {
+	if !settings.LoginAgreement.Enabled || len(settings.LoginAgreement.Documents) < 6 {
 		t.Fatalf("expected enabled default agreement documents, got %#v", settings.LoginAgreement)
+	}
+	if settings.LoginAgreement.UpdatedAt != defaultAgreementUpdatedAt {
+		t.Fatalf("unexpected default agreement date: %q", settings.LoginAgreement.UpdatedAt)
+	}
+	for _, document := range settings.LoginAgreement.Documents {
+		if strings.Contains(document.ContentMD, "#") {
+			t.Fatalf("default legal document %q contains raw markdown heading markers", document.ID)
+		}
+		if strings.TrimSpace(document.ContentMD) == "" {
+			t.Fatalf("default legal document %q is empty", document.ID)
+		}
 	}
 	before := settings.LoginAgreement.Revision()
 	settings.LoginAgreement.Documents[0].ContentMD += "\n\n补充说明。"

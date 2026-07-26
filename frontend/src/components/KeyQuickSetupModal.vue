@@ -22,6 +22,8 @@ const toast = useToast()
 
 const activeClient = ref<ClientID>('codex')
 const activeShell = ref<ShellID>('unix')
+const activeStep = ref<1 | 2 | 3>(1)
+const activeFileIndex = ref(0)
 const copied = ref('')
 const models = ref<string[]>([])
 const selectedModel = ref('')
@@ -241,6 +243,7 @@ watch([() => props.show, () => props.platform, () => props.platforms.join(','), 
   modelsError.value = ''
   reasoningEffort.value = normalizeReasoningEffort(props.reasoningEffort)
   if (!show) return
+  activeStep.value = 1
   workingApiKey.value = props.apiKey.trim() || readRememberedApiKey()
   if (configuredApiKey.value) void loadModels()
 }, { immediate: true })
@@ -253,6 +256,11 @@ watch(workingApiKey, rememberApiKey)
 
 watch(activeClient, () => {
   activeShell.value = 'unix'
+  activeFileIndex.value = 0
+})
+
+watch(activeShell, () => {
+  activeFileIndex.value = 0
 })
 
 watch(activePlatform, () => {
@@ -493,6 +501,17 @@ function openCCSwitch() {
   if (configuredApiKey.value) window.location.assign(ccSwitchLink.value)
 }
 
+function setActiveStep(step: 1 | 2 | 3) {
+  if (step > 1 && !configuredApiKey.value) return
+  activeStep.value = step
+}
+
+function nextStep() {
+  if (!configuredApiKey.value) return
+  if (activeStep.value === 1) activeStep.value = 2
+  else if (activeStep.value === 2) activeStep.value = 3
+}
+
 </script>
 
 <template>
@@ -505,7 +524,13 @@ function openCCSwitch() {
     @close="emit('close')"
   >
     <div class="key-setup-flow">
-      <section class="key-setup-step">
+      <nav class="key-setup-progress" aria-label="配置步骤">
+        <button type="button" :class="{ 'is-active': activeStep === 1, 'is-complete': activeStep > 1 }" @click="setActiveStep(1)"><span>1</span><strong>密钥</strong></button>
+        <button type="button" :disabled="!configuredApiKey" :class="{ 'is-active': activeStep === 2, 'is-complete': activeStep > 2 }" @click="setActiveStep(2)"><span>2</span><strong>模型</strong></button>
+        <button type="button" :disabled="!configuredApiKey" :class="{ 'is-active': activeStep === 3 }" @click="setActiveStep(3)"><span>3</span><strong>客户端</strong></button>
+      </nav>
+
+      <section v-if="activeStep === 1" class="key-setup-step">
         <header><span>1</span><div><strong>确认密钥与平台</strong><small>核对接入信息后再读取模型。</small></div></header>
         <div class="key-setup-summary">
           <div class="key-setup-secret key-setup-secret--full"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey" class="btn-ghost is-danger" @click="forgetApiKey">清除本机</button></div></div>
@@ -516,7 +541,7 @@ function openCCSwitch() {
 		<p v-if="invalidApiKeyInput" class="key-setup-status is-error" role="alert">输入内容不是有效的 dd- 密钥；浏览器可能自动填入了登录密码。</p>
       </section>
 
-      <section v-if="configuredApiKey" class="key-setup-step">
+      <section v-else-if="activeStep === 2 && configuredApiKey" class="key-setup-step">
         <header><span>2</span><div><strong>验证并选择模型</strong><small>模型列表来自当前密钥所属分组。</small></div></header>
         <div class="key-setup-model-row">
           <label><span>模型</span><select v-model="selectedModel" class="input" :disabled="modelsState === 'loading' || !models.length"><option v-if="!models.length" value="">{{ modelsState === 'loading' ? '正在读取模型…' : '暂无模型' }}</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
@@ -528,13 +553,14 @@ function openCCSwitch() {
         <p v-else-if="modelsState === 'idle'" class="key-setup-status">点击“验证并刷新”读取模型。</p>
       </section>
 
-      <section v-if="configuredApiKey" class="key-setup-step">
+      <section v-else-if="activeStep === 3 && configuredApiKey" class="key-setup-step">
         <header><span>3</span><div><strong>选择客户端并复制配置</strong><small>配置会随平台、模型和系统选项实时更新。</small></div></header>
         <div class="key-setup-tabs" role="tablist" aria-label="客户端"><button v-for="item in clientOptions" :key="item.id" :class="{ 'is-active': activeClient === item.id }" role="tab" :aria-selected="activeClient === item.id" @click="activeClient = item.id">{{ item.label }}</button></div>
         <div v-if="shellOptions.length" class="key-setup-subtabs"><button v-for="item in shellOptions" :key="item.id" :class="{ 'is-active': activeShell === item.id }" @click="activeShell = item.id">{{ item.label }}</button></div>
         <p class="key-setup-hint">{{ activeDescription }}</p>
         <template v-if="activeClient !== 'ccswitch'">
-          <div v-for="(file, index) in currentFiles" :key="file.path" class="key-setup-code"><div><span :title="file.path">{{ file.path }}</span><button @click="copy(file.content, `${activeClient}-${index}`)">{{ copied === `${activeClient}-${index}` ? '已复制' : '复制配置' }}</button></div><p v-if="file.hint">{{ file.hint }}</p><pre>{{ file.content }}</pre></div>
+          <div v-if="currentFiles.length > 1" class="key-setup-file-tabs" role="tablist" aria-label="配置文件"><button v-for="(file, index) in currentFiles" :key="file.path" type="button" role="tab" :aria-selected="activeFileIndex === index" :class="{ 'is-active': activeFileIndex === index }" :title="file.path" @click="activeFileIndex = index">{{ file.path }}</button></div>
+          <div v-if="currentFiles[activeFileIndex]" class="key-setup-code"><div><span :title="currentFiles[activeFileIndex].path">{{ currentFiles[activeFileIndex].path }}</span><button @click="copy(currentFiles[activeFileIndex].content, `${activeClient}-${activeFileIndex}`)">{{ copied === `${activeClient}-${activeFileIndex}` ? '已复制' : '复制配置' }}</button></div><p v-if="currentFiles[activeFileIndex].hint">{{ currentFiles[activeFileIndex].hint }}</p><pre>{{ currentFiles[activeFileIndex].content }}</pre></div>
         </template>
         <template v-else>
           <div class="key-setup-ccswitch"><strong>导入到 CCSwitch</strong><p>将导入 {{ ccSwitchConfig.app }} 配置，模型为 {{ selectedModelLabel }}；用量查询不消耗上游额度。</p><div class="key-setup-ccswitch-actions"><button class="btn-primary" @click="openCCSwitch">打开 CCSwitch</button><button class="btn-ghost" @click="copy(ccSwitchLink, 'ccswitch-link')">{{ copied === 'ccswitch-link' ? '已复制' : '复制导入链接' }}</button></div></div>
@@ -542,13 +568,18 @@ function openCCSwitch() {
         </template>
       </section>
 
-      <div v-else class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。密钥会保存在当前浏览器本机，可随时清除。</p><button class="btn-danger" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
+      <div v-if="activeStep === 1 && !configuredApiKey" class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。密钥会保存在当前浏览器本机，可随时清除。</p><button class="btn-danger" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
 
-      <details class="modal-disclosure key-setup-downloads">
+      <details v-if="activeStep === 3 && configuredApiKey" class="modal-disclosure key-setup-downloads">
         <summary><span><strong>客户端下载</strong><small>Claude、Codex、Gemini、Chatbox 等 {{ downloadClients.length }} 个工具</small></span></summary>
         <div class="modal-disclosure__body"><div class="key-setup-download-list"><a v-for="client in downloadClients" :key="client" :href="clientDownloads[client].url" target="_blank" rel="noopener noreferrer"><strong>{{ clientDownloads[client].label }}</strong><small>{{ clientDownloads[client].action }}</small><span aria-hidden="true">↗</span></a></div></div>
       </details>
     </div>
-    <template #footer><p class="key-setup-footer-note">配置含密钥，请勿转发或提交到仓库。</p><button type="button" class="btn-primary" @click="emit('close')">完成</button></template>
+    <template #footer>
+      <p class="key-setup-footer-note">配置含密钥，请勿转发或提交到仓库。</p>
+      <button v-if="activeStep > 1" type="button" class="btn-ghost" @click="setActiveStep(activeStep === 3 ? 2 : 1)">上一步</button>
+      <button v-if="activeStep < 3" type="button" class="btn-primary" :disabled="!configuredApiKey" @click="nextStep">下一步</button>
+      <button v-else type="button" class="btn-primary" @click="emit('close')">完成</button>
+    </template>
   </AppModal>
 </template>
