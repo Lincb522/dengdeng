@@ -502,6 +502,7 @@ export interface ApiKey {
 export interface UpstreamAccount {
   id: number
   group_id: number
+	group_ids: number[]
 	proxy_id: number
   name: string
   platform: string
@@ -523,6 +524,7 @@ export interface UpstreamAccount {
   last_error: string
   created_at: string
 	group?: Group
+	groups?: Group[]
 	proxy?: Proxy
 	quota?: AccountQuotaSnapshot
 	codex_quota?: CodexQuotaSnapshot

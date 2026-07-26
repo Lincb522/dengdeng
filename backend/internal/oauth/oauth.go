@@ -357,6 +357,7 @@ func truncate(s string, n int) string {
 // authorization succeeds. It is kept server-side alongside the PKCE verifier.
 type LoginIntent struct {
 	GroupID     int64
+	GroupIDs    []int64
 	Name        string
 	BaseURL     string
 	Priority    int

@@ -578,19 +578,22 @@ func (h *AdminHandler) loadOpsRealtime(filter opsFilter, lastMinute *opsWindow) 
 	result.InFlight = snapshot.InFlight
 	result.Waiting = snapshot.Waiting
 	var capacityAccounts []model.UpstreamAccount
-	accountQuery := h.db.Where("status = ?", model.StatusActive)
+	accountQuery := h.db.Preload("Group").Preload("Groups").Where("status = ?", model.StatusActive)
 	if filter.Platform != "" {
 		accountQuery = accountQuery.Where("platform = ?", filter.Platform)
 	}
 	if filter.GroupID > 0 {
-		accountQuery = accountQuery.Where("group_id = ?", filter.GroupID)
+		accountQuery = accountQuery.Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", filter.GroupID, filter.GroupID)
 	}
 	_ = accountQuery.Find(&capacityAccounts).Error
 	platformCapacity, groupCapacity, accountCapacity := map[string]int{}, map[int64]int{}, map[int64]int{}
 	for _, account := range capacityAccounts {
 		if account.Concurrency > 0 {
 			platformCapacity[account.Platform] += account.Concurrency
-			groupCapacity[account.GroupID] += account.Concurrency
+			hydrateUpstreamAccountGroups(&account)
+			for _, groupID := range account.GroupIDs {
+				groupCapacity[groupID] += account.Concurrency
+			}
 			accountCapacity[account.ID] = account.Concurrency
 		}
 	}
@@ -762,9 +765,9 @@ type opsHealthCounts struct{ total, available, cooling, attention, disabled int 
 
 func (h *AdminHandler) loadOpsAccountHealth(filter opsFilter) ([]opsAccountHealth, opsHealthCounts, error) {
 	var accounts []model.UpstreamAccount
-	q := h.db.Preload("Group").Order("priority ASC, id ASC")
+	q := h.db.Preload("Group").Preload("Groups").Order("priority ASC, id ASC")
 	if filter.GroupID > 0 {
-		q = q.Where("group_id = ?", filter.GroupID)
+		q = q.Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", filter.GroupID, filter.GroupID)
 	}
 	if filter.Platform != "" {
 		q = q.Where("platform = ?", filter.Platform)
@@ -780,6 +783,7 @@ func (h *AdminHandler) loadOpsAccountHealth(filter opsFilter) ([]opsAccountHealt
 	result := make([]opsAccountHealth, 0, len(accounts))
 	counts := opsHealthCounts{total: len(accounts)}
 	for _, account := range accounts {
+		hydrateUpstreamAccountGroups(&account)
 		health := "ready"
 		probe := latest[account.ID]
 		switch {
@@ -801,11 +805,11 @@ func (h *AdminHandler) loadOpsAccountHealth(filter opsFilter) ([]opsAccountHealt
 		default:
 			counts.available++
 		}
-		groupName := ""
-		if account.Group != nil {
-			groupName = account.Group.Name
+		groupNames := make([]string, 0, len(account.Groups))
+		for _, group := range account.Groups {
+			groupNames = append(groupNames, group.Name)
 		}
-		item := opsAccountHealth{ID: account.ID, Name: account.Name, Email: account.Email, GroupID: account.GroupID, GroupName: groupName, Platform: account.Platform, Status: account.Status, Health: health, ErrorCount: account.ErrorCount, CooldownUntil: account.CooldownUntil, LastUsedAt: account.LastUsedAt, LastError: account.LastError}
+		item := opsAccountHealth{ID: account.ID, Name: account.Name, Email: account.Email, GroupID: account.GroupID, GroupName: strings.Join(groupNames, "、"), Platform: account.Platform, Status: account.Status, Health: health, ErrorCount: account.ErrorCount, CooldownUntil: account.CooldownUntil, LastUsedAt: account.LastUsedAt, LastError: account.LastError}
 		if probe != nil {
 			checked := probe.CheckedAt
 			item.ProbeState, item.ProbeMode, item.ProbeStatus, item.ProbeLatency, item.ProbeChecked, item.ProbeError = probe.State, probe.Mode, probe.StatusCode, probe.LatencyMs, &checked, probe.ErrorMessage

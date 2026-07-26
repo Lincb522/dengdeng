@@ -113,6 +113,7 @@ type Scheduler struct {
 	sessions              map[string]schedulerSessionBinding
 	modelFailures         map[schedulerAccountModelKey]schedulerModelFailure
 	diagnostics           map[int64]SchedulerDiagnostics
+	accountInFlight       map[int64]int
 	snapshotTTL           time.Duration
 	lastPersistedInterval time.Duration
 	sessionTTL            time.Duration
@@ -128,9 +129,10 @@ func NewScheduler(db *gorm.DB) *Scheduler {
 	return &Scheduler{
 		db: db, groups: make(map[int64]*schedulerGroupSnapshot, defaultSchedulerSnapshotCapacity),
 		lastPersisted: make(map[int64]time.Time), sessions: make(map[string]schedulerSessionBinding),
-		modelFailures: make(map[schedulerAccountModelKey]schedulerModelFailure),
-		diagnostics:   make(map[int64]SchedulerDiagnostics),
-		snapshotTTL:   defaultSchedulerSnapshotTTL, lastPersistedInterval: defaultLastUsedPersistInterval,
+		modelFailures:   make(map[schedulerAccountModelKey]schedulerModelFailure),
+		diagnostics:     make(map[int64]SchedulerDiagnostics),
+		accountInFlight: make(map[int64]int),
+		snapshotTTL:     defaultSchedulerSnapshotTTL, lastPersistedInterval: defaultLastUsedPersistInterval,
 		sessionTTL: defaultSessionAffinityTTL, sessionCapacity: defaultSessionAffinityCapacity,
 		modelFailureCapacity: defaultModelFailureCapacity, now: time.Now,
 		slotNotify: make(chan struct{}),
@@ -262,7 +264,13 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	}
 	delete(s.diagnostics, groupID)
 	selected.lastSelected = now
-	selected.inFlight++
+	s.accountInFlight[selected.account.ID]++
+	selected.inFlight = s.accountInFlight[selected.account.ID]
+	for _, group := range s.groups {
+		if entry := group.accounts[selected.account.ID]; entry != nil {
+			entry.inFlight = selected.inFlight
+		}
+	}
 	account := selected.account
 	account.LastUsedAt = timePointer(now)
 	if sessionKey != "" {
@@ -378,7 +386,7 @@ func cloneReasonCounts(source map[string]int) map[string]int {
 }
 
 func (s *Scheduler) entryHasConcurrencySlot(entry *schedulerAccountEntry) bool {
-	return entry != nil && (entry.account.Concurrency <= 0 || entry.inFlight < entry.account.Concurrency)
+	return entry != nil && (entry.account.Concurrency <= 0 || s.accountInFlight[entry.account.ID] < entry.account.Concurrency)
 }
 
 func schedulerEntryBefore(candidate, current *schedulerAccountEntry, now time.Time) bool {
@@ -504,7 +512,7 @@ func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnaps
 
 	var accounts []model.UpstreamAccount
 	err := s.db.Preload("Proxy").Preload("Quota").Preload("CodexQuota").
-		Where("group_id = ?", groupID).
+		Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", groupID, groupID).
 		Find(&accounts).Error
 	if err != nil {
 		return nil, err
@@ -537,6 +545,9 @@ func (s *Scheduler) snapshot(groupID int64, now time.Time) (*schedulerGroupSnaps
 				}
 			}
 		}
+		for id, entry := range fresh.accounts {
+			entry.inFlight = s.accountInFlight[id]
+		}
 		s.groups[groupID] = fresh
 	}
 	s.mu.Unlock()
@@ -551,10 +562,17 @@ func (s *Scheduler) Release(accountID int64) {
 	}
 	released := false
 	s.mu.Lock()
+	if s.accountInFlight[accountID] > 0 {
+		s.accountInFlight[accountID]--
+		released = true
+	}
+	current := s.accountInFlight[accountID]
+	if current == 0 {
+		delete(s.accountInFlight, accountID)
+	}
 	for _, group := range s.groups {
-		if entry := group.accounts[accountID]; entry != nil && entry.inFlight > 0 {
-			entry.inFlight--
-			released = true
+		if entry := group.accounts[accountID]; entry != nil {
+			entry.inFlight = current
 		}
 	}
 	s.mu.Unlock()

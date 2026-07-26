@@ -112,7 +112,7 @@ async function save() {
 }
 
 async function remove(g: Group) {
-  if (!confirm(`确认删除分组「${g.name}」?其下上游账号将一并删除。`)) return
+  if (!confirm(`确认删除分组「${g.name}」？同时属于其他分组的账号会保留，仅属于该分组的账号会一并删除。`)) return
   await withToast(() => api.delete(`/api/admin/groups/${g.id}`), '已删除')
   await load()
 }

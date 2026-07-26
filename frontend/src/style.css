@@ -1816,7 +1816,8 @@ body.has-app-modal { overflow: hidden; }
   .account-card-meta dt { color: var(--ink-soft); font-size: .66rem; font-weight: 700; }
   .account-card-meta dd { overflow-x: auto; overflow-y: hidden; margin-top: .18rem; color: var(--ink); font-size: .76rem; font-weight: 750; text-overflow: clip; white-space: nowrap; scrollbar-width: thin; }
 	.account-card-group-meta { grid-column: 1 / -1; min-width: 0; }
-	.account-card-group-meta dd { overflow-x: auto; overflow-y: hidden; text-overflow: clip; }
+	.account-card-group-meta dd { overflow: visible; text-overflow: clip; }
+	.account-card-group-list { display: flex; min-width: 0; flex-wrap: wrap; gap: .28rem; }
   .account-card-quota { margin-top: .95rem; padding-top: .9rem; border-top: 1px solid var(--line); }
   .account-quota-head { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
   .account-card-quota strong { color: var(--ink); font-size: .76rem; font-weight: 800; }
@@ -2180,6 +2181,22 @@ body.has-app-modal { overflow: hidden; }
   .oauth-primary-path strong { color: var(--ink); font-size: .75rem; font-weight: 800; }
   .oauth-primary-path p { color: var(--ink-soft); font-size: .64rem; line-height: 1.45; }
   .oauth-primary-path .btn { flex: 0 0 auto; }
+  .account-group-picker-head { display: flex; min-width: 0; align-items: end; justify-content: space-between; gap: .6rem; }
+  .account-group-picker-head > span { display: grid; gap: .16rem; }
+  .account-group-picker-head strong { color: var(--ink); font-size: .72rem; font-weight: 780; }
+  .account-group-picker-head small { color: var(--ink-soft); font-size: .62rem; }
+  .account-group-picker-head button { color: var(--accent); font-size: .66rem; font-weight: 780; white-space: nowrap; }
+  .account-group-picker { display: flex; min-width: 0; flex-wrap: wrap; gap: .38rem; }
+  .account-group-picker > label { display: flex; min-width: 7.5rem; flex: 1 1 8.5rem; align-items: center; gap: .45rem; padding: .52rem .58rem; border: 1px solid var(--line); border-radius: .58rem; background: var(--surface); cursor: pointer; transition: border-color .16s ease, background .16s ease; }
+  .account-group-picker > label:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+  .account-group-picker > label.is-selected { border-color: color-mix(in srgb, var(--accent) 58%, var(--line)); background: var(--accent-soft); }
+  .account-group-picker > label.is-disabled { opacity: .65; }
+  .account-group-picker input { width: .9rem; height: .9rem; flex: 0 0 auto; accent-color: var(--accent); }
+  .account-group-picker span { display: grid; min-width: 0; gap: .08rem; }
+  .account-group-picker strong { overflow: hidden; color: var(--ink); font-size: .68rem; font-weight: 760; text-overflow: ellipsis; white-space: nowrap; }
+  .account-group-picker small { color: var(--ink-soft); font-size: .58rem; }
+  .account-inline-group { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .55rem; padding: .62rem; border-radius: .62rem; background: var(--surface-muted); }
+  .account-inline-group .btn { min-height: 2.35rem; white-space: nowrap; }
   .oauth-code-completion { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .65rem; padding: .72rem .78rem; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: .65rem; background: color-mix(in srgb, var(--accent-soft) 48%, var(--surface)); }
   .oauth-code-completion .modal-field { min-width: 0; }
   .oauth-code-completion .btn { min-height: 2.35rem; white-space: nowrap; }
@@ -2234,6 +2251,8 @@ body.has-app-modal { overflow: hidden; }
 	.oauth-primary-path .btn { width: 100%; }
 	.oauth-code-completion { grid-template-columns: minmax(0, 1fr); }
 	.oauth-code-completion .btn { width: 100%; }
+	.account-inline-group { grid-template-columns: minmax(0, 1fr); }
+	.account-inline-group .btn { width: 100%; }
   }
   .ops-loading-state { display: grid; min-height: 24rem; place-items: center; color: var(--ink-soft); font-size: .84rem; }
   .usage-page-head { margin-bottom: 1rem; }

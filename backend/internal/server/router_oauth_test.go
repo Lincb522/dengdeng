@@ -184,6 +184,10 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 	if err := db.Create(&group).Error; err != nil {
 		t.Fatalf("create group: %v", err)
 	}
+	secondaryGroup := model.Group{Name: "claude-secondary", Platform: model.PlatformAnthropic, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&secondaryGroup).Error; err != nil {
+		t.Fatalf("create secondary group: %v", err)
+	}
 	router := NewRouter(cfg, db)
 
 	settings, err := service.NewSystemSettingsService(db, cfg).Get()
@@ -203,7 +207,7 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 		t.Fatalf("decode login: %v, body=%s", err, login.Body.String())
 	}
 
-	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/anthropic/start", map[string]any{"group_id": group.ID, "name": "claude-login"}, loginBody.Data.Token)
+	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/anthropic/start", map[string]any{"group_ids": []int64{group.ID, secondaryGroup.ID}, "name": "claude-login"}, loginBody.Data.Token)
 	if start.Code != http.StatusOK {
 		t.Fatalf("oauth start status=%d body=%s", start.Code, start.Body.String())
 	}
@@ -241,6 +245,10 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 	}
 	if account.Name != "claude-login" || account.AuthType != model.AuthOAuth || account.Email != "claude@example.test" || account.AccountID != "account-123" || string(account.AccessToken) != "claude-access" || string(account.RefreshToken) != "claude-refresh" {
 		t.Fatalf("unexpected account: %#v", account)
+	}
+	var bindings []model.UpstreamAccountGroup
+	if err := db.Where("upstream_account_id = ?", account.ID).Order("group_id ASC").Find(&bindings).Error; err != nil || len(bindings) != 2 || bindings[0].GroupID != group.ID || bindings[1].GroupID != secondaryGroup.ID {
+		t.Fatalf("oauth group bindings=%#v err=%v", bindings, err)
 	}
 }
 

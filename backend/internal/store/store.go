@@ -49,7 +49,7 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	}
 
 	if err := db.AutoMigrate(
-		&model.User{}, &model.UserOAuthIdentity{}, &model.UserOAuthFlow{}, &model.UserProviderDefaultGrant{}, &model.UserPlatformQuota{}, &model.UserGroupSubscription{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
+		&model.User{}, &model.UserOAuthIdentity{}, &model.UserOAuthFlow{}, &model.UserProviderDefaultGrant{}, &model.UserPlatformQuota{}, &model.UserGroupSubscription{}, &model.Group{}, &model.UserGroupRate{}, &model.APIKey{}, &model.APIKeyGroup{}, &model.ReferralCode{}, &model.ReferralBinding{}, &model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutAccount{}, &model.ReferralPayoutConfig{}, &model.ReferralPayout{}, &model.Proxy{}, &model.UpstreamAccount{}, &model.UpstreamAccountGroup{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{},
 		&model.AccountProbe{}, &model.AlertRule{}, &model.AlertEvent{},
 		&model.ModelPrice{}, &model.ModelConfig{}, &model.UsageLog{}, &model.RedeemCode{}, &model.EmailVerification{}, &model.Setting{}, &model.AuditLog{},
 		&model.OpsSystemMetric{}, &model.OpsMetricAggregate{}, &model.OpsErrorLog{}, &model.OpsJobHeartbeat{}, &model.OpsAlertSilence{}, &model.OpsSystemLog{},
@@ -104,6 +104,20 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	if len(legacyKeyGroups) > 0 {
 		if err := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(legacyKeyGroups, 500).Error; err != nil {
 			return nil, fmt.Errorf("backfill key groups: %w", err)
+		}
+	}
+	// Every existing upstream credential starts with its legacy primary group as
+	// a membership. The backfill is idempotent and keeps rollback builds usable.
+	var legacyAccountGroups []model.UpstreamAccountGroup
+	if err := db.Model(&model.UpstreamAccount{}).
+		Select("id AS upstream_account_id, group_id AS group_id").
+		Where("group_id > 0").
+		Scan(&legacyAccountGroups).Error; err != nil {
+		return nil, fmt.Errorf("load legacy account groups: %w", err)
+	}
+	if len(legacyAccountGroups) > 0 {
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(legacyAccountGroups, 500).Error; err != nil {
+			return nil, fmt.Errorf("backfill account groups: %w", err)
 		}
 	}
 	if err := normalizeSQLiteUsageTimes(db, cfg); err != nil {

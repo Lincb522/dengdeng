@@ -52,6 +52,37 @@ func TestSchedulerEnforcesAccountConcurrencyAndWakesWaiter(t *testing.T) {
 	}
 }
 
+func TestSchedulerSharedAccountEnforcesConcurrencyAcrossGroups(t *testing.T) {
+	db := newSchedulerTestDB(t)
+	account := model.UpstreamAccount{GroupID: 1, Name: "shared", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 10, Concurrency: 1, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	bindings := []model.UpstreamAccountGroup{
+		{UpstreamAccountID: account.ID, GroupID: 1},
+		{UpstreamAccountID: account.ID, GroupID: 2},
+	}
+	if err := db.Create(&bindings).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	scheduler := NewScheduler(db)
+	scheduler.lastPersisted[account.ID] = time.Now()
+	first, err := scheduler.Pick(1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scheduler.Pick(2, nil); !errors.Is(err, ErrAccountConcurrencyBusy) {
+		t.Fatalf("second group bypassed shared concurrency: %v", err)
+	}
+	scheduler.Release(first.ID)
+	second, err := scheduler.Pick(2, nil)
+	if err != nil || second.ID != account.ID {
+		t.Fatalf("second group pick = %#v, %v", second, err)
+	}
+	scheduler.Release(second.ID)
+}
+
 func TestSchedulerAccountQueueIsBounded(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	account := model.UpstreamAccount{GroupID: 1, Name: "one-slot", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 10, Concurrency: 1, Status: model.StatusActive}

@@ -333,9 +333,10 @@ func (h *AdminHandler) ListGroups(c *gin.Context) {
 		Alive   int64
 	}
 	var rows []row
-	h.db.Model(&model.UpstreamAccount{}).
-		Select("group_id AS group_id, COUNT(*) AS total, SUM(CASE WHEN status = 'active' AND (cooldown_until IS NULL OR cooldown_until < ?) THEN 1 ELSE 0 END) AS alive", time.Now()).
-		Group("group_id").Scan(&rows)
+	h.db.Table("upstream_account_groups account_membership").
+		Select("account_membership.group_id AS group_id, COUNT(DISTINCT upstream_accounts.id) AS total, SUM(CASE WHEN upstream_accounts.status = 'active' AND (upstream_accounts.cooldown_until IS NULL OR upstream_accounts.cooldown_until < ?) THEN 1 ELSE 0 END) AS alive", time.Now()).
+		Joins("JOIN upstream_accounts ON upstream_accounts.id = account_membership.upstream_account_id").
+		Group("account_membership.group_id").Scan(&rows)
 	counts := map[int64]row{}
 	for _, r := range rows {
 		counts[r.GroupID] = r
@@ -593,9 +594,37 @@ func (h *AdminHandler) DeleteGroup(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "group still has API keys bound to it")
 		return
 	}
-	h.db.Where("group_id = ?", id).Delete(&model.UpstreamAccount{})
-	h.db.Where("group_id = ?", id).Delete(&model.UserGroupRate{})
-	h.db.Delete(&model.Group{}, id)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		var memberships []model.UpstreamAccountGroup
+		if err := tx.Where("group_id = ?", id).Find(&memberships).Error; err != nil {
+			return err
+		}
+		for _, membership := range memberships {
+			var alternatives []model.UpstreamAccountGroup
+			if err := tx.Where("upstream_account_id = ? AND group_id <> ?", membership.UpstreamAccountID, id).Order("group_id ASC").Find(&alternatives).Error; err != nil {
+				return err
+			}
+			if len(alternatives) == 0 {
+				if err := tx.Delete(&model.UpstreamAccount{}, membership.UpstreamAccountID).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err := tx.Model(&model.UpstreamAccount{}).Where("id = ?", membership.UpstreamAccountID).Update("group_id", alternatives[0].GroupID).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("group_id = ?", id).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("group_id = ?", id).Delete(&model.UserGroupRate{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.Group{}, id).Error
+	}); err != nil {
+		util.Fail(c, http.StatusInternalServerError, "delete group failed")
+		return
+	}
 	util.OK(c, gin.H{"deleted": true})
 }
 
@@ -657,7 +686,7 @@ func parseAccountListQuery(c *gin.Context) (accountListQuery, error) {
 
 func applyAccountListFilters(q *gorm.DB, query accountListQuery) *gorm.DB {
 	if query.GroupID > 0 {
-		q = q.Where("upstream_accounts.group_id = ?", query.GroupID)
+		q = q.Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", query.GroupID, query.GroupID)
 	}
 	if query.Platform != "" {
 		q = q.Where("upstream_accounts.platform = ?", query.Platform)
@@ -719,21 +748,27 @@ func (h *AdminHandler) ListAccounts(c *gin.Context) {
 			return
 		}
 		var accounts []model.UpstreamAccount
-		list := applyAccountListFilters(h.db.Model(&model.UpstreamAccount{}).Preload("Group").Preload("Proxy").Preload("Quota").Preload("CodexQuota"), query)
+		list := applyAccountListFilters(h.db.Model(&model.UpstreamAccount{}).Preload("Group").Preload("Groups").Preload("Proxy").Preload("Quota").Preload("CodexQuota"), query)
 		if err := applyAccountListOrder(list, query).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&accounts).Error; err != nil {
 			util.Fail(c, http.StatusInternalServerError, "query accounts failed")
 			return
+		}
+		for index := range accounts {
+			hydrateUpstreamAccountGroups(&accounts[index])
 		}
 		util.OK(c, gin.H{"items": accounts, "total": total, "page": query.Page, "size": query.Size})
 		return
 	}
 
 	var accounts []model.UpstreamAccount
-	q := h.db.Preload("Group").Preload("Proxy").Preload("Quota").Preload("CodexQuota")
+	q := h.db.Preload("Group").Preload("Groups").Preload("Proxy").Preload("Quota").Preload("CodexQuota")
 	if gid := c.Query("group_id"); gid != "" {
-		q = q.Where("group_id = ?", gid)
+		q = q.Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", gid, gid)
 	}
 	q.Order("CASE WHEN display_order = 0 THEN 1 ELSE 0 END ASC").Order("display_order ASC").Order("id DESC").Find(&accounts)
+	for index := range accounts {
+		hydrateUpstreamAccountGroups(&accounts[index])
+	}
 	util.OK(c, accounts)
 }
 
@@ -881,10 +916,11 @@ func (h *AdminHandler) reorderAccountByPlacement(c *gin.Context, req reorderAcco
 
 type accountReq struct {
 	GroupID      int64      `json:"group_id"`
+	GroupIDs     *[]int64   `json:"group_ids"`
 	ProxyID      *int64     `json:"proxy_id"`
 	Name         string     `json:"name"`
-	BaseURL      string     `json:"base_url"`
-	QuotaURL     string     `json:"quota_url"`
+	BaseURL      *string    `json:"base_url"`
+	QuotaURL     *string    `json:"quota_url"`
 	AuthType     string     `json:"auth_type"`
 	APIKey       string     `json:"api_key"`
 	AccessToken  string     `json:"access_token"`
@@ -897,10 +933,133 @@ type accountReq struct {
 	Status       string     `json:"status"`
 }
 
+const maxUpstreamAccountGroups = 32
+
+func normalizeAccountGroupIDs(primary int64, groupIDs *[]int64) []int64 {
+	values := make([]int64, 0, maxUpstreamAccountGroups)
+	if groupIDs != nil {
+		values = append(values, (*groupIDs)...)
+	} else if primary > 0 {
+		values = append(values, primary)
+	}
+	seen := make(map[int64]struct{}, len(values))
+	result := make([]int64, 0, len(values))
+	for _, id := range values {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		result = append(result, id)
+	}
+	return result
+}
+
+func trimOptionalString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func (h *AdminHandler) resolveAccountGroups(ids []int64, platform string) ([]model.Group, error) {
+	if len(ids) == 0 || len(ids) > maxUpstreamAccountGroups {
+		return nil, fmt.Errorf("select between 1 and %d groups", maxUpstreamAccountGroups)
+	}
+	var found []model.Group
+	if err := h.db.Where("id IN ?", ids).Find(&found).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]model.Group, len(found))
+	for _, group := range found {
+		byID[group.ID] = group
+	}
+	ordered := make([]model.Group, 0, len(ids))
+	for _, id := range ids {
+		group, exists := byID[id]
+		if !exists {
+			return nil, fmt.Errorf("group not found")
+		}
+		if platform != "" && group.Platform != platform {
+			return nil, fmt.Errorf("all account groups must use platform %s", platform)
+		}
+		if platform == "" {
+			platform = group.Platform
+		}
+		ordered = append(ordered, group)
+	}
+	return ordered, nil
+}
+
+func accountGroupBindings(accountID int64, groups []model.Group) []model.UpstreamAccountGroup {
+	bindings := make([]model.UpstreamAccountGroup, 0, len(groups))
+	for _, group := range groups {
+		bindings = append(bindings, model.UpstreamAccountGroup{UpstreamAccountID: accountID, GroupID: group.ID})
+	}
+	return bindings
+}
+
+func replaceUpstreamAccountGroups(tx *gorm.DB, account *model.UpstreamAccount, groups []model.Group) error {
+	if account == nil || len(groups) == 0 {
+		return fmt.Errorf("at least one group is required")
+	}
+	if err := tx.Where("upstream_account_id = ?", account.ID).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Create(accountGroupBindings(account.ID, groups)).Error; err != nil {
+		return err
+	}
+	account.GroupID = groups[0].ID
+	account.Platform = groups[0].Platform
+	return tx.Model(account).Updates(map[string]any{"group_id": account.GroupID, "platform": account.Platform}).Error
+}
+
+func appendUpstreamAccountGroups(tx *gorm.DB, accountID int64, groups []model.Group) error {
+	for _, group := range groups {
+		binding := model.UpstreamAccountGroup{UpstreamAccountID: accountID, GroupID: group.ID}
+		if err := tx.Where("upstream_account_id = ? AND group_id = ?", accountID, group.ID).FirstOrCreate(&binding).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func hydrateUpstreamAccountGroups(account *model.UpstreamAccount) {
+	if account == nil {
+		return
+	}
+	ordered := make([]model.Group, 0, len(account.Groups)+1)
+	seen := make(map[int64]struct{}, len(account.Groups)+1)
+	if account.Group != nil && account.Group.ID > 0 {
+		ordered = append(ordered, *account.Group)
+		seen[account.Group.ID] = struct{}{}
+	}
+	for _, group := range account.Groups {
+		if _, exists := seen[group.ID]; exists {
+			continue
+		}
+		ordered = append(ordered, group)
+		seen[group.ID] = struct{}{}
+	}
+	account.Groups = ordered
+	account.GroupIDs = make([]int64, 0, len(ordered))
+	for _, group := range ordered {
+		account.GroupIDs = append(account.GroupIDs, group.ID)
+	}
+}
+
 func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	var req accountReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == 0 || req.Name == "" {
-		util.Fail(c, http.StatusBadRequest, "group_id and name are required")
+	if err := c.ShouldBindJSON(&req); err != nil || req.Name == "" {
+		util.Fail(c, http.StatusBadRequest, "group_ids and name are required")
+		return
+	}
+	groupIDs := normalizeAccountGroupIDs(req.GroupID, req.GroupIDs)
+	groups, err := h.resolveAccountGroups(groupIDs, "")
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	authType := req.AuthType
@@ -923,11 +1082,6 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "account concurrency must be between 0 and 10000")
 		return
 	}
-	var group model.Group
-	if err := h.db.First(&group, req.GroupID).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "group not found")
-		return
-	}
 	proxyID := int64(0)
 	if req.ProxyID != nil {
 		proxyID = *req.ProxyID
@@ -939,8 +1093,8 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	acc := model.UpstreamAccount{
-		GroupID: group.ID, ProxyID: proxyID, Name: req.Name, Platform: group.Platform,
-		BaseURL: strings.TrimSpace(req.BaseURL), QuotaURL: strings.TrimSpace(req.QuotaURL), AuthType: authType,
+		GroupID: groups[0].ID, ProxyID: proxyID, Name: req.Name, Platform: groups[0].Platform,
+		BaseURL: trimOptionalString(req.BaseURL), QuotaURL: trimOptionalString(req.QuotaURL), AuthType: authType,
 		APIKey:       crypto.EncryptedString(req.APIKey),
 		AccessToken:  crypto.EncryptedString(req.AccessToken),
 		RefreshToken: crypto.EncryptedString(req.RefreshToken),
@@ -953,11 +1107,18 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 	if req.Concurrency != nil {
 		acc.Concurrency = *req.Concurrency
 	}
-	if err := h.db.Create(&acc).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&acc).Error; err != nil {
+			return err
+		}
+		return tx.Create(accountGroupBindings(acc.ID, groups)).Error
+	}); err != nil {
 		util.Fail(c, http.StatusInternalServerError, "create account failed")
 		return
 	}
-	acc.Group = &group
+	acc.Group = &groups[0]
+	acc.Groups = groups
+	acc.GroupIDs = groupIDs
 	if proxyID > 0 {
 		var proxy model.Proxy
 		if h.db.First(&proxy, proxyID).Error == nil {
@@ -987,7 +1148,23 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "import or create a separate credential to replace an Agent Identity account")
 		return
 	}
-	updates := map[string]any{"base_url": strings.TrimSpace(req.BaseURL), "quota_url": strings.TrimSpace(req.QuotaURL)}
+	var nextGroups []model.Group
+	if req.GroupIDs != nil || req.GroupID > 0 {
+		groupIDs := normalizeAccountGroupIDs(req.GroupID, req.GroupIDs)
+		var err error
+		nextGroups, err = h.resolveAccountGroups(groupIDs, acc.Platform)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	updates := map[string]any{}
+	if req.BaseURL != nil {
+		updates["base_url"] = trimOptionalString(req.BaseURL)
+	}
+	if req.QuotaURL != nil {
+		updates["quota_url"] = trimOptionalString(req.QuotaURL)
+	}
 	if req.Name != "" {
 		updates["name"] = req.Name
 	}
@@ -1038,29 +1215,42 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 			updates["last_error"] = ""
 		}
 	}
-	h.db.Model(&acc).Updates(updates)
-	h.db.Preload("Group").Preload("Proxy").First(&acc, acc.ID)
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&acc).Updates(updates).Error; err != nil {
+			return err
+		}
+		if len(nextGroups) > 0 {
+			return replaceUpstreamAccountGroups(tx, &acc, nextGroups)
+		}
+		return nil
+	}); err != nil {
+		util.Fail(c, http.StatusInternalServerError, "update account failed")
+		return
+	}
+	h.db.Preload("Group").Preload("Groups").Preload("Proxy").First(&acc, acc.ID)
+	hydrateUpstreamAccountGroups(&acc)
 	util.OK(c, acc)
 }
 
 type importReq struct {
-	GroupID     int64  `json:"group_id"`
-	ProxyID     int64  `json:"proxy_id"`
-	Name        string `json:"name"`
-	Format      string `json:"format"` // sub2api | cpa | auto
-	Data        string `json:"data"`   // raw export JSON
-	BaseURL     string `json:"base_url"`
-	Priority    *int   `json:"priority"`
-	Concurrency *int   `json:"concurrency"`
-	SkipExpired bool   `json:"skip_expired"`
+	GroupID     int64    `json:"group_id"`
+	GroupIDs    *[]int64 `json:"group_ids"`
+	ProxyID     int64    `json:"proxy_id"`
+	Name        string   `json:"name"`
+	Format      string   `json:"format"` // sub2api | cpa | auto
+	Data        string   `json:"data"`   // raw export JSON
+	BaseURL     string   `json:"base_url"`
+	Priority    *int     `json:"priority"`
+	Concurrency *int     `json:"concurrency"`
+	SkipExpired bool     `json:"skip_expired"`
 }
 
 // ImportAccounts bulk-creates upstream accounts from a sub2api or cpa export.
 // Accounts whose platform differs from the target group are skipped.
 func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	var req importReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == 0 || req.Data == "" {
-		util.Fail(c, http.StatusBadRequest, "group_id and data are required")
+	if err := c.ShouldBindJSON(&req); err != nil || req.Data == "" {
+		util.Fail(c, http.StatusBadRequest, "group_ids and data are required")
 		return
 	}
 	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
@@ -1071,11 +1261,12 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
-	var group model.Group
-	if err := h.db.First(&group, req.GroupID).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "group not found")
+	groups, err := h.resolveAccountGroups(normalizeAccountGroupIDs(req.GroupID, req.GroupIDs), "")
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	group := groups[0]
 
 	parsed, err := importer.Parse(req.Format, []byte(req.Data))
 	if err != nil {
@@ -1148,7 +1339,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		}
 		extra, _ := model.EncodeExtra(p.Extra)
 		if p.AuthType == model.AuthAgentIdentity {
-			existing, findErr := h.findAgentIdentityImportTarget(group.ID, p.AccountID)
+			existing, findErr := h.findAgentIdentityImportTarget(p.AccountID)
 			if findErr != nil && findErr != gorm.ErrRecordNotFound {
 				skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 				continue
@@ -1184,7 +1375,12 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 				} else if req.Concurrency != nil {
 					updates["concurrency"] = *req.Concurrency
 				}
-				if err := h.db.Model(existing).Updates(updates).Error; err != nil {
+				if err := h.db.Transaction(func(tx *gorm.DB) error {
+					if err := tx.Model(existing).Updates(updates).Error; err != nil {
+						return err
+					}
+					return appendUpstreamAccountGroups(tx, existing.ID, groups)
+				}); err != nil {
 					skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 					continue
 				}
@@ -1193,7 +1389,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			}
 		}
 		if p.AuthType == model.AuthOAuth && strings.TrimSpace(p.AccountID) != "" {
-			existing, findErr := h.findOAuthImportTarget(group.ID, group.Platform, p.AccountID)
+			existing, findErr := h.findOAuthImportTarget(group.Platform, p.AccountID)
 			if findErr != nil && findErr != gorm.ErrRecordNotFound {
 				skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 				continue
@@ -1238,7 +1434,12 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 				} else if req.Concurrency != nil {
 					updates["concurrency"] = *req.Concurrency
 				}
-				if err := h.db.Model(existing).Updates(updates).Error; err != nil {
+				if err := h.db.Transaction(func(tx *gorm.DB) error {
+					if err := tx.Model(existing).Updates(updates).Error; err != nil {
+						return err
+					}
+					return appendUpstreamAccountGroups(tx, existing.ID, groups)
+				}); err != nil {
 					skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 					continue
 				}
@@ -1268,7 +1469,12 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		} else if req.Concurrency != nil {
 			acc.Concurrency = *req.Concurrency
 		}
-		if err := h.db.Create(&acc).Error; err != nil {
+		if err := h.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&acc).Error; err != nil {
+				return err
+			}
+			return tx.Create(accountGroupBindings(acc.ID, groups)).Error
+		}); err != nil {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "db error"})
 			continue
 		}
@@ -1292,15 +1498,15 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 	})
 }
 
-func (h *AdminHandler) findOAuthImportTarget(groupID int64, platform, accountID string) (*model.UpstreamAccount, error) {
+func (h *AdminHandler) findOAuthImportTarget(platform, accountID string) (*model.UpstreamAccount, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
 	var existing model.UpstreamAccount
 	err := h.db.Where(
-		"group_id = ? AND platform = ? AND auth_type = ? AND account_id = ?",
-		groupID, platform, model.AuthOAuth, accountID,
+		"platform = ? AND auth_type = ? AND account_id = ?",
+		platform, model.AuthOAuth, accountID,
 	).Order("id ASC").First(&existing).Error
 	if err != nil {
 		return nil, err
@@ -1312,15 +1518,15 @@ func (h *AdminHandler) findOAuthImportTarget(groupID int64, platform, accountID 
 // durable runtime per ChatGPT account. Re-importing the same account rotates
 // the runtime/private key in place; different Team accounts remain isolated
 // even when they belong to the same user.
-func (h *AdminHandler) findAgentIdentityImportTarget(groupID int64, accountID string) (*model.UpstreamAccount, error) {
+func (h *AdminHandler) findAgentIdentityImportTarget(accountID string) (*model.UpstreamAccount, error) {
 	accountID = strings.TrimSpace(accountID)
 	if accountID == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
 	var existing model.UpstreamAccount
 	err := h.db.Where(
-		"group_id = ? AND platform = ? AND account_id = ?",
-		groupID, model.PlatformOpenAI, accountID,
+		"platform = ? AND account_id = ?",
+		model.PlatformOpenAI, accountID,
 	).Order("id ASC").First(&existing).Error
 	if err != nil {
 		return nil, err
@@ -1350,11 +1556,12 @@ func firstNonEmpty(vals ...string) string {
 // ---- browser OAuth sign-in ----
 
 type oauthStartReq struct {
-	GroupID     int64  `json:"group_id"`
-	Name        string `json:"name"`
-	BaseURL     string `json:"base_url"`
-	Priority    *int   `json:"priority"`
-	Concurrency *int   `json:"concurrency"`
+	GroupID     int64    `json:"group_id"`
+	GroupIDs    *[]int64 `json:"group_ids"`
+	Name        string   `json:"name"`
+	BaseURL     string   `json:"base_url"`
+	Priority    *int     `json:"priority"`
+	Concurrency *int     `json:"concurrency"`
 }
 
 // StartOAuthLogin creates a short-lived PKCE flow. The frontend opens the
@@ -1367,17 +1574,14 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 		return
 	}
 	var req oauthStartReq
-	if err := c.ShouldBindJSON(&req); err != nil || req.GroupID == 0 {
-		util.Fail(c, http.StatusBadRequest, "group_id is required")
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.Fail(c, http.StatusBadRequest, "group_ids are required")
 		return
 	}
-	var group model.Group
-	if err := h.db.First(&group, req.GroupID).Error; err != nil {
-		util.Fail(c, http.StatusNotFound, "group not found")
-		return
-	}
-	if group.Platform != platform {
-		util.Fail(c, http.StatusBadRequest, "selected group does not match OAuth platform")
+	groupIDs := normalizeAccountGroupIDs(req.GroupID, req.GroupIDs)
+	groups, err := h.resolveAccountGroups(groupIDs, platform)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.Concurrency != nil && (*req.Concurrency < 0 || *req.Concurrency > 10000) {
@@ -1398,7 +1602,7 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 		concurrency = *req.Concurrency
 	}
 	authorizeURL, err := h.oauth.BeginLoginWithCompletion(platform, callbackURL, completionURL, oauth.LoginIntent{
-		GroupID: group.ID, Name: trimAccountName(req.Name), BaseURL: strings.TrimSpace(req.BaseURL), Priority: priority, Concurrency: concurrency,
+		GroupID: groups[0].ID, GroupIDs: groupIDs, Name: trimAccountName(req.Name), BaseURL: strings.TrimSpace(req.BaseURL), Priority: priority, Concurrency: concurrency,
 	})
 	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "start oauth login failed")
@@ -1415,8 +1619,12 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 }
 
 func (h *AdminHandler) persistOAuthAccount(platform string, result *oauth.LoginResult) (*model.UpstreamAccount, error) {
-	var group model.Group
-	if err := h.db.First(&group, result.Intent.GroupID).Error; err != nil || group.Platform != platform {
+	var requestedGroupIDs *[]int64
+	if len(result.Intent.GroupIDs) > 0 {
+		requestedGroupIDs = &result.Intent.GroupIDs
+	}
+	groups, err := h.resolveAccountGroups(normalizeAccountGroupIDs(result.Intent.GroupID, requestedGroupIDs), platform)
+	if err != nil {
 		return nil, errors.New("target group is unavailable or changed platform")
 	}
 	identity := oauth.IdentityFromIDToken(result.IDToken)
@@ -1427,6 +1635,55 @@ func (h *AdminHandler) persistOAuthAccount(platform string, result *oauth.LoginR
 	accountID := identity.AccountID
 	if accountID == "" {
 		accountID = result.AccountID
+	}
+	if accountID != "" {
+		var existing model.UpstreamAccount
+		findErr := h.db.Where("platform = ? AND auth_type = ? AND account_id = ?", platform, model.AuthOAuth, accountID).Order("id ASC").First(&existing).Error
+		if findErr == nil {
+			updates := map[string]any{
+				"access_token":   crypto.EncryptedString(result.AccessToken),
+				"email":          firstNonEmpty(email, existing.Email),
+				"status":         model.StatusActive,
+				"error_count":    0,
+				"last_error":     "",
+				"cooldown_until": nil,
+			}
+			if result.ExpiresAt != nil {
+				updates["expires_at"] = result.ExpiresAt
+			}
+			if result.RefreshToken != "" {
+				updates["refresh_token"] = crypto.EncryptedString(result.RefreshToken)
+			}
+			if result.Intent.Name != "" {
+				updates["name"] = trimAccountName(result.Intent.Name)
+			}
+			if result.Intent.BaseURL != "" {
+				updates["base_url"] = result.Intent.BaseURL
+			}
+			extra := existing.DecodeExtra()
+			if result.IDToken != "" {
+				extra["id_token"] = result.IDToken
+				if encoded, encodeErr := model.EncodeExtra(extra); encodeErr == nil {
+					updates["extra"] = encoded
+				}
+			}
+			if err := h.db.Transaction(func(tx *gorm.DB) error {
+				if err := tx.Model(&existing).Updates(updates).Error; err != nil {
+					return err
+				}
+				return appendUpstreamAccountGroups(tx, existing.ID, groups)
+			}); err != nil {
+				return nil, err
+			}
+			if err := h.db.Preload("Group").Preload("Groups").First(&existing, existing.ID).Error; err != nil {
+				return nil, err
+			}
+			hydrateUpstreamAccountGroups(&existing)
+			return &existing, nil
+		}
+		if findErr != gorm.ErrRecordNotFound {
+			return nil, findErr
+		}
 	}
 	name := result.Intent.Name
 	if name == "" {
@@ -1446,15 +1703,23 @@ func (h *AdminHandler) persistOAuthAccount(platform string, result *oauth.LoginR
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	account := model.UpstreamAccount{
-		GroupID: group.ID, Name: name, Platform: platform, BaseURL: result.Intent.BaseURL,
+		GroupID: groups[0].ID, Name: name, Platform: platform, BaseURL: result.Intent.BaseURL,
 		AuthType:    model.AuthOAuth,
 		AccessToken: crypto.EncryptedString(result.AccessToken), RefreshToken: crypto.EncryptedString(result.RefreshToken),
 		ExpiresAt: result.ExpiresAt, Email: email, AccountID: accountID,
 		Extra: encodedExtra, Priority: result.Intent.Priority, Concurrency: result.Intent.Concurrency, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
 	}
-	if err := h.db.Create(&account).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&account).Error; err != nil {
+			return err
+		}
+		return tx.Create(accountGroupBindings(account.ID, groups)).Error
+	}); err != nil {
 		return nil, err
 	}
+	account.Group = &groups[0]
+	account.Groups = groups
+	account.GroupIDs = normalizeAccountGroupIDs(result.Intent.GroupID, requestedGroupIDs)
 	return &account, nil
 }
 
@@ -1544,6 +1809,7 @@ func (h *AdminHandler) oauthCallbackPage(c *gin.Context, status int, message, re
 func (h *AdminHandler) DeleteAccount(c *gin.Context) {
 	var account model.UpstreamAccount
 	if err := h.db.First(&account, c.Param("id")).Error; err == nil {
+		h.db.Where("upstream_account_id = ?", account.ID).Delete(&model.UpstreamAccountGroup{})
 		h.db.Where("account_id = ?", account.ID).Delete(&model.AccountProbe{})
 		h.db.Where("upstream_account_id = ?", account.ID).Delete(&model.AccountQuotaSnapshot{})
 		h.db.Where("upstream_account_id = ?", account.ID).Delete(&model.CodexQuotaSnapshot{})

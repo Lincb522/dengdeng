@@ -14,7 +14,11 @@ function compact(value: string, limit = 22) {
 	return `${normalized.slice(0, limit - 7)}…${normalized.slice(-6)}`
 }
 
-const groupName = computed(() => props.account.group?.name || '未分组')
+const accountGroups = computed(() => {
+	const values = props.account.groups?.length ? props.account.groups : (props.account.group ? [props.account.group] : [])
+	return values.filter((group, index) => values.findIndex((candidate) => candidate.id === group.id) === index)
+})
+const groupName = computed(() => accountGroups.value.map((group) => group.name).join('、') || '未分组')
 const platformName = computed(() => PLATFORM_LABELS[props.account.platform] || props.account.platform || '未知平台')
 const authName = computed(() => ({ api_key: 'API Key', oauth: 'OAuth', agent_identity: 'Agent Identity' } as Record<string, string>)[props.account.auth_type] || props.account.auth_type)
 const summaryName = computed(() => compact(props.account.name || `账号 ${props.account.id}`, 24))
@@ -57,7 +61,7 @@ const proxyName = computed(() => props.account.proxy?.name || '默认出口')
 				<dl class="usage-location-lines account-route-lines">
 					<div><dt>账号名称</dt><dd>{{ account.name || '未记录' }}</dd></div>
 					<div><dt>账号邮箱</dt><dd>{{ account.email || '未记录' }}</dd></div>
-					<div><dt>所属分组</dt><dd>{{ groupName }}</dd></div>
+					<div><dt>可用分组</dt><dd>{{ groupName }}</dd></div>
 					<div><dt>平台</dt><dd>{{ platformName }}</dd></div>
 					<div><dt>凭据类型</dt><dd>{{ authName }}</dd></div>
 					<div><dt>Base URL</dt><dd class="is-code">{{ baseURL }}</dd></div>

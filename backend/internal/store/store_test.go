@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestOpenBackfillsLegacyAPIKeyGroup(t *testing.T) {
+func TestOpenBackfillsLegacyGroupBindings(t *testing.T) {
 	cfg := config.Default()
 	cfg.Database.Path = filepath.Join(t.TempDir(), "legacy-key.db")
 	db, err := Open(cfg)
@@ -31,10 +31,17 @@ func TestOpenBackfillsLegacyAPIKeyGroup(t *testing.T) {
 	if err := db.Create(&key).Error; err != nil {
 		t.Fatal(err)
 	}
+	account := model.UpstreamAccount{GroupID: group.ID, Name: "legacy-upstream", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	var before int64
 	if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ?", key.ID).Count(&before).Error; err != nil || before != 0 {
 		t.Fatalf("unexpected pre-migration bindings=%d err=%v", before, err)
+	}
+	if err := db.Model(&model.UpstreamAccountGroup{}).Where("upstream_account_id = ?", account.ID).Count(&before).Error; err != nil || before != 0 {
+		t.Fatalf("unexpected pre-migration account bindings=%d err=%v", before, err)
 	}
 	closeTestDB(t, db)
 
@@ -49,6 +56,13 @@ func TestOpenBackfillsLegacyAPIKeyGroup(t *testing.T) {
 	}
 	if len(bindings) != 1 || bindings[0].GroupID != group.ID {
 		t.Fatalf("legacy binding not restored: %#v", bindings)
+	}
+	var accountBindings []model.UpstreamAccountGroup
+	if err := db.Where("upstream_account_id = ?", account.ID).Find(&accountBindings).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(accountBindings) != 1 || accountBindings[0].GroupID != group.ID {
+		t.Fatalf("legacy account binding not restored: %#v", accountBindings)
 	}
 }
 

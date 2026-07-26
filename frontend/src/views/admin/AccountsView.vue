@@ -39,9 +39,18 @@ const filterAuthType = ref<'all' | 'api_key' | 'oauth' | 'agent_identity'>('all'
 const draggingAccountID = ref<number | null>(null)
 const accountPresentationStorageKey = 'dengdeng.admin.accounts.presentation.v1'
 const selectedPlatform = ref<AccountPlatform>('openai')
+type AccountEntryMode = 'new' | 'existing'
+const accountEntryMode = ref<AccountEntryMode>('new')
+const accountOptions = ref<UpstreamAccount[]>([])
+const accountOptionsLoading = ref(false)
+const selectedExistingAccountID = ref(0)
+const inlineGroupOpen = ref(false)
+const inlineGroupName = ref('')
+const inlineGroupSaving = ref(false)
 
 const form = ref({
   group_id: 0,
+  group_ids: [] as number[],
   name: '',
   base_url: '',
 	quota_url: '',
@@ -122,6 +131,9 @@ onMounted(() => {
 })
 
 const groupsForSelectedPlatform = computed(() => groups.value.filter((group) => group.platform === selectedPlatform.value))
+const accountOptionsByPlatform = computed(() => (['openai', 'anthropic', 'gemini', 'grok'] as AccountPlatform[])
+  .map((platform) => ({ platform, accounts: accountOptions.value.filter((account) => account.platform === platform) }))
+  .filter((section) => section.accounts.length > 0))
 const platformOfSelectedGroup = computed<AccountPlatform>(
   () => groups.value.find((g) => g.id === form.value.group_id)?.platform ?? selectedPlatform.value,
 )
@@ -157,9 +169,14 @@ function resetOAuthCompletion() {
 function openCreate() {
   const initialGroup = groups.value[0]
   editing.value = null
+  accountEntryMode.value = 'new'
+  selectedExistingAccountID.value = 0
+  inlineGroupOpen.value = false
+  inlineGroupName.value = ''
   selectedPlatform.value = initialGroup?.platform ?? 'openai'
   form.value = {
     group_id: initialGroup?.id ?? 0,
+    group_ids: initialGroup ? [initialGroup.id] : [],
     name: '', base_url: '', quota_url: '', auth_type: 'api_key',
     api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
@@ -172,13 +189,11 @@ function openCreate() {
 }
 
 function openOAuthLogin() {
-  if (!oauthLoginGroup.value) {
-    toast.show('请先创建并启用 OpenAI 或 Claude 分组', 'error')
-    return
-  }
   openCreate()
-  selectedPlatform.value = oauthLoginGroup.value.platform
-  form.value.group_id = oauthLoginGroup.value.id
+  selectedPlatform.value = oauthLoginGroup.value?.platform ?? 'anthropic'
+  const initialGroup = oauthLoginGroup.value || groups.value.find((group) => group.platform === selectedPlatform.value)
+  form.value.group_id = initialGroup?.id ?? 0
+  form.value.group_ids = initialGroup ? [initialGroup.id] : []
   form.value.auth_type = 'oauth'
 }
 
@@ -186,6 +201,7 @@ function changeAccountPlatform() {
   if (editing.value) return
   const firstGroup = groupsForSelectedPlatform.value[0]
   form.value.group_id = firstGroup?.id ?? 0
+  form.value.group_ids = firstGroup ? [firstGroup.id] : []
   if (!oauthAvailable.value && form.value.auth_type === 'oauth') form.value.auth_type = 'api_key'
   if (!agentIdentityAvailable.value && form.value.auth_type === 'agent_identity') form.value.auth_type = 'api_key'
   resetOAuthCompletion()
@@ -193,9 +209,12 @@ function changeAccountPlatform() {
 
 function openEdit(a: UpstreamAccount) {
   editing.value = a
+  accountEntryMode.value = 'new'
+  inlineGroupOpen.value = false
+  inlineGroupName.value = ''
   selectedPlatform.value = (groups.value.find((group) => group.id === a.group_id)?.platform || a.platform) as AccountPlatform
   form.value = {
-    group_id: a.group_id, name: a.name, base_url: a.base_url, quota_url: a.quota_url || '', auth_type: a.auth_type,
+    group_id: a.group_id, group_ids: accountGroupIDs(a), name: a.name, base_url: a.base_url, quota_url: a.quota_url || '', auth_type: a.auth_type,
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
@@ -210,12 +229,122 @@ function closeAccountForm() {
 }
 
 const canSave = computed(() => {
+  if (!form.value.group_ids.length) return false
+  if (!editing.value && accountEntryMode.value === 'existing') return selectedExistingAccountID.value > 0
   if (editing.value) return true
 	if (form.value.auth_type === 'agent_identity') return !!agentIdentityJSON.value.trim()
   if (!form.value.name) return false
   if (form.value.auth_type === 'api_key') return !!form.value.api_key
   return !!(form.value.access_token || form.value.refresh_token)
 })
+
+function accountGroupIDs(account: UpstreamAccount): number[] {
+  const values = account.group_ids?.length
+    ? account.group_ids
+    : (account.groups?.length ? account.groups.map((group) => group.id) : [account.group_id])
+  return [...new Set(values.filter((id) => id > 0))]
+}
+
+function accountGroupNames(account: UpstreamAccount): string {
+  return accountGroupsForDisplay(account).map((group) => group.name).filter(Boolean).join('、') || '未分组'
+}
+
+function accountGroupsForDisplay(account: UpstreamAccount): Group[] {
+  const values = account.groups?.length ? account.groups : (account.group ? [account.group] : [])
+  return values.filter((group, index) => values.findIndex((candidate) => candidate.id === group.id) === index)
+}
+
+function toggleAccountGroup(groupID: number) {
+  const selected = new Set(form.value.group_ids)
+  if (selected.has(groupID)) {
+    if (selected.size === 1) {
+      toast.show('账号至少需要保留一个分组', 'error')
+      return
+    }
+    selected.delete(groupID)
+  } else {
+    if (selected.size >= 32) {
+      toast.show('一个账号最多选择 32 个分组', 'error')
+      return
+    }
+    selected.add(groupID)
+  }
+  form.value.group_ids = groupsForSelectedPlatform.value.filter((group) => selected.has(group.id)).map((group) => group.id)
+  form.value.group_id = form.value.group_ids[0] || 0
+  resetOAuthCompletion()
+}
+
+async function loadAccountOptions() {
+  if (accountOptionsLoading.value) return
+  accountOptionsLoading.value = true
+  try {
+    accountOptions.value = await api.get<UpstreamAccount[]>('/api/admin/accounts')
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '加载已有账号失败', 'error')
+  } finally {
+    accountOptionsLoading.value = false
+  }
+}
+
+function changeAccountEntryMode(mode: AccountEntryMode) {
+  accountEntryMode.value = mode
+  selectedExistingAccountID.value = 0
+  if (mode === 'existing') void loadAccountOptions()
+}
+
+function chooseExistingAccount() {
+  const account = accountOptions.value.find((item) => item.id === selectedExistingAccountID.value)
+  if (!account) return
+  selectedPlatform.value = account.platform as AccountPlatform
+  form.value.group_ids = accountGroupIDs(account)
+  form.value.group_id = form.value.group_ids[0] || 0
+  resetOAuthCompletion()
+}
+
+async function createInlineGroup() {
+  const name = inlineGroupName.value.trim()
+  if (!name || inlineGroupSaving.value) return
+  inlineGroupSaving.value = true
+  try {
+    const group = await api.post<Group>('/api/admin/groups', {
+      name,
+      platform: selectedPlatform.value,
+      is_public: true,
+      status: 'active',
+    })
+    groups.value.push(group)
+    form.value.group_ids = [...form.value.group_ids, group.id]
+    form.value.group_id = form.value.group_ids[0] || group.id
+    inlineGroupName.value = ''
+    inlineGroupOpen.value = false
+    toast.show(`分组「${group.name}」已创建并选中`, 'success')
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '创建分组失败', 'error')
+  } finally {
+    inlineGroupSaving.value = false
+  }
+}
+
+async function saveExistingAccountGroups() {
+  if (!selectedExistingAccountID.value || !form.value.group_ids.length || savingAccount.value) return
+  const account = accountOptions.value.find((item) => item.id === selectedExistingAccountID.value)
+  if (!account) return
+  savingAccount.value = true
+  try {
+    await api.put(`/api/admin/accounts/${selectedExistingAccountID.value}`, {
+      group_ids: form.value.group_ids,
+      base_url: account.base_url,
+      quota_url: account.quota_url,
+    })
+    toast.show('账号可用分组已更新', 'success')
+    showForm.value = false
+    await loadAccounts()
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '保存账号分组失败', 'error')
+  } finally {
+    savingAccount.value = false
+  }
+}
 
 function isAgentIdentityImportContent(content: string): boolean {
 	const isAgentIdentityValue = (value: unknown): boolean => {
@@ -255,6 +384,7 @@ async function save() {
 		const result = await withToast(
 			() => api.post<ImportResult>('/api/admin/accounts/import', {
 				group_id: Number(form.value.group_id),
+				group_ids: form.value.group_ids,
 				format: 'auto',
 				data: agentIdentityJSON.value,
 				name: form.value.name,
@@ -276,6 +406,7 @@ async function save() {
 	}
   const body: Record<string, unknown> = {
     name: form.value.name,
+    group_ids: form.value.group_ids,
     base_url: form.value.base_url,
 		quota_url: form.value.auth_type === 'api_key' ? form.value.quota_url : '',
     auth_type: form.value.auth_type,
@@ -326,6 +457,7 @@ async function startOAuthLogin() {
       `/api/admin/oauth/${platformOfSelectedGroup.value}/start`,
       {
         group_id: Number(form.value.group_id),
+        group_ids: form.value.group_ids,
         name: form.value.name,
         base_url: form.value.base_url,
         priority: Number(form.value.priority),
@@ -829,7 +961,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     <div class="console-page-head accounts-page-head">
       <div>
         <h1>上游账号</h1>
-        <p class="mt-1 text-sm text-slate-500">按分组、类别和状态管理账号；自定义排序不会影响上游调度优先级。</p>
+        <p class="mt-1 text-sm text-slate-500">一个账号可用于多个同平台分组；自定义排序不会影响上游调度优先级。</p>
       </div>
       <div class="accounts-toolbar">
         <select v-model.number="filterGroup" class="input accounts-toolbar-select" aria-label="分组筛选" @change="updateAccountFilters">
@@ -863,9 +995,9 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <button type="button" :class="{ 'is-active': accountView === 'table' }" @click="updateAccountView('table')">列表</button>
           <button type="button" :class="{ 'is-active': accountView === 'cards' }" @click="updateAccountView('cards')">卡片</button>
         </div>
-        <button class="btn-ghost" :disabled="!oauthLoginGroup" title="使用 OpenAI 或 Claude 订阅账号授权登录" @click="openOAuthLogin">订阅登录</button>
+        <button class="btn-ghost" title="使用 OpenAI 或 Claude 订阅账号授权登录" @click="openOAuthLogin">订阅登录</button>
         <button class="btn-ghost" :disabled="!groups.length" @click="openImport">导入 JSON</button>
-        <button class="btn-primary" :disabled="!groups.length" @click="openCreate">添加账号</button>
+        <button class="btn-primary" @click="openCreate">添加账号</button>
       </div>
     </div>
 
@@ -901,7 +1033,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         </div>
 
         <dl class="account-card-meta">
-          <div class="account-card-group-meta"><dt>分组</dt><dd><span class="tag-gray group-tag">{{ a.group?.name || '未分组' }}</span></dd></div>
+          <div class="account-card-group-meta"><dt>分组</dt><dd class="account-card-group-list"><span v-for="group in accountGroupsForDisplay(a)" :key="group.id" class="tag-gray group-tag">{{ group.name }}</span><span v-if="!accountGroupsForDisplay(a).length" class="tag-gray group-tag">未分组</span></dd></div>
           <div><dt>优先级</dt><dd class="num">{{ a.priority }}</dd></div>
 							<div><dt>并发上限</dt><dd class="num">{{ a.concurrency > 0 ? a.concurrency : '不限' }}</dd></div>
           <div><dt>最近使用</dt><dd>{{ a.last_used_at ? new Date(a.last_used_at).toLocaleString() : '从未使用' }}</dd></div>
@@ -970,7 +1102,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     <AppModal
       :open="showForm"
       :title="editing ? '编辑上游账号' : '添加上游账号'"
-      description="选择凭据方式，并按需配置独立连接策略。"
+      :description="editing ? '调整账号可用分组、凭据与连接策略。' : '新增凭据或复用已有账号，并配置可用分组。'"
       width="wide"
       :busy="savingAccount || oauthStarting || oauthCompleting"
       @close="closeAccountForm"
@@ -978,30 +1110,48 @@ async function refreshAccountQuota(account: UpstreamAccount) {
       <div class="modal-form">
         <section class="modal-section">
           <div class="modal-section__head"><strong>账号归属</strong></div>
-          <div class="modal-grid modal-grid--two">
+          <div v-if="!editing" class="modal-segmented" role="group" aria-label="账号来源">
+            <button type="button" :class="{ 'is-active': accountEntryMode === 'new' }" @click="changeAccountEntryMode('new')">添加新账号</button>
+            <button type="button" :class="{ 'is-active': accountEntryMode === 'existing' }" @click="changeAccountEntryMode('existing')">使用已有账号</button>
+          </div>
+          <label v-if="!editing && accountEntryMode === 'existing'" class="modal-field">
+            <span class="label">已有账号</span>
+            <select v-model.number="selectedExistingAccountID" class="input" :disabled="accountOptionsLoading" @change="chooseExistingAccount">
+              <option :value="0">{{ accountOptionsLoading ? '正在加载…' : '选择一个已有账号' }}</option>
+              <optgroup v-for="section in accountOptionsByPlatform" :key="section.platform" :label="PLATFORM_LABELS[section.platform]">
+                <option v-for="account in section.accounts" :key="account.id" :value="account.id">{{ account.name }}{{ account.email ? ` · ${account.email}` : '' }}</option>
+              </optgroup>
+            </select>
+            <small class="modal-field__hint">只调整账号可用分组，不会复制或覆盖原凭据。</small>
+          </label>
+          <div v-if="editing || accountEntryMode === 'new' || selectedExistingAccountID" class="modal-grid modal-grid--two">
             <label class="modal-field">
-              <span class="label">登录平台</span>
-              <select v-model="selectedPlatform" class="input" :disabled="!!editing" @change="changeAccountPlatform">
+              <span class="label">账号平台</span>
+              <select v-model="selectedPlatform" class="input" :disabled="!!editing || accountEntryMode === 'existing'" @change="changeAccountPlatform">
                 <option value="openai">OpenAI</option>
                 <option value="anthropic">Claude</option>
                 <option value="gemini">Gemini</option>
                 <option value="grok">Grok</option>
               </select>
             </label>
-            <label class="modal-field">
-              <span class="label">所属分组</span>
-              <select v-model.number="form.group_id" class="input" :disabled="!!editing || !groupsForSelectedPlatform.length" @change="resetOAuthCompletion">
-                <option v-if="!groupsForSelectedPlatform.length" :value="0">请先创建 {{ PLATFORM_LABELS[selectedPlatform] }} 分组</option>
-                <option v-for="g in groupsForSelectedPlatform" :key="g.id" :value="g.id">{{ g.name }}{{ g.status !== 'active' ? '（已停用）' : '' }}</option>
-              </select>
+            <div class="account-group-picker-head"><span><strong>可用分组</strong><small>已选 {{ form.group_ids.length }} 个</small></span><button type="button" @click="inlineGroupOpen = !inlineGroupOpen">{{ inlineGroupOpen ? '取消创建' : '新建分组' }}</button></div>
+          </div>
+          <div v-if="(editing || accountEntryMode === 'new' || selectedExistingAccountID) && groupsForSelectedPlatform.length" class="account-group-picker" role="group" aria-label="账号可用分组">
+            <label v-for="group in groupsForSelectedPlatform" :key="group.id" :class="{ 'is-selected': form.group_ids.includes(group.id), 'is-disabled': group.status !== 'active' }">
+              <input type="checkbox" :checked="form.group_ids.includes(group.id)" @change="toggleAccountGroup(group.id)" />
+              <span><strong>{{ group.name }}</strong><small>{{ group.status === 'active' ? '可调度' : '已停用' }}</small></span>
             </label>
           </div>
-          <small v-if="editing" class="modal-field__hint">账号平台与所属分组在编辑时不可迁移。</small>
-          <small v-else-if="!groupsForSelectedPlatform.length" class="modal-field__hint">当前平台还没有分组，请先前往分组管理创建。</small>
-          <label class="modal-field"><span class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</span><input v-model.trim="form.name" class="input" placeholder="例如：key-01 或邮箱" /></label>
+          <p v-else-if="editing || accountEntryMode === 'new' || selectedExistingAccountID" class="modal-note">当前平台还没有分组，可直接在下方创建。</p>
+          <div v-if="inlineGroupOpen && (editing || accountEntryMode === 'new' || selectedExistingAccountID)" class="account-inline-group">
+            <label class="modal-field"><span class="label">新分组名称</span><input v-model.trim="inlineGroupName" class="input" maxlength="64" placeholder="例如：claude-standard" @keyup.enter="createInlineGroup" /></label>
+            <button type="button" class="btn-primary" :disabled="inlineGroupSaving || !inlineGroupName.trim()" @click="createInlineGroup">{{ inlineGroupSaving ? '创建中…' : '创建并选中' }}</button>
+          </div>
+          <small v-if="editing" class="modal-field__hint">平台不可迁移，但可随时增加、移除或调整同平台分组。</small>
+          <label v-if="editing || accountEntryMode === 'new'" class="modal-field"><span class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</span><input v-model.trim="form.name" class="input" placeholder="例如：key-01 或邮箱" /></label>
         </section>
 
-        <section class="modal-section">
+        <section v-if="editing || accountEntryMode === 'new'" class="modal-section">
           <div class="modal-section__head"><strong>凭据方式</strong><p>只显示当前方式需要填写的内容。</p></div>
           <div class="modal-segmented" role="group" aria-label="凭据方式">
             <button type="button" :class="{ 'is-active': form.auth_type === 'api_key' }" :disabled="editing?.auth_type === 'agent_identity'" @click="form.auth_type = 'api_key'">API Key</button>
@@ -1050,7 +1200,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           </template>
         </section>
 
-        <details class="modal-disclosure" :open="advancedConnectionOpen" @toggle="advancedConnectionOpen = ($event.currentTarget as HTMLDetailsElement).open">
+        <details v-if="editing || accountEntryMode === 'new'" class="modal-disclosure" :open="advancedConnectionOpen" @toggle="advancedConnectionOpen = ($event.currentTarget as HTMLDetailsElement).open">
           <summary><span><strong>高级连接设置</strong><small>{{ form.base_url || form.proxy_id || form.quota_url ? '已配置自定义连接' : '使用平台默认连接' }}</small></span></summary>
           <div class="modal-disclosure__body">
             <label class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
@@ -1061,13 +1211,13 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           </div>
         </details>
       </div>
-      <template #footer><button type="button" class="btn-ghost" :disabled="savingAccount || oauthStarting || oauthCompleting" @click="closeAccountForm">取消</button><button v-if="editing || form.auth_type !== 'oauth' || manualOAuthOpen" type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="save">{{ savingAccount ? '保存中…' : (editing ? '保存修改' : (form.auth_type === 'agent_identity' ? '导入账号' : '添加账号')) }}</button></template>
+      <template #footer><button type="button" class="btn-ghost" :disabled="savingAccount || oauthStarting || oauthCompleting" @click="closeAccountForm">取消</button><button v-if="!editing && accountEntryMode === 'existing'" type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="saveExistingAccountGroups">{{ savingAccount ? '保存中…' : '保存可用分组' }}</button><button v-else-if="editing || form.auth_type !== 'oauth' || manualOAuthOpen" type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="save">{{ savingAccount ? '保存中…' : (editing ? '保存修改' : (form.auth_type === 'agent_identity' ? '导入账号' : '添加账号')) }}</button></template>
     </AppModal>
 
 		<Teleport to="body">
 			<div v-if="diagnostic" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="diagnostic = null">
 				<div class="card max-h-[88vh] w-full max-w-lg overflow-y-auto p-6">
-					<div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ diagnostic.group?.name || '未分组' }}</p></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
+					<div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ accountGroupNames(diagnostic) }}</p></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<section class="rounded-lg border border-ink-700 bg-ink-850 p-3">
 							<p class="text-xs text-slate-500">调度可用度</p>

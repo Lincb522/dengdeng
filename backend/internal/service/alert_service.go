@@ -47,7 +47,7 @@ func (s *AlertService) EvaluateProbe(probe model.AccountProbe) {
 		return
 	}
 	var account model.UpstreamAccount
-	if err := s.db.First(&account, probe.AccountID).Error; err != nil {
+	if err := s.db.Preload("Groups").First(&account, probe.AccountID).Error; err != nil {
 		return
 	}
 	var rules []model.AlertRule
@@ -144,7 +144,7 @@ func (s *AlertService) metricRuleValue(rule model.AlertRule, snapshot model.OpsS
 	case "available_account_ratio", "available_account_count", "rate_limited_account_count", "error_account_count":
 		q := s.db.Model(&model.UpstreamAccount{})
 		if rule.GroupID > 0 {
-			q = q.Where("group_id = ?", rule.GroupID)
+			q = q.Where("EXISTS (SELECT 1 FROM upstream_account_groups account_membership WHERE account_membership.upstream_account_id = upstream_accounts.id AND account_membership.group_id = ?) OR upstream_accounts.group_id = ?", rule.GroupID, rule.GroupID)
 		}
 		if rule.Platform != "" {
 			q = q.Where("platform = ?", rule.Platform)
@@ -229,8 +229,20 @@ func (s *AlertService) openOrRefreshMetric(rule model.AlertRule, value float64, 
 
 func ruleApplies(rule model.AlertRule, account model.UpstreamAccount) bool {
 	return (rule.AccountID == 0 || rule.AccountID == account.ID) &&
-		(rule.GroupID == 0 || rule.GroupID == account.GroupID) &&
+		(rule.GroupID == 0 || upstreamAccountBelongsToGroup(account, rule.GroupID)) &&
 		(rule.Platform == "" || rule.Platform == account.Platform)
+}
+
+func upstreamAccountBelongsToGroup(account model.UpstreamAccount, groupID int64) bool {
+	if account.GroupID == groupID {
+		return true
+	}
+	for _, group := range account.Groups {
+		if group.ID == groupID {
+			return true
+		}
+	}
+	return false
 }
 
 func ruleMatchesProbe(rule model.AlertRule, probe model.AccountProbe) bool {
@@ -260,8 +272,12 @@ func (s *AlertService) openOrRefresh(rule model.AlertRule, account model.Upstrea
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return
 	}
+	eventGroupID := account.GroupID
+	if rule.GroupID > 0 {
+		eventGroupID = rule.GroupID
+	}
 	event = model.AlertEvent{
-		RuleID: rule.ID, AccountID: account.ID, GroupID: account.GroupID, Platform: account.Platform, State: "open",
+		RuleID: rule.ID, AccountID: account.ID, GroupID: eventGroupID, Platform: account.Platform, State: "open",
 		Severity: alertSeverity(probe), Title: fmt.Sprintf("%s：%s", rule.Name, account.Name), Message: alertProbeMessage(probe),
 		FirstSeenAt: now, LastSeenAt: now, DeliveryStatus: "console",
 	}

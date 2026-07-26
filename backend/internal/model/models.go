@@ -390,8 +390,12 @@ type ReferralPayout struct {
 // static API key, a refreshable OAuth token pair, or an OpenAI Agent Identity
 // that signs every request. All secret fields are encrypted at rest.
 type UpstreamAccount struct {
-	ID      int64 `gorm:"primaryKey" json:"id"`
-	GroupID int64 `gorm:"index;not null" json:"group_id"`
+	ID int64 `gorm:"primaryKey" json:"id"`
+	// GroupID mirrors the first selected group for rollback compatibility. New
+	// scheduling uses UpstreamAccountGroup so one credential can serve multiple
+	// groups of the same platform without being duplicated.
+	GroupID  int64   `gorm:"index;not null" json:"group_id"`
+	GroupIDs []int64 `gorm:"-" json:"group_ids"`
 	// ProxyID is optional. A zero value continues to use the deployment-wide
 	// outbound route, while a non-zero value selects a separately managed
 	// proxy for this one upstream account.
@@ -434,8 +438,9 @@ type UpstreamAccount struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
 
-	Group *Group `gorm:"foreignKey:GroupID" json:"group,omitempty"`
-	Proxy *Proxy `gorm:"foreignKey:ProxyID" json:"proxy,omitempty"`
+	Group  *Group  `gorm:"foreignKey:GroupID" json:"group,omitempty"`
+	Groups []Group `gorm:"many2many:upstream_account_groups;constraint:OnDelete:CASCADE;" json:"groups,omitempty"`
+	Proxy  *Proxy  `gorm:"foreignKey:ProxyID" json:"proxy,omitempty"`
 	// Quota is the normalized provider allowance plus DengDeng-observed usage.
 	// Every platform receives a snapshot. Providers with a subscription usage
 	// endpoint add real upstream windows; API-key providers that do not expose
@@ -445,6 +450,14 @@ type UpstreamAccount struct {
 	// endpoint for an OpenAI OAuth account. It is intentionally separate from
 	// this service's billing ledger: provider subscription limits are not USD.
 	CodexQuota *CodexQuotaSnapshot `gorm:"foreignKey:UpstreamAccountID;references:ID" json:"codex_quota,omitempty"`
+}
+
+// UpstreamAccountGroup is the durable many-to-many account pool membership.
+// The legacy upstream_accounts.group_id column remains the primary/first group
+// so older builds can still read every account during a rolling upgrade.
+type UpstreamAccountGroup struct {
+	UpstreamAccountID int64 `gorm:"primaryKey;autoIncrement:false" json:"upstream_account_id"`
+	GroupID           int64 `gorm:"primaryKey;autoIncrement:false;index" json:"group_id"`
 }
 
 // AccountQuotaWindow is one provider-side allowance or rate-limit window.
