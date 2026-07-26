@@ -5,12 +5,20 @@ import type { ReferralDashboard, ReferralPayout } from '../api/types'
 import { formatMoney } from '../api/types'
 import { useToast } from '../stores/toast'
 
+type PromotionTemplate = {
+  id: string
+  name: string
+  description: string
+  content: string
+}
+
 const toast = useToast()
 const data = ref<ReferralDashboard | null>(null)
 const loading = ref(true)
 const bindCode = ref('')
 const payoutOpenID = ref('')
 const payoutBusy = ref(false)
+const activePromotionID = ref('short')
 
 const referralCodes = computed(() => Array.isArray(data.value?.codes) ? data.value.codes : [])
 const commissions = computed(() => Array.isArray(data.value?.commissions) ? data.value.commissions : [])
@@ -19,6 +27,41 @@ const payouts = computed(() => Array.isArray(data.value?.payouts) ? data.value.p
 const referralLink = computed(() => primaryCode.value
   ? `${window.location.origin}/login?ref=${encodeURIComponent(primaryCode.value.code)}`
   : '')
+const promotionTemplates = computed<PromotionTemplate[]>(() => {
+  if (!primaryCode.value || !referralLink.value) return []
+
+  const code = primaryCode.value.code
+  const link = referralLink.value
+  return [
+    {
+      id: 'short',
+      name: '简短分享',
+      description: '私聊、群聊',
+      content: `DengDeng AI，多模型 API 接入与用量管理。\n注册：${link}\n推广码：${code}`,
+    },
+    {
+      id: 'developer',
+      name: '开发者接入',
+      description: '开发者社区',
+      content: `DengDeng AI 提供 OpenAI、Anthropic、Gemini 兼容接口，支持模型查询、独立密钥和用量明细。\n注册：${link}\n推广码：${code}`,
+    },
+    {
+      id: 'cli',
+      name: 'CLI 工具',
+      description: '工具用户',
+      content: `Claude Code、Codex CLI、Gemini CLI 和 Chatbox 可以通过 DengDeng AI 快速配置接入。注册后创建密钥即可使用。\n注册：${link}\n推广码：${code}`,
+    },
+    {
+      id: 'social',
+      name: '日常分享',
+      description: '朋友圈、公告',
+      content: `最近在用 DengDeng AI 管理多模型 API，密钥、模型和用量可以集中查看。有需要可以从这里注册：\n${link}\n推广码：${code}`,
+    },
+  ]
+})
+const activePromotion = computed(() => promotionTemplates.value.find((item) => item.id === activePromotionID.value)
+  || promotionTemplates.value[0]
+  || null)
 
 async function load() {
   loading.value = true
@@ -184,6 +227,54 @@ onMounted(load)
           <p v-if="primaryCode.status !== 'active'" class="text-xs text-signal-red">该推广码已暂停，不再产生新绑定或佣金。</p>
         </div>
         <p v-else class="text-sm text-slate-500">还没有推广码。</p>
+      </section>
+
+      <section v-if="primaryCode" class="referral-promotion card mb-6">
+        <header class="referral-promotion__head">
+          <div>
+            <h2>推广文案 Promotion Copy</h2>
+            <p>已自动带入你的推广链接和推广码。</p>
+          </div>
+          <button
+            class="btn-primary referral-promotion__copy"
+            type="button"
+            :disabled="!activePromotion || primaryCode.status !== 'active'"
+            @click="activePromotion && copy(activePromotion.content, '推广文案已复制')"
+          >
+            复制当前文案
+          </button>
+        </header>
+
+        <div class="referral-promotion__workspace">
+          <nav class="referral-promotion__tabs" aria-label="推广文案类型">
+            <button
+              v-for="item in promotionTemplates"
+              :key="item.id"
+              type="button"
+              :class="{ 'is-active': activePromotion?.id === item.id }"
+              :aria-pressed="activePromotion?.id === item.id"
+              @click="activePromotionID = item.id"
+            >
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.description }}</span>
+            </button>
+          </nav>
+
+          <div class="referral-promotion__preview" aria-live="polite">
+            <div class="referral-promotion__preview-head">
+              <span>{{ activePromotion?.name }}</span>
+              <button
+                type="button"
+                :disabled="!activePromotion || primaryCode.status !== 'active'"
+                @click="activePromotion && copy(activePromotion.content, '推广文案已复制')"
+              >
+                复制
+              </button>
+            </div>
+            <p>{{ activePromotion?.content }}</p>
+          </div>
+        </div>
+        <p v-if="primaryCode.status !== 'active'" class="referral-promotion__notice">推广码已暂停，恢复后才可复制推广文案。</p>
       </section>
 
       <section class="card mb-6 p-6">
