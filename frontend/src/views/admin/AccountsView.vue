@@ -130,6 +130,7 @@ const oauthAvailable = computed(
 )
 const agentIdentityAvailable = computed(() => platformOfSelectedGroup.value === 'openai')
 const oauthProviderLabel = computed(() => PLATFORM_LABELS[platformOfSelectedGroup.value] || '上游账号')
+const claudeOAuthGroup = computed(() => groups.value.find((group) => group.platform === 'anthropic' && group.status === 'active') || null)
 const baseURLPlaceholder = computed(() => ({
 	openai: 'https://api.openai.com',
 	anthropic: 'https://api.anthropic.com',
@@ -137,6 +138,16 @@ const baseURLPlaceholder = computed(() => ({
 	grok: 'https://api.x.ai',
 }[platformOfSelectedGroup.value] || '留空使用官方地址'))
 const oauthStarting = ref(false)
+const oauthCompleting = ref(false)
+const oauthAwaitingCode = ref(false)
+const oauthPendingState = ref('')
+const oauthAuthorizationCode = ref('')
+
+function resetOAuthCompletion() {
+  oauthAwaitingCode.value = false
+  oauthPendingState.value = ''
+  oauthAuthorizationCode.value = ''
+}
 
 function openCreate() {
   editing.value = null
@@ -149,7 +160,18 @@ function openCreate() {
 	agentIdentityJSON.value = ''
   manualOAuthOpen.value = false
   advancedConnectionOpen.value = false
+  resetOAuthCompletion()
   showForm.value = true
+}
+
+function openClaudeOAuth() {
+  if (!claudeOAuthGroup.value) {
+    toast.show('请先创建并启用 Claude 分组', 'error')
+    return
+  }
+  openCreate()
+  form.value.group_id = claudeOAuthGroup.value.id
+  form.value.auth_type = 'oauth'
 }
 
 function openEdit(a: UpstreamAccount) {
@@ -165,7 +187,7 @@ function openEdit(a: UpstreamAccount) {
 }
 
 function closeAccountForm() {
-  if (!savingAccount.value && !oauthStarting.value) showForm.value = false
+  if (!savingAccount.value && !oauthStarting.value && !oauthCompleting.value) showForm.value = false
 }
 
 const canSave = computed(() => {
@@ -281,7 +303,7 @@ async function startOAuthLogin() {
   const popup = window.open('', 'dengdeng-oauth-login', 'width=520,height=720,noopener=false')
   oauthStarting.value = true
   try {
-    const result = await api.post<{ authorize_url: string }>(
+    const result = await api.post<{ authorize_url: string; state?: string; completion_mode?: 'callback' | 'code' }>(
       `/api/admin/oauth/${platformOfSelectedGroup.value}/start`,
       {
         group_id: Number(form.value.group_id),
@@ -291,6 +313,11 @@ async function startOAuthLogin() {
 				concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
       },
     )
+    if (result.completion_mode === 'code') {
+      oauthPendingState.value = result.state || ''
+      oauthAwaitingCode.value = true
+      oauthAuthorizationCode.value = ''
+    }
     if (popup) {
       popup.location.href = result.authorize_url
       popup.focus()
@@ -302,6 +329,25 @@ async function startOAuthLogin() {
     toast.show(e instanceof Error ? e.message : '无法发起 OAuth 登录', 'error')
   } finally {
     oauthStarting.value = false
+  }
+}
+
+async function completeClaudeOAuth() {
+  if (platformOfSelectedGroup.value !== 'anthropic' || !oauthPendingState.value || !oauthAuthorizationCode.value.trim()) return
+  oauthCompleting.value = true
+  try {
+    await api.post('/api/admin/oauth/anthropic/complete', {
+      state: oauthPendingState.value,
+      code: oauthAuthorizationCode.value.trim(),
+    })
+    toast.show('Claude 登录成功，账号已添加', 'success')
+    showForm.value = false
+    resetOAuthCompletion()
+    await loadAccounts()
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : 'Claude 授权码验证失败', 'error')
+  } finally {
+    oauthCompleting.value = false
   }
 }
 
@@ -798,6 +844,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <button type="button" :class="{ 'is-active': accountView === 'table' }" @click="updateAccountView('table')">列表</button>
           <button type="button" :class="{ 'is-active': accountView === 'cards' }" @click="updateAccountView('cards')">卡片</button>
         </div>
+        <button class="btn-ghost" :disabled="!claudeOAuthGroup" title="使用 Claude 订阅账号授权登录" @click="openClaudeOAuth">登录 Claude</button>
         <button class="btn-ghost" :disabled="!groups.length" @click="openImport">导入 JSON</button>
         <button class="btn-primary" :disabled="!groups.length" @click="openCreate">添加账号</button>
       </div>
@@ -906,13 +953,13 @@ async function refreshAccountQuota(account: UpstreamAccount) {
       :title="editing ? '编辑上游账号' : '添加上游账号'"
       description="选择凭据方式，并按需配置独立连接策略。"
       width="wide"
-      :busy="savingAccount || oauthStarting"
+      :busy="savingAccount || oauthStarting || oauthCompleting"
       @close="closeAccountForm"
     >
       <div class="modal-form">
         <section class="modal-section">
           <div class="modal-section__head"><strong>账号归属</strong></div>
-          <label class="modal-field"><span class="label">所属分组</span><select v-model.number="form.group_id" class="input" :disabled="!!editing"><option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ PLATFORM_LABELS[g.platform] }}</option></select><small v-if="editing" class="modal-field__hint">账号平台由分组决定，编辑时不可迁移。</small></label>
+          <label class="modal-field"><span class="label">所属分组</span><select v-model.number="form.group_id" class="input" :disabled="!!editing" @change="resetOAuthCompletion"><option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ PLATFORM_LABELS[g.platform] }}</option></select><small v-if="editing" class="modal-field__hint">账号平台由分组决定，编辑时不可迁移。</small></label>
           <label class="modal-field"><span class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</span><input v-model.trim="form.name" class="input" placeholder="例如：key-01 或邮箱" /></label>
         </section>
 
@@ -928,8 +975,23 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">API Key {{ editing ? '（留空保持不变）' : '' }}</span><input v-model="form.api_key" class="input font-mono" autocomplete="off" placeholder="sk-..." /></label>
 
           <template v-else-if="form.auth_type === 'oauth'">
-            <div v-if="!editing" class="oauth-primary-path"><div><strong>登录 {{ oauthProviderLabel }}</strong><p>在新窗口完成授权，回调后自动加密保存。</p></div><button type="button" class="btn-primary" :disabled="!oauthAvailable || oauthStarting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : '去登录' }}</button></div>
-            <div v-else class="modal-note"><strong>已保存 OAuth 凭据。</strong> 如需替换，可在下方手动凭据中录入新 Token。</div>
+            <div v-if="!editing" class="oauth-primary-path">
+              <div>
+                <strong>登录 {{ oauthProviderLabel }}</strong>
+                <p v-if="platformOfSelectedGroup === 'anthropic'">在 Claude 页面完成授权，复制页面显示的授权码并粘贴回来。</p>
+                <p v-else>在新窗口完成授权，回调后自动加密保存。</p>
+              </div>
+              <button type="button" class="btn-primary" :disabled="!oauthAvailable || oauthStarting || oauthCompleting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : (oauthAwaitingCode ? '重新授权' : '去登录') }}</button>
+            </div>
+            <div v-if="!editing && platformOfSelectedGroup === 'anthropic' && oauthAwaitingCode" class="oauth-code-completion">
+              <label class="modal-field">
+                <span class="label">Claude 授权码</span>
+                <input v-model.trim="oauthAuthorizationCode" class="input font-mono text-xs" autocomplete="off" placeholder="粘贴授权页显示的授权码" @keyup.enter="completeClaudeOAuth" />
+                <small class="modal-field__hint">可以直接粘贴完整的“授权码#state”，系统会自动校验。</small>
+              </label>
+              <button type="button" class="btn-primary" :disabled="oauthCompleting || !oauthAuthorizationCode.trim()" @click="completeClaudeOAuth">{{ oauthCompleting ? '验证中…' : '完成登录' }}</button>
+            </div>
+            <div v-if="editing" class="modal-note"><strong>已保存 OAuth 凭据。</strong> 如需替换，可在下方手动凭据中录入新 Token。</div>
             <details class="modal-disclosure" :open="manualOAuthOpen" @toggle="manualOAuthOpen = ($event.currentTarget as HTMLDetailsElement).open">
               <summary><span><strong>手动录入 Token</strong><small>仅在无法完成浏览器登录时使用</small></span></summary>
               <div class="modal-disclosure__body">
@@ -961,7 +1023,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           </div>
         </details>
       </div>
-      <template #footer><button type="button" class="btn-ghost" :disabled="savingAccount || oauthStarting" @click="closeAccountForm">取消</button><button type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="save">{{ savingAccount ? '保存中…' : (editing ? '保存修改' : (form.auth_type === 'agent_identity' ? '导入账号' : '添加账号')) }}</button></template>
+      <template #footer><button type="button" class="btn-ghost" :disabled="savingAccount || oauthStarting || oauthCompleting" @click="closeAccountForm">取消</button><button v-if="editing || form.auth_type !== 'oauth' || manualOAuthOpen" type="button" class="btn-primary" :disabled="savingAccount || !canSave" @click="save">{{ savingAccount ? '保存中…' : (editing ? '保存修改' : (form.auth_type === 'agent_identity' ? '导入账号' : '添加账号')) }}</button></template>
     </AppModal>
 
 		<Teleport to="body">

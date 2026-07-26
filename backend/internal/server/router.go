@@ -204,6 +204,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/accounts/:id/quota/refresh", adminH.RefreshAccountQuota)
 			admin.POST("/accounts/:id/codex-quota/refresh", adminH.RefreshCodexQuota)
 			admin.POST("/oauth/:platform/start", adminH.StartOAuthLogin)
+			admin.POST("/oauth/:platform/complete", adminH.FinishOAuthLogin)
 			admin.PUT("/accounts/:id", adminH.UpdateAccount)
 			admin.DELETE("/accounts/:id", adminH.DeleteAccount)
 			admin.GET("/proxies", adminH.ListProxies)

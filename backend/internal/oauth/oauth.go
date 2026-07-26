@@ -43,16 +43,18 @@ type Provider struct {
 	ClientSecret string
 	Scope        string
 	RedirectURL  string
-	// BuiltinClient uses the public Codex client registration and therefore
-	// needs its registered loopback ports and Codex-specific authorize flags.
+	// BuiltinClient uses an official CLI's public client registration and must
+	// preserve that client's registered callback and authorize parameters.
 	BuiltinClient bool
 }
 
 var providers = map[string]Provider{
 	model.PlatformAnthropic: {
 		AuthorizeURL:  "https://claude.ai/oauth/authorize",
-		TokenURL:      "https://console.anthropic.com/v1/oauth/token",
+		TokenURL:      "https://platform.claude.com/v1/oauth/token",
 		ClientID:      "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
+		Scope:         "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+		RedirectURL:   "https://platform.claude.com/oauth/code/callback",
 		BuiltinClient: true,
 	},
 	model.PlatformOpenAI: {
@@ -228,6 +230,41 @@ type tokenResp struct {
 	IDToken      string `json:"id_token"`
 	ExpiresIn    int64  `json:"expires_in"`
 	TokenType    string `json:"token_type"`
+	Account      *struct {
+		UUID         string `json:"uuid"`
+		EmailAddress string `json:"email_address"`
+	} `json:"account,omitempty"`
+	Organization *struct {
+		UUID string `json:"uuid"`
+	} `json:"organization,omitempty"`
+}
+
+func newTokenRequest(ctx context.Context, platform, tokenURL string, values url.Values) (*http.Request, error) {
+	if platform == model.PlatformAnthropic {
+		payload := make(map[string]string, len(values))
+		for key := range values {
+			payload[key] = values.Get(key)
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(string(raw)))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/plain, */*")
+		req.Header.Set("User-Agent", "axios/1.13.6")
+		return req, nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	return req, nil
 }
 
 func (m *Manager) refresh(ctx context.Context, acc *model.UpstreamAccount) (string, error) {
@@ -265,12 +302,10 @@ func (m *Manager) refresh(ctx context.Context, acc *model.UpstreamAccount) (stri
 	}
 	// Do not send scope on refresh: OAuth refresh grants cannot be expanded.
 	// New scopes (such as api.model.read) require a fresh browser authorization.
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, prov.TokenURL, strings.NewReader(values.Encode()))
+	req, err := newTokenRequest(ctx, acc.Platform, prov.TokenURL, values)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -334,6 +369,8 @@ type LoginResult struct {
 	AccessToken  string
 	RefreshToken string
 	IDToken      string
+	Email        string
+	AccountID    string
 	ExpiresAt    *time.Time
 	Origin       string
 }
@@ -400,6 +437,23 @@ func (m *Manager) CallbackURLs(platform, requestHost string, isTLS bool) (provid
 	prov, ok := m.provider(platform)
 	if !ok || prov.AuthorizeURL == "" || prov.TokenURL == "" || prov.ClientID == "" {
 		return "", "", fmt.Errorf("oauth login is not configured for %s", platform)
+	}
+	if platform == model.PlatformAnthropic && prov.BuiltinClient {
+		host, port, err := splitHostPort(requestHost)
+		if err != nil {
+			return "", "", err
+		}
+		if port == "" && host == "::1" {
+			requestHost = "[::1]"
+		} else if port == "" {
+			requestHost = host
+		}
+		scheme := "http"
+		if isTLS {
+			scheme = "https"
+		}
+		completionURL = fmt.Sprintf("%s://%s/api/admin/oauth/%s/callback", scheme, requestHost, platform)
+		return prov.RedirectURL, completionURL, nil
 	}
 	if prov.RedirectURL != "" {
 		if defaults, exists := providers[platform]; exists && prov.ClientID == defaults.ClientID {
@@ -520,6 +574,9 @@ func (m *Manager) BeginLoginWithCompletion(platform, redirectURL, completionURL 
 		q.Set("codex_cli_simplified_flow", "true")
 		q.Set("originator", "codex_cli_rs")
 	}
+	if platform == model.PlatformAnthropic && prov.BuiltinClient {
+		q.Set("code", "true")
+	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
 }
@@ -532,6 +589,15 @@ func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code strin
 		return nil, err
 	}
 	prov, _ := m.provider(platform)
+	code = strings.TrimSpace(code)
+	codeState := ""
+	if index := strings.Index(code, "#"); index >= 0 {
+		codeState = strings.TrimSpace(code[index+1:])
+		code = strings.TrimSpace(code[:index])
+	}
+	if platform == model.PlatformAnthropic && codeState != "" && codeState != state {
+		return nil, errors.New("oauth authorization state does not match")
+	}
 	values := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -539,15 +605,16 @@ func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code strin
 		"client_id":     {prov.ClientID},
 		"code_verifier": {flow.verifier},
 	}
+	if platform == model.PlatformAnthropic {
+		values.Set("state", state)
+	}
 	if prov.ClientSecret != "" {
 		values.Set("client_secret", prov.ClientSecret)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, prov.TokenURL, strings.NewReader(values.Encode()))
+	req, err := newTokenRequest(ctx, platform, prov.TokenURL, values)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
 	resp, err := m.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("token exchange request: %w", err)
@@ -570,10 +637,18 @@ func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code strin
 	if callback, err := url.Parse(flow.completionURL); err == nil {
 		origin = callback.Scheme + "://" + callback.Host
 	}
-	return &LoginResult{
+	result := &LoginResult{
 		Intent: flow.intent, AccessToken: tokens.AccessToken, RefreshToken: tokens.RefreshToken,
 		IDToken: tokens.IDToken, ExpiresAt: expiresAt, Origin: origin,
-	}, nil
+	}
+	if tokens.Account != nil {
+		result.Email = tokens.Account.EmailAddress
+		result.AccountID = tokens.Account.UUID
+	}
+	if result.AccountID == "" && tokens.Organization != nil {
+		result.AccountID = tokens.Organization.UUID
+	}
+	return result, nil
 }
 
 // CancelLogin consumes a pending state after a provider-side denial. It

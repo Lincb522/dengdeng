@@ -2180,6 +2180,9 @@ body.has-app-modal { overflow: hidden; }
   .oauth-primary-path strong { color: var(--ink); font-size: .75rem; font-weight: 800; }
   .oauth-primary-path p { color: var(--ink-soft); font-size: .64rem; line-height: 1.45; }
   .oauth-primary-path .btn { flex: 0 0 auto; }
+  .oauth-code-completion { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: .65rem; padding: .72rem .78rem; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: .65rem; background: color-mix(in srgb, var(--accent-soft) 48%, var(--surface)); }
+  .oauth-code-completion .modal-field { min-width: 0; }
+  .oauth-code-completion .btn { min-height: 2.35rem; white-space: nowrap; }
 
   .key-setup-flow { display: grid; gap: .82rem; }
   .key-setup-progress { position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; padding-bottom: .72rem; border-bottom: 1px solid var(--line); }
@@ -2229,6 +2232,8 @@ body.has-app-modal { overflow: hidden; }
 	.key-setup-progress button { min-height: 2.75rem; }
 	.oauth-primary-path { align-items: stretch; flex-direction: column; }
 	.oauth-primary-path .btn { width: 100%; }
+	.oauth-code-completion { grid-template-columns: minmax(0, 1fr); }
+	.oauth-code-completion .btn { width: 100%; }
   }
   .ops-loading-state { display: grid; min-height: 24rem; place-items: center; color: var(--ink-soft); font-size: .84rem; }
   .usage-page-head { margin-bottom: 1rem; }

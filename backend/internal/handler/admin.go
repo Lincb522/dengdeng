@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -1402,7 +1404,85 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "start oauth login failed")
 		return
 	}
-	util.OK(c, gin.H{"authorize_url": authorizeURL})
+	payload := gin.H{"authorize_url": authorizeURL, "completion_mode": "callback"}
+	if parsed, parseErr := url.Parse(authorizeURL); parseErr == nil {
+		payload["state"] = parsed.Query().Get("state")
+		if platform == model.PlatformAnthropic && parsed.Query().Get("code") == "true" {
+			payload["completion_mode"] = "code"
+		}
+	}
+	util.OK(c, payload)
+}
+
+func (h *AdminHandler) persistOAuthAccount(platform string, result *oauth.LoginResult) (*model.UpstreamAccount, error) {
+	var group model.Group
+	if err := h.db.First(&group, result.Intent.GroupID).Error; err != nil || group.Platform != platform {
+		return nil, errors.New("target group is unavailable or changed platform")
+	}
+	identity := oauth.IdentityFromIDToken(result.IDToken)
+	email := identity.Email
+	if email == "" {
+		email = result.Email
+	}
+	accountID := identity.AccountID
+	if accountID == "" {
+		accountID = result.AccountID
+	}
+	name := result.Intent.Name
+	if name == "" {
+		name = trimAccountName(email)
+	}
+	if name == "" {
+		name = fmt.Sprintf("%s-oauth-%d", platform, time.Now().Unix())
+	}
+	extra := map[string]any{}
+	if result.IDToken != "" {
+		extra["id_token"] = result.IDToken
+	}
+	encodedExtra, err := model.EncodeExtra(extra)
+	if err != nil {
+		return nil, err
+	}
+	var maxDisplayOrder int
+	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
+	account := model.UpstreamAccount{
+		GroupID: group.ID, Name: name, Platform: platform, BaseURL: result.Intent.BaseURL,
+		AuthType:    model.AuthOAuth,
+		AccessToken: crypto.EncryptedString(result.AccessToken), RefreshToken: crypto.EncryptedString(result.RefreshToken),
+		ExpiresAt: result.ExpiresAt, Email: email, AccountID: accountID,
+		Extra: encodedExtra, Priority: result.Intent.Priority, Concurrency: result.Intent.Concurrency, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
+	}
+	if err := h.db.Create(&account).Error; err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
+// FinishOAuthLogin completes providers such as Claude whose fixed callback
+// page displays an authorization code for the administrator to paste back.
+func (h *AdminHandler) FinishOAuthLogin(c *gin.Context) {
+	platform := c.Param("platform")
+	var req struct {
+		State string `json:"state"`
+		Code  string `json:"code"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.State) == "" || strings.TrimSpace(req.Code) == "" {
+		util.Fail(c, http.StatusBadRequest, "oauth state and authorization code are required")
+		return
+	}
+	result, err := h.oauth.CompleteLogin(c.Request.Context(), platform, strings.TrimSpace(req.State), strings.TrimSpace(req.Code))
+	if err != nil {
+		log.Printf("[oauth] complete %s login failed: %v", platform, err)
+		util.Fail(c, http.StatusBadRequest, "OAuth 登录未完成，请重新发起授权并粘贴新的授权码")
+		return
+	}
+	account, err := h.persistOAuthAccount(platform, result)
+	if err != nil {
+		log.Printf("[oauth] persist %s account failed: %v", platform, err)
+		util.Fail(c, http.StatusInternalServerError, "创建 OAuth 上游账号失败")
+		return
+	}
+	util.OK(c, gin.H{"account_id": account.ID, "name": account.Name, "email": account.Email})
 }
 
 // CompleteOAuthLogin is intentionally unauthenticated: it is invoked by the
@@ -1427,39 +1507,8 @@ func (h *AdminHandler) CompleteOAuthLogin(c *gin.Context) {
 		return
 	}
 
-	var group model.Group
-	if err := h.db.First(&group, result.Intent.GroupID).Error; err != nil || group.Platform != platform {
+	if _, err := h.persistOAuthAccount(platform, result); err != nil {
 		h.oauthCallbackPage(c, http.StatusBadRequest, "目标分组不存在或平台已变更，请关闭此窗口后重试。", "error", result.Origin)
-		return
-	}
-	identity := oauth.IdentityFromIDToken(result.IDToken)
-	name := result.Intent.Name
-	if name == "" {
-		name = trimAccountName(identity.Email)
-	}
-	if name == "" {
-		name = fmt.Sprintf("%s-oauth-%d", platform, time.Now().Unix())
-	}
-	extra := map[string]any{}
-	if result.IDToken != "" {
-		extra["id_token"] = result.IDToken
-	}
-	encodedExtra, err := model.EncodeExtra(extra)
-	if err != nil {
-		h.oauthCallbackPage(c, http.StatusInternalServerError, "保存 OAuth 凭据失败，请关闭此窗口后重试。", "error", result.Origin)
-		return
-	}
-	var maxDisplayOrder int
-	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
-	account := model.UpstreamAccount{
-		GroupID: group.ID, Name: name, Platform: platform, BaseURL: result.Intent.BaseURL,
-		AuthType:    model.AuthOAuth,
-		AccessToken: crypto.EncryptedString(result.AccessToken), RefreshToken: crypto.EncryptedString(result.RefreshToken),
-		ExpiresAt: result.ExpiresAt, Email: identity.Email, AccountID: identity.AccountID,
-		Extra: encodedExtra, Priority: result.Intent.Priority, Concurrency: result.Intent.Concurrency, DisplayOrder: maxDisplayOrder + 1, Status: model.StatusActive,
-	}
-	if err := h.db.Create(&account).Error; err != nil {
-		h.oauthCallbackPage(c, http.StatusInternalServerError, "创建上游账号失败，请关闭此窗口后重试。", "error", result.Origin)
 		return
 	}
 	h.oauthCallbackPage(c, http.StatusOK, "OAuth 登录成功，账号已添加。现在可以关闭此窗口。", "success", result.Origin)

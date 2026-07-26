@@ -66,6 +66,113 @@ func TestBrowserLoginUsesPKCEAndExchangesCode(t *testing.T) {
 	}
 }
 
+func TestClaudeBrowserLoginUsesFixedCallbackAndPastedCode(t *testing.T) {
+	var received map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q", got)
+		}
+		if got := r.Header.Get("User-Agent"); got != "axios/1.13.6" {
+			t.Fatalf("User-Agent = %q", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode token request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "claude-access", "refresh_token": "claude-refresh", "expires_in": 3600,
+			"account": map[string]any{"uuid": "claude-account", "email_address": "claude@example.test"},
+		})
+	}))
+	defer server.Close()
+
+	manager := NewManager(nil, config.OAuthConfig{Anthropic: config.OAuthProviderConfig{
+		AuthorizeURL: server.URL + "/authorize", TokenURL: server.URL,
+	}}, server.Client())
+	providerURL, completionURL, err := manager.CallbackURLs(model.PlatformAnthropic, "dengdeng.example", true)
+	if err != nil {
+		t.Fatalf("CallbackURLs: %v", err)
+	}
+	if providerURL != "https://platform.claude.com/oauth/code/callback" {
+		t.Fatalf("provider callback = %q", providerURL)
+	}
+	if completionURL != "https://dengdeng.example/api/admin/oauth/anthropic/callback" {
+		t.Fatalf("completion callback = %q", completionURL)
+	}
+
+	authorizeURL, err := manager.BeginLoginWithCompletion(model.PlatformAnthropic, providerURL, completionURL, LoginIntent{GroupID: 9})
+	if err != nil {
+		t.Fatalf("BeginLoginWithCompletion: %v", err)
+	}
+	parsed, err := url.Parse(authorizeURL)
+	if err != nil {
+		t.Fatalf("parse authorize URL: %v", err)
+	}
+	query := parsed.Query()
+	if query.Get("code") != "true" || query.Get("redirect_uri") != providerURL || query.Get("state") == "" || query.Get("code_challenge") == "" {
+		t.Fatalf("unexpected authorize query: %v", query)
+	}
+	if query.Get("scope") != providers[model.PlatformAnthropic].Scope {
+		t.Fatalf("scope = %q", query.Get("scope"))
+	}
+
+	state := query.Get("state")
+	result, err := manager.CompleteLogin(context.Background(), model.PlatformAnthropic, state, "provider-code#"+state)
+	if err != nil {
+		t.Fatalf("CompleteLogin: %v", err)
+	}
+	if result.AccessToken != "claude-access" || result.RefreshToken != "claude-refresh" || result.Email != "claude@example.test" || result.AccountID != "claude-account" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if received["grant_type"] != "authorization_code" || received["code"] != "provider-code" || received["state"] != state || received["redirect_uri"] != providerURL || received["code_verifier"] == "" {
+		t.Fatalf("unexpected token request: %v", received)
+	}
+}
+
+func TestClaudeRefreshUsesJSONAndPersistsRotatedToken(t *testing.T) {
+	if err := crypto.Init("", "oauth-claude-refresh-test"); err != nil {
+		t.Fatalf("initialize crypto: %v", err)
+	}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open database: %v", err)
+	}
+	if err := db.AutoMigrate(&model.UpstreamAccount{}); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+
+	var received map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode refresh request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(tokenResp{AccessToken: "renewed-claude", RefreshToken: "rotated-claude", ExpiresIn: 3600})
+	}))
+	defer server.Close()
+
+	account := model.UpstreamAccount{
+		GroupID: 1, Name: "claude", Platform: model.PlatformAnthropic, AuthType: model.AuthOAuth,
+		AccessToken: crypto.EncryptedString("old-access"), RefreshToken: crypto.EncryptedString("old-refresh"),
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+	manager := NewManager(db, config.OAuthConfig{Anthropic: config.OAuthProviderConfig{TokenURL: server.URL}}, server.Client())
+	token, err := manager.Refresh(context.Background(), &account)
+	if err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if token != "renewed-claude" || received["grant_type"] != "refresh_token" || received["refresh_token"] != "old-refresh" || received["client_id"] != providers[model.PlatformAnthropic].ClientID {
+		t.Fatalf("token=%q request=%v", token, received)
+	}
+	var stored model.UpstreamAccount
+	if err := db.First(&stored, account.ID).Error; err != nil {
+		t.Fatalf("load account: %v", err)
+	}
+	if stored.AccessToken != "renewed-claude" || stored.RefreshToken != "rotated-claude" {
+		t.Fatalf("stored account = %#v", stored)
+	}
+}
+
 func TestRefreshRenewsRevokedSessionBeforeRecordedExpiry(t *testing.T) {
 	if err := crypto.Init("", "oauth-refresh-test"); err != nil {
 		t.Fatalf("initialize crypto: %v", err)
