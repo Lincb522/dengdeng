@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestClaudeBrowserLoginUsesFixedCallbackAndPastedCode(t *testing.T) {
 	defer server.Close()
 
 	manager := NewManager(nil, config.OAuthConfig{Anthropic: config.OAuthProviderConfig{
-		AuthorizeURL: server.URL + "/authorize", TokenURL: server.URL,
+		TokenURL: server.URL,
 	}}, server.Client())
 	providerURL, completionURL, err := manager.CallbackURLs(model.PlatformAnthropic, "dengdeng.example", true)
 	if err != nil {
@@ -108,6 +109,12 @@ func TestClaudeBrowserLoginUsesFixedCallbackAndPastedCode(t *testing.T) {
 		t.Fatalf("parse authorize URL: %v", err)
 	}
 	query := parsed.Query()
+	if parsed.Scheme+"://"+parsed.Host+parsed.Path != "https://claude.com/cai/oauth/authorize" {
+		t.Fatalf("authorize endpoint = %q", parsed.Scheme+"://"+parsed.Host+parsed.Path)
+	}
+	if !strings.HasPrefix(parsed.RawQuery, "code=true&client_id=") {
+		t.Fatalf("authorize parameter order = %q", parsed.RawQuery)
+	}
 	if query.Get("code") != "true" || query.Get("redirect_uri") != providerURL || query.Get("state") == "" || query.Get("code_challenge") == "" {
 		t.Fatalf("unexpected authorize query: %v", query)
 	}
@@ -123,7 +130,7 @@ func TestClaudeBrowserLoginUsesFixedCallbackAndPastedCode(t *testing.T) {
 	if result.AccessToken != "claude-access" || result.RefreshToken != "claude-refresh" || result.Email != "claude@example.test" || result.AccountID != "claude-account" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
-	if received["grant_type"] != "authorization_code" || received["code"] != "provider-code" || received["state"] != state || received["redirect_uri"] != providerURL || received["code_verifier"] == "" {
+	if received["grant_type"] != "authorization_code" || received["code"] != "provider-code" || received["state"] != state || received["redirect_uri"] != providerURL || len(received["code_verifier"]) != 43 {
 		t.Fatalf("unexpected token request: %v", received)
 	}
 }

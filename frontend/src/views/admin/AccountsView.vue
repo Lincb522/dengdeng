@@ -30,6 +30,7 @@ const diagnostic = ref<UpstreamAccount | null>(null)
 const refreshingQuotaAccountID = ref<number | null>(null)
 type AccountView = 'table' | 'cards'
 type AccountSort = 'custom' | 'name' | 'platform' | 'group' | 'priority' | 'availability' | 'last_used'
+type AccountPlatform = Group['platform']
 const accountView = ref<AccountView>('table')
 const sortBy = ref<AccountSort>('custom')
 const sortDirection = ref<'asc' | 'desc'>('asc')
@@ -37,6 +38,7 @@ const filterPlatform = ref<'all' | 'openai' | 'anthropic' | 'gemini' | 'grok'>('
 const filterAuthType = ref<'all' | 'api_key' | 'oauth' | 'agent_identity'>('all')
 const draggingAccountID = ref<number | null>(null)
 const accountPresentationStorageKey = 'dengdeng.admin.accounts.presentation.v1'
+const selectedPlatform = ref<AccountPlatform>('openai')
 
 const form = ref({
   group_id: 0,
@@ -119,8 +121,9 @@ onMounted(() => {
   void load()
 })
 
-const platformOfSelectedGroup = computed(
-  () => groups.value.find((g) => g.id === form.value.group_id)?.platform ?? '',
+const groupsForSelectedPlatform = computed(() => groups.value.filter((group) => group.platform === selectedPlatform.value))
+const platformOfSelectedGroup = computed<AccountPlatform>(
+  () => groups.value.find((g) => g.id === form.value.group_id)?.platform ?? selectedPlatform.value,
 )
 // Only Claude and OpenAI have the built-in browser OAuth client. Gemini has no
 // OAuth flow, and Grok's browser authorize needs an operator-supplied xAI
@@ -130,7 +133,9 @@ const oauthAvailable = computed(
 )
 const agentIdentityAvailable = computed(() => platformOfSelectedGroup.value === 'openai')
 const oauthProviderLabel = computed(() => PLATFORM_LABELS[platformOfSelectedGroup.value] || '上游账号')
-const claudeOAuthGroup = computed(() => groups.value.find((group) => group.platform === 'anthropic' && group.status === 'active') || null)
+const oauthLoginGroup = computed(() => groups.value.find((group) => group.platform === 'anthropic' && group.status === 'active')
+  || groups.value.find((group) => group.platform === 'openai' && group.status === 'active')
+  || null)
 const baseURLPlaceholder = computed(() => ({
 	openai: 'https://api.openai.com',
 	anthropic: 'https://api.anthropic.com',
@@ -150,9 +155,11 @@ function resetOAuthCompletion() {
 }
 
 function openCreate() {
+  const initialGroup = groups.value[0]
   editing.value = null
+  selectedPlatform.value = initialGroup?.platform ?? 'openai'
   form.value = {
-    group_id: groups.value[0]?.id ?? 0,
+    group_id: initialGroup?.id ?? 0,
     name: '', base_url: '', quota_url: '', auth_type: 'api_key',
     api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
@@ -164,24 +171,36 @@ function openCreate() {
   showForm.value = true
 }
 
-function openClaudeOAuth() {
-  if (!claudeOAuthGroup.value) {
-    toast.show('请先创建并启用 Claude 分组', 'error')
+function openOAuthLogin() {
+  if (!oauthLoginGroup.value) {
+    toast.show('请先创建并启用 OpenAI 或 Claude 分组', 'error')
     return
   }
   openCreate()
-  form.value.group_id = claudeOAuthGroup.value.id
+  selectedPlatform.value = oauthLoginGroup.value.platform
+  form.value.group_id = oauthLoginGroup.value.id
   form.value.auth_type = 'oauth'
+}
+
+function changeAccountPlatform() {
+  if (editing.value) return
+  const firstGroup = groupsForSelectedPlatform.value[0]
+  form.value.group_id = firstGroup?.id ?? 0
+  if (!oauthAvailable.value && form.value.auth_type === 'oauth') form.value.auth_type = 'api_key'
+  if (!agentIdentityAvailable.value && form.value.auth_type === 'agent_identity') form.value.auth_type = 'api_key'
+  resetOAuthCompletion()
 }
 
 function openEdit(a: UpstreamAccount) {
   editing.value = a
+  selectedPlatform.value = (groups.value.find((group) => group.id === a.group_id)?.platform || a.platform) as AccountPlatform
   form.value = {
     group_id: a.group_id, name: a.name, base_url: a.base_url, quota_url: a.quota_url || '', auth_type: a.auth_type,
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
   manualOAuthOpen.value = false
+  resetOAuthCompletion()
   advancedConnectionOpen.value = !!(a.base_url || a.quota_url || a.proxy_id || a.priority !== 10 || a.concurrency || a.status !== 'active')
   showForm.value = true
 }
@@ -844,7 +863,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <button type="button" :class="{ 'is-active': accountView === 'table' }" @click="updateAccountView('table')">列表</button>
           <button type="button" :class="{ 'is-active': accountView === 'cards' }" @click="updateAccountView('cards')">卡片</button>
         </div>
-        <button class="btn-ghost" :disabled="!claudeOAuthGroup" title="使用 Claude 订阅账号授权登录" @click="openClaudeOAuth">登录 Claude</button>
+        <button class="btn-ghost" :disabled="!oauthLoginGroup" title="使用 OpenAI 或 Claude 订阅账号授权登录" @click="openOAuthLogin">订阅登录</button>
         <button class="btn-ghost" :disabled="!groups.length" @click="openImport">导入 JSON</button>
         <button class="btn-primary" :disabled="!groups.length" @click="openCreate">添加账号</button>
       </div>
@@ -959,7 +978,26 @@ async function refreshAccountQuota(account: UpstreamAccount) {
       <div class="modal-form">
         <section class="modal-section">
           <div class="modal-section__head"><strong>账号归属</strong></div>
-          <label class="modal-field"><span class="label">所属分组</span><select v-model.number="form.group_id" class="input" :disabled="!!editing" @change="resetOAuthCompletion"><option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }} · {{ PLATFORM_LABELS[g.platform] }}</option></select><small v-if="editing" class="modal-field__hint">账号平台由分组决定，编辑时不可迁移。</small></label>
+          <div class="modal-grid modal-grid--two">
+            <label class="modal-field">
+              <span class="label">登录平台</span>
+              <select v-model="selectedPlatform" class="input" :disabled="!!editing" @change="changeAccountPlatform">
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Claude</option>
+                <option value="gemini">Gemini</option>
+                <option value="grok">Grok</option>
+              </select>
+            </label>
+            <label class="modal-field">
+              <span class="label">所属分组</span>
+              <select v-model.number="form.group_id" class="input" :disabled="!!editing || !groupsForSelectedPlatform.length" @change="resetOAuthCompletion">
+                <option v-if="!groupsForSelectedPlatform.length" :value="0">请先创建 {{ PLATFORM_LABELS[selectedPlatform] }} 分组</option>
+                <option v-for="g in groupsForSelectedPlatform" :key="g.id" :value="g.id">{{ g.name }}{{ g.status !== 'active' ? '（已停用）' : '' }}</option>
+              </select>
+            </label>
+          </div>
+          <small v-if="editing" class="modal-field__hint">账号平台与所属分组在编辑时不可迁移。</small>
+          <small v-else-if="!groupsForSelectedPlatform.length" class="modal-field__hint">当前平台还没有分组，请先前往分组管理创建。</small>
           <label class="modal-field"><span class="label">账号名称{{ !editing && form.auth_type === 'agent_identity' ? '（单个文件时可覆盖）' : '' }}</span><input v-model.trim="form.name" class="input" placeholder="例如：key-01 或邮箱" /></label>
         </section>
 
@@ -981,7 +1019,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
                 <p v-if="platformOfSelectedGroup === 'anthropic'">在 Claude 页面完成授权，复制页面显示的授权码并粘贴回来。</p>
                 <p v-else>在新窗口完成授权，回调后自动加密保存。</p>
               </div>
-              <button type="button" class="btn-primary" :disabled="!oauthAvailable || oauthStarting || oauthCompleting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : (oauthAwaitingCode ? '重新授权' : '去登录') }}</button>
+              <button type="button" class="btn-primary" :disabled="!form.group_id || !oauthAvailable || oauthStarting || oauthCompleting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : (oauthAwaitingCode ? '重新授权' : '去登录') }}</button>
             </div>
             <div v-if="!editing && platformOfSelectedGroup === 'anthropic' && oauthAwaitingCode" class="oauth-code-completion">
               <label class="modal-field">

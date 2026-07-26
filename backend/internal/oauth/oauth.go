@@ -50,10 +50,10 @@ type Provider struct {
 
 var providers = map[string]Provider{
 	model.PlatformAnthropic: {
-		AuthorizeURL:  "https://claude.ai/oauth/authorize",
+		AuthorizeURL:  "https://claude.com/cai/oauth/authorize",
 		TokenURL:      "https://platform.claude.com/v1/oauth/token",
 		ClientID:      "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
-		Scope:         "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+		Scope:         "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
 		RedirectURL:   "https://platform.claude.com/oauth/code/callback",
 		BuiltinClient: true,
 	},
@@ -146,7 +146,7 @@ func NewManager(db *gorm.DB, cfg config.OAuthConfig, client *http.Client) *Manag
 		configured[platform] = p
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = &http.Client{Timeout: 60 * time.Second}
 	}
 	return &Manager{
 		db: db, client: client, providers: configured,
@@ -534,7 +534,14 @@ func (m *Manager) BeginLoginWithCompletion(platform, redirectURL, completionURL 
 	if err != nil {
 		return "", err
 	}
-	verifier, err := randomURLToken(48)
+	verifierSize := 48
+	if platform == model.PlatformAnthropic && prov.BuiltinClient {
+		// Claude Code uses a 32-byte verifier (43 base64url characters).
+		// Preserve the official client's exact flow because its authorize page
+		// validates this request more strictly than a generic OAuth server.
+		verifierSize = 32
+	}
+	verifier, err := randomURLToken(verifierSize)
 	if err != nil {
 		return "", err
 	}
@@ -575,7 +582,17 @@ func (m *Manager) BeginLoginWithCompletion(platform, redirectURL, completionURL 
 		q.Set("originator", "codex_cli_rs")
 	}
 	if platform == model.PlatformAnthropic && prov.BuiltinClient {
-		q.Set("code", "true")
+		// Keep Claude Code's parameter order. The consumer authorization page is
+		// stricter than most OAuth servers and has rejected equivalent URLs built
+		// with alphabetically sorted query parameters in past releases.
+		return fmt.Sprintf("%s?code=true&client_id=%s&response_type=code&redirect_uri=%s&scope=%s&code_challenge=%s&code_challenge_method=S256&state=%s",
+			prov.AuthorizeURL,
+			url.QueryEscape(prov.ClientID),
+			url.QueryEscape(redirectURL),
+			url.QueryEscape(prov.Scope),
+			url.QueryEscape(challenge),
+			url.QueryEscape(state),
+		), nil
 	}
 	u.RawQuery = q.Encode()
 	return u.String(), nil
@@ -605,8 +622,8 @@ func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code strin
 		"client_id":     {prov.ClientID},
 		"code_verifier": {flow.verifier},
 	}
-	if platform == model.PlatformAnthropic {
-		values.Set("state", state)
+	if platform == model.PlatformAnthropic && codeState != "" {
+		values.Set("state", codeState)
 	}
 	if prov.ClientSecret != "" {
 		values.Set("client_secret", prov.ClientSecret)

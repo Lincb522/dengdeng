@@ -7,7 +7,9 @@
 ### Claude 上游账号登录
 
 - 上游账号页新增独立“登录 Claude”入口，可直接选择已启用的 Claude 分组并发起订阅账号授权。
+- 添加账号时明确选择 OpenAI、Claude、Gemini 或 Grok 平台，并只列出该平台的分组；订阅登录入口可在 OpenAI 与 Claude 之间切换。
 - Claude OAuth 更新为固定授权回调与授权码粘贴流程，兼容授权页返回的 `授权码#state`，并在服务端校验一次性 state 与 PKCE verifier。
+- Claude 订阅授权切换到当前 Claude Code 使用的 `claude.com/cai` 入口和 Scope，修复旧授权页提示“提交的信息有误”；PKCE 参数长度与排列同步官方客户端。
 - Claude Token 交换和续期改用当前 JSON 协议，补齐官方 Scope、客户端请求头、Refresh Token 轮换及账号邮箱、账号 ID 自动保存。
 - 浏览器授权失败时仍可手动录入 Token 或导入 JSON；授权码输入区在移动端改为单列，不产生横向溢出。
 - 新增 Claude 授权、账号落库和自动续期回归测试，同时保留 OpenAI OAuth 原有回调行为。
