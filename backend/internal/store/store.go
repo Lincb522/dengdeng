@@ -338,6 +338,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 		// Anthropic first-party pricing, USD per MTok, checked July 2026.
 		// Model-specific rules intentionally beat the legacy family wildcards below.
 		{Match: "claude-fable-5", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
+		{Match: "claude-opus-5", Platform: model.PlatformAnthropic, InputPrice: 5, OutputPrice: 25, CacheReadPrice: 0.5, CacheWritePrice: 6.25},
 		{Match: "claude-mythos-5", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
 		{Match: "claude-mythos-preview", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
 		{Match: "claude-opus-4-8", Platform: model.PlatformAnthropic, InputPrice: 5, OutputPrice: 25, CacheReadPrice: 0.5, CacheWritePrice: 6.25},
@@ -402,6 +403,7 @@ func defaultModelConfigs() []model.ModelConfig {
 		{Name: "gpt-5.5-pro", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 高精度专业模型"},
 		{Name: "gpt-image-2", Platform: model.PlatformOpenAI, Kind: "image", Description: "OpenAI 最新图像生成与编辑模型"},
 		{Name: "claude-fable-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude 最新旗舰智能体模型"},
+		{Name: "claude-opus-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 5"},
 		{Name: "claude-opus-4-8", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.8，高级推理与代码"},
 		{Name: "claude-opus-4-7", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.7，高级推理与代码"},
 		{Name: "claude-opus-4-6", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.6，高级推理与代码"},
