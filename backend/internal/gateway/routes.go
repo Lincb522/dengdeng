@@ -184,6 +184,7 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 		g.relayAnthropicViaResponses(c, ak, body, ak.Group.Platform)
 		return
 	}
+	body = stripAnthropicUnsupportedParams(body)
 	g.relay(c, ak, relayRequest{
 		Platform: model.PlatformAnthropic,
 		Path:     "/v1/messages",
