@@ -66,6 +66,51 @@ func TestQueryUsageUserScopeOverridesRequestedUser(t *testing.T) {
 	}
 }
 
+func TestQueryUsageSortDirectionsKeepMissingMeasurementsLast(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.UsageLog{}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 27, 8, 0, 0, 0, time.UTC)
+	logs := []model.UsageLog{
+		{RequestID: "missing", FirstTokenMs: 0, DurationMs: 0, StatusCode: 0, CostMicro: 20, CreatedAt: base},
+		{RequestID: "slow", FirstTokenMs: 80, DurationMs: 500, StatusCode: 500, CostMicro: 30, CreatedAt: base.Add(time.Second)},
+		{RequestID: "fast", FirstTokenMs: 20, DurationMs: 100, StatusCode: 200, CostMicro: 10, CreatedAt: base.Add(2 * time.Second)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	requestIDs := func(sortBy, order string) []string {
+		items, _, queryErr := queryUsage(db, usageQuery{Page: 1, Size: 20, Sort: sortBy, Order: order}, nil)
+		if queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		result := make([]string, len(items))
+		for index := range items {
+			result[index] = items[index].RequestID
+		}
+		return result
+	}
+	assertOrder := func(sortBy, order, want string) {
+		t.Helper()
+		if got := strings.Join(requestIDs(sortBy, order), ","); got != want {
+			t.Fatalf("%s %s = %s, want %s", sortBy, order, got, want)
+		}
+	}
+
+	assertOrder("first_token_ms", "asc", "fast,slow,missing")
+	assertOrder("first_token_ms", "desc", "slow,fast,missing")
+	assertOrder("duration_ms", "asc", "fast,slow,missing")
+	assertOrder("status_code", "desc", "slow,fast,missing")
+	assertOrder("cost_micro", "asc", "fast,missing,slow")
+	assertOrder("created_at", "asc", "missing,slow,fast")
+	assertOrder("created_at", "desc", "fast,slow,missing")
+}
+
 func TestDecorateUsageIncludesUpstreamPlatform(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {

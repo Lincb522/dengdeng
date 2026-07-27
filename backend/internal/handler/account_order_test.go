@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"dengdeng/internal/model"
 
@@ -103,6 +104,77 @@ func TestListAccountsPaginatesAndFiltersCredentialType(t *testing.T) {
 	}
 	if len(payload.Data.Items) != 1 || payload.Data.Items[0].Name != "alpha" || payload.Data.Items[0].AuthType != model.AuthAPIKey {
 		t.Fatalf("credential filter/sort returned %#v", payload.Data.Items)
+	}
+}
+
+func TestAccountSortDirectionsMatchDisplayedValues(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:account-sort-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.UpstreamAccount{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	accounts := []model.UpstreamAccount{
+		{Name: "beta", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 20, Status: model.StatusActive},
+		{Name: "Alpha", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 10, Status: model.StatusActive},
+		{Name: "gamma", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 20, Status: model.StatusActive},
+	}
+	if err := db.Create(&accounts).Error; err != nil {
+		t.Fatalf("create accounts: %v", err)
+	}
+
+	loadNames := func(sortBy, order string) string {
+		var items []model.UpstreamAccount
+		query := accountListQuery{Sort: sortBy, Order: order}
+		if err := applyAccountListOrder(db.Model(&model.UpstreamAccount{}), query).Find(&items).Error; err != nil {
+			t.Fatalf("sort %s %s: %v", sortBy, order, err)
+		}
+		names := make([]string, len(items))
+		for index := range items {
+			names[index] = items[index].Name
+		}
+		return strings.Join(names, ",")
+	}
+	if got := loadNames("name", "asc"); got != "Alpha,beta,gamma" {
+		t.Fatalf("name asc = %s", got)
+	}
+	if got := loadNames("name", "desc"); got != "gamma,beta,Alpha" {
+		t.Fatalf("name desc = %s", got)
+	}
+	if got := loadNames("priority", "asc"); got != "Alpha,beta,gamma" {
+		t.Fatalf("priority asc = %s", got)
+	}
+	if got := loadNames("priority", "desc"); got != "gamma,beta,Alpha" {
+		t.Fatalf("priority desc = %s", got)
+	}
+}
+
+func TestAccountAvailabilitySortIncludesQuotaExhaustion(t *testing.T) {
+	now := time.Date(2026, 7, 27, 8, 0, 0, 0, time.UTC)
+	exhausted := 100.0
+	accounts := []model.UpstreamAccount{
+		{ID: 1, Name: "healthy", Status: model.StatusActive},
+		{ID: 2, Name: "warning", Status: model.StatusActive, ErrorCount: 1},
+		{ID: 3, Name: "quota", Status: model.StatusActive, Quota: &model.AccountQuotaSnapshot{Windows: []model.AccountQuotaWindow{{UsedPercent: &exhausted}}}},
+		{ID: 4, Name: "disabled", Status: model.StatusDisabled},
+	}
+
+	orderedNames := func(order string) string {
+		items := append([]model.UpstreamAccount(nil), accounts...)
+		sortAccountsByAvailability(items, order, now)
+		names := make([]string, len(items))
+		for index := range items {
+			names[index] = items[index].Name
+		}
+		return strings.Join(names, ",")
+	}
+	if got := orderedNames("desc"); got != "healthy,warning,disabled,quota" {
+		t.Fatalf("availability desc = %s", got)
+	}
+	if got := orderedNames("asc"); got != "quota,disabled,warning,healthy" {
+		t.Fatalf("availability asc = %s", got)
 	}
 }
 

@@ -4,6 +4,7 @@ import { api, withToast } from '../../api/client'
 import type { AccountObservedUsage, AccountQuotaSnapshot, AccountQuotaWindow, Group, Proxy, UpstreamAccount } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
+import { defaultSortDirection, sortDirectionLabel, type SortMeaning } from '../../api/sorting'
 import { useToast } from '../../stores/toast'
 import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
@@ -887,6 +888,12 @@ function openDiagnostic(account: UpstreamAccount) {
 const sortedAccounts = computed(() => accounts.value)
 
 const manualOrderEnabled = computed(() => sortBy.value === 'custom')
+const accountSortMeaning = computed<SortMeaning>(() => {
+	if (sortBy.value === 'last_used') return 'time'
+	if (sortBy.value === 'name' || sortBy.value === 'platform' || sortBy.value === 'group') return 'text'
+	return 'number'
+})
+const accountSortDirectionLabel = computed(() => sortDirectionLabel(sortDirection.value, accountSortMeaning.value))
 
 function updateAccountView(view: AccountView) {
 	accountView.value = view
@@ -894,6 +901,7 @@ function updateAccountView(view: AccountView) {
 }
 
 function updateSort() {
+	if (sortBy.value !== 'custom') sortDirection.value = defaultSortDirection(accountSortMeaning.value)
 	persistAccountPresentation()
 	page.value = 1
 	void loadAccounts()
@@ -990,7 +998,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <option value="availability">可用度</option>
           <option value="last_used">最近使用</option>
         </select>
-        <button class="accounts-sort-direction" type="button" :disabled="sortBy === 'custom'" :title="sortDirection === 'asc' ? '切换为降序' : '切换为升序'" @click="toggleSortDirection">{{ sortDirection === 'asc' ? '升序' : '降序' }}</button>
+		<button class="accounts-sort-direction" type="button" :disabled="sortBy === 'custom'" :title="`当前${accountSortDirectionLabel}，点击切换`" @click="toggleSortDirection">{{ sortDirection === 'asc' ? '↑' : '↓' }} {{ accountSortDirectionLabel }}</button>
         <div class="accounts-view-toggle" role="group" aria-label="账号展示方式">
           <button type="button" :class="{ 'is-active': accountView === 'table' }" @click="updateAccountView('table')">列表</button>
           <button type="button" :class="{ 'is-active': accountView === 'cards' }" @click="updateAccountView('cards')">卡片</button>

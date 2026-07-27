@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1061,33 +1062,82 @@ func applyAccountListOrder(q *gorm.DB, query accountListQuery) *gorm.DB {
 			Order("upstream_accounts.display_order ASC").
 			Order("upstream_accounts.id DESC")
 	}
+	// Availability includes normalized quota windows and is therefore sorted
+	// after preloading those snapshots in ListAccounts.
+	if query.Sort == "availability" {
+		return q
+	}
 
 	column := ""
 	switch query.Sort {
 	case "name":
-		column = "upstream_accounts.name"
+		column = "LOWER(upstream_accounts.name)"
 	case "platform":
-		column = "upstream_accounts.platform"
+		column = "LOWER(upstream_accounts.platform)"
 	case "group":
 		q = q.Joins("LEFT JOIN groups account_groups ON account_groups.id = upstream_accounts.group_id").Select("upstream_accounts.*")
-		column = "account_groups.name"
+		column = "LOWER(account_groups.name)"
 	case "priority":
 		column = "upstream_accounts.priority"
-	case "availability":
-		column = `CASE
-			WHEN upstream_accounts.status <> 'active' THEN 0
-			WHEN upstream_accounts.auth_type = 'oauth' AND upstream_accounts.expires_at IS NOT NULL AND upstream_accounts.expires_at <= CURRENT_TIMESTAMP THEN 0
-			WHEN upstream_accounts.cooldown_until IS NOT NULL AND upstream_accounts.cooldown_until > CURRENT_TIMESTAMP THEN 10
-			WHEN upstream_accounts.error_count >= 4 THEN 45
-			WHEN upstream_accounts.error_count > 0 THEN 75
-			ELSE 100 END`
 	case "last_used":
 		// Put never-used accounts last in either direction; a NULL position must
 		// not depend on the database engine's default NULL ordering.
 		q = q.Order("CASE WHEN upstream_accounts.last_used_at IS NULL THEN 1 ELSE 0 END ASC")
 		column = "upstream_accounts.last_used_at"
 	}
-	return q.Order(column + " " + strings.ToUpper(query.Order)).Order("upstream_accounts.id DESC")
+	return q.Order(column + " " + strings.ToUpper(query.Order)).Order("upstream_accounts.id " + strings.ToUpper(query.Order))
+}
+
+func accountQuotaIsExhausted(snapshot *model.AccountQuotaSnapshot) bool {
+	if snapshot == nil {
+		return false
+	}
+	for _, window := range snapshot.Windows {
+		if window.UsedPercent != nil && *window.UsedPercent >= 100 {
+			return true
+		}
+	}
+	return false
+}
+
+func accountAvailabilityScore(account model.UpstreamAccount, now time.Time) int {
+	if account.Status != model.StatusActive {
+		return 0
+	}
+	if account.AuthType == model.AuthOAuth && account.ExpiresAt != nil && !account.ExpiresAt.After(now) && account.Quota != nil && account.Quota.State == "error" {
+		return 0
+	}
+	if accountQuotaIsExhausted(account.Quota) {
+		return 0
+	}
+	if account.CooldownUntil != nil && account.CooldownUntil.After(now) {
+		return 10
+	}
+	if account.ErrorCount >= 4 {
+		return 45
+	}
+	if account.ErrorCount > 0 {
+		return 75
+	}
+	return 100
+}
+
+func sortAccountsByAvailability(accounts []model.UpstreamAccount, order string, now time.Time) {
+	descending := order == "desc"
+	sort.SliceStable(accounts, func(left, right int) bool {
+		leftScore := accountAvailabilityScore(accounts[left], now)
+		rightScore := accountAvailabilityScore(accounts[right], now)
+		if leftScore == rightScore {
+			if descending {
+				return accounts[left].ID > accounts[right].ID
+			}
+			return accounts[left].ID < accounts[right].ID
+		}
+		if descending {
+			return leftScore > rightScore
+		}
+		return leftScore < rightScore
+	})
 }
 
 func (h *AdminHandler) ListAccounts(c *gin.Context) {
@@ -1106,7 +1156,20 @@ func (h *AdminHandler) ListAccounts(c *gin.Context) {
 		}
 		var accounts []model.UpstreamAccount
 		list := applyAccountListFilters(h.db.Model(&model.UpstreamAccount{}).Preload("Group").Preload("Groups").Preload("Proxy").Preload("Quota").Preload("CodexQuota"), query)
-		if err := applyAccountListOrder(list, query).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&accounts).Error; err != nil {
+		if query.Sort == "availability" {
+			if err := list.Find(&accounts).Error; err != nil {
+				util.Fail(c, http.StatusInternalServerError, "query accounts failed")
+				return
+			}
+			sortAccountsByAvailability(accounts, query.Order, time.Now().UTC())
+			start := (query.Page - 1) * query.Size
+			if start >= len(accounts) {
+				accounts = []model.UpstreamAccount{}
+			} else {
+				end := min(start+query.Size, len(accounts))
+				accounts = accounts[start:end]
+			}
+		} else if err := applyAccountListOrder(list, query).Offset((query.Page - 1) * query.Size).Limit(query.Size).Find(&accounts).Error; err != nil {
 			util.Fail(c, http.StatusInternalServerError, "query accounts failed")
 			return
 		}

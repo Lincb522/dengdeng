@@ -48,7 +48,7 @@ export const themePresets: readonly ThemePreset[] = [
   {
     id: 'breeze',
     name: '小清新',
-    description: '轻窄侧栏与薄荷工作区',
+    description: '双层导航与轻量工作台',
     layout: 'breeze',
     density: 'balanced',
     colors: ['#f1fbf7', '#18332e', '#27866d'],
@@ -57,7 +57,7 @@ export const themePresets: readonly ThemePreset[] = [
   {
     id: 'immersive',
     name: '沉浸式',
-    description: '全屏内容与低干扰顶栏',
+    description: '全屏画布与底部命令坞',
     layout: 'immersive',
     density: 'comfortable',
     colors: ['#eef1f6', '#151922', '#4a5f96'],
@@ -66,7 +66,7 @@ export const themePresets: readonly ThemePreset[] = [
   {
     id: 'glass',
     name: '毛玻璃',
-    description: '通透浮层与柔和景深',
+    description: '浮动图标坞与透明面板',
     layout: 'glass',
     density: 'balanced',
     colors: ['#edf5ff', '#1d2940', '#5b68b5'],

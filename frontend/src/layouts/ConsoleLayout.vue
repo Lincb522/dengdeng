@@ -10,7 +10,11 @@ const auth = useAuth()
 const route = useRoute()
 const railOpen = ref(false)
 const topNavOpen = ref('')
+const breezeGroup = ref('工作区')
+const glassNavOpen = ref('')
 const topNavigation = ref<HTMLElement | null>(null)
+const immersiveNavigation = ref<HTMLElement | null>(null)
+const glassNavigation = ref<HTMLElement | null>(null)
 
 const userNav = [
   { to: '/dashboard', label: '总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
@@ -51,7 +55,6 @@ const adminNavGroups = [
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const balance = computed(() => formatMoney(auth.user?.balance_micro ?? 0))
-const initials = computed(() => (auth.user?.email || 'D').trim().slice(0, 1).toUpperCase())
 const visibleUserNav = computed(() => userNav.filter((item) => {
 	if (item.to === '/models') return auth.features.model_plaza_enabled
 	if (item.to === '/referrals') return auth.features.referral_enabled
@@ -69,12 +72,23 @@ const navigationGroups = computed(() => {
 })
 const allNavigationItems = computed(() => navigationGroups.value.flatMap((group) => group.items))
 const currentNavigation = computed(() => allNavigationItems.value.find((item) => isActive(item.to)))
+const currentNavigationGroup = computed(() => navigationGroups.value.find((group) => group.items.some((item) => isActive(item.to))))
+const breezeNavigationItems = computed(() => {
+	if (breezeGroup.value === '扩展') return []
+	return navigationGroups.value.find((group) => group.label === breezeGroup.value)?.items || visibleUserNav.value
+})
+const glassNavigationItems = computed(() => {
+	if (glassNavOpen.value === '扩展') return []
+	return navigationGroups.value.find((group) => group.label === glassNavOpen.value)?.items || []
+})
 
 watch(
   () => route.fullPath,
   () => {
     railOpen.value = false
     topNavOpen.value = ''
+		glassNavOpen.value = ''
+		if (currentNavigationGroup.value) breezeGroup.value = currentNavigationGroup.value.label
   },
 )
 
@@ -90,7 +104,9 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 function handleDocumentPointer(event: PointerEvent) {
-	if (!topNavigation.value?.contains(event.target as Node)) topNavOpen.value = ''
+	const target = event.target as Node
+	if (!topNavigation.value?.contains(target) && !immersiveNavigation.value?.contains(target)) topNavOpen.value = ''
+	if (!glassNavigation.value?.contains(target)) glassNavOpen.value = ''
 }
 
 onMounted(() => {
@@ -109,6 +125,14 @@ function isActive(to: string) {
 
 function toggleTopNavigation(label: string) {
 	topNavOpen.value = topNavOpen.value === label ? '' : label
+}
+
+function selectBreezeGroup(label: string) {
+	breezeGroup.value = label
+}
+
+function toggleGlassNavigation(label: string) {
+	glassNavOpen.value = glassNavOpen.value === label ? '' : label
 }
 </script>
 
@@ -169,7 +193,7 @@ function toggleTopNavigation(label: string) {
 
         <div class="rail-account">
           <div class="rail-account-profile">
-            <span class="rail-account-avatar" aria-hidden="true">{{ initials }}</span>
+            <span class="rail-account-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.1 0-8 2.05-8 5v2h16v-2c0-2.95-3.9-5-8-5Z" /></svg></span>
             <div><strong :title="auth.user?.email">{{ auth.user?.email }}</strong><small>{{ isAdmin ? '管理员账户' : '个人账户' }}</small></div>
           </div>
           <div class="rail-account-balance">
@@ -183,6 +207,54 @@ function toggleTopNavigation(label: string) {
           </div>
         </div>
       </aside>
+
+		<header class="breeze-shellbar">
+			<RouterLink to="/dashboard" class="breeze-shellbar__brand" :aria-label="`${auth.siteName} 总览`">
+				<BrandMark :size="32" />
+				<span><strong>{{ auth.siteName }}</strong><small>{{ currentNavigation?.label || '工作台' }}</small></span>
+			</RouterLink>
+			<nav class="breeze-shellbar__groups" aria-label="导航分区">
+				<button v-for="group in navigationGroups" :key="group.label" type="button" :class="{ 'is-active': breezeGroup === group.label }" @click="selectBreezeGroup(group.label)">{{ group.label }}</button>
+				<button v-if="customMenuItems.length" type="button" :class="{ 'is-active': breezeGroup === '扩展' }" @click="selectBreezeGroup('扩展')">扩展</button>
+			</nav>
+			<div class="breeze-shellbar__account">
+				<strong class="num">{{ balance }}</strong>
+				<ThemeToggle />
+				<button type="button" class="breeze-shellbar__logout" aria-label="退出登录" title="退出登录" @click="auth.logout()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg></button>
+			</div>
+		</header>
+		<nav class="breeze-route-strip" aria-label="当前导航分区">
+			<template v-if="breezeGroup !== '扩展'">
+				<RouterLink v-for="item in breezeNavigationItems" :key="item.to" :to="item.to" :class="{ 'is-active': isActive(item.to) }"><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg><span>{{ item.label }}</span></RouterLink>
+			</template>
+			<template v-else>
+				<a v-for="item in customMenuItems" :key="item.id" :href="item.url" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg><span>{{ item.name }}</span></a>
+			</template>
+		</nav>
+
+		<header class="immersive-shellbar">
+			<RouterLink to="/dashboard" class="immersive-shellbar__brand"><BrandMark :size="30" /><strong>{{ auth.siteName }}</strong></RouterLink>
+			<div class="immersive-shellbar__context"><span>{{ currentNavigationGroup?.label || '工作区' }}</span><strong>{{ currentNavigation?.label || '总览' }}</strong></div>
+			<div class="immersive-shellbar__account"><span class="num">{{ balance }}</span><ThemeToggle /><button type="button" aria-label="退出登录" title="退出登录" @click="auth.logout()"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg></button></div>
+		</header>
+		<nav ref="immersiveNavigation" class="immersive-command-dock" aria-label="沉浸式导航">
+			<div v-for="group in navigationGroups" :key="group.label" class="immersive-command-dock__group">
+				<button type="button" :class="{ 'is-active': group.items.some((item) => isActive(item.to)) }" :aria-expanded="topNavOpen === `immersive-${group.label}`" @click.stop="toggleTopNavigation(`immersive-${group.label}`)"><svg viewBox="0 0 24 24"><path :d="group.items[0]?.icon" /></svg><span>{{ group.label }}</span></button>
+				<div v-if="topNavOpen === `immersive-${group.label}`" class="immersive-command-menu"><RouterLink v-for="item in group.items" :key="item.to" :to="item.to" :class="{ 'is-active': isActive(item.to) }"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg><span>{{ item.label }}</span></RouterLink></div>
+			</div>
+			<div v-if="customMenuItems.length" class="immersive-command-dock__group"><button type="button" :aria-expanded="topNavOpen === 'immersive-扩展'" @click.stop="toggleTopNavigation('immersive-扩展')"><svg viewBox="0 0 24 24"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg><span>扩展</span></button><div v-if="topNavOpen === 'immersive-扩展'" class="immersive-command-menu"><a v-for="item in customMenuItems" :key="item.id" :href="item.url" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined"><span>{{ item.name }}</span></a></div></div>
+		</nav>
+
+		<aside ref="glassNavigation" class="glass-dock" aria-label="毛玻璃导航">
+			<RouterLink to="/dashboard" class="glass-dock__brand"><BrandMark :size="30" /></RouterLink>
+			<nav><button v-for="group in navigationGroups" :key="group.label" type="button" :class="{ 'is-active': group.items.some((item) => isActive(item.to)), 'is-open': glassNavOpen === group.label }" :title="group.label" :aria-label="group.label" :aria-expanded="glassNavOpen === group.label" @click.stop="toggleGlassNavigation(group.label)"><svg viewBox="0 0 24 24"><path :d="group.items[0]?.icon" /></svg></button><button v-if="customMenuItems.length" type="button" title="扩展" aria-label="扩展" :aria-expanded="glassNavOpen === '扩展'" @click.stop="toggleGlassNavigation('扩展')"><svg viewBox="0 0 24 24"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg></button></nav>
+			<div class="glass-dock__actions"><ThemeToggle /><button type="button" aria-label="退出登录" title="退出登录" @click="auth.logout()"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg></button></div>
+			<section v-if="glassNavOpen" class="glass-nav-panel">
+				<header><span>{{ glassNavOpen }}</span><button type="button" aria-label="关闭导航面板" @click="glassNavOpen = ''">×</button></header>
+				<nav v-if="glassNavOpen !== '扩展'"><RouterLink v-for="item in glassNavigationItems" :key="item.to" :to="item.to" :class="{ 'is-active': isActive(item.to) }"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg><span>{{ item.label }}</span></RouterLink></nav>
+				<nav v-else><a v-for="item in customMenuItems" :key="item.id" :href="item.url" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined"><span>{{ item.name }}</span></a></nav>
+			</section>
+		</aside>
 
 		<header ref="topNavigation" class="top-shellbar">
 			<RouterLink to="/dashboard" class="top-shellbar__brand" :aria-label="`${auth.siteName} 总览`">
@@ -208,6 +280,7 @@ function toggleTopNavigation(label: string) {
 						</RouterLink>
 					</div>
 				</div>
+				<div v-if="customMenuItems.length" class="top-shellbar__group"><button type="button" :aria-expanded="topNavOpen === '扩展'" @click.stop="toggleTopNavigation('扩展')">扩展<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg></button><div v-if="topNavOpen === '扩展'" class="top-shellbar__menu"><a v-for="item in customMenuItems" :key="item.id" :href="item.url" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined"><span><svg viewBox="0 0 24 24"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg></span>{{ item.name }}</a></div></div>
 			</nav>
 
 			<div class="top-shellbar__account">
@@ -240,7 +313,7 @@ function toggleTopNavigation(label: string) {
           </div>
           <div class="workspace-user">
             <span class="hidden max-w-44 truncate sm:inline" :title="auth.user?.email">{{ auth.user?.email }}</span>
-            <span class="workspace-avatar" aria-hidden="true">{{ initials }}</span>
+            <span class="workspace-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Zm0 2c-4.1 0-8 2.05-8 5v2h16v-2c0-2.95-3.9-5-8-5Z" /></svg></span>
           </div>
         </header>
 

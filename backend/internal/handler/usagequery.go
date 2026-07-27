@@ -215,12 +215,24 @@ func queryUsage(db *gorm.DB, filter usageQuery, userID *int64) ([]model.UsageLog
 	}
 
 	var logs []model.UsageLog
-	order := "usage_logs." + filter.Sort + " " + strings.ToUpper(filter.Order) + ", usage_logs.id DESC"
-	if err := q.Order(order).Offset((filter.Page - 1) * filter.Size).Limit(filter.Size).Find(&logs).Error; err != nil {
+	if err := applyUsageOrder(q, filter).Offset((filter.Page - 1) * filter.Size).Limit(filter.Size).Find(&logs).Error; err != nil {
 		return nil, 0, err
 	}
 	decorateUsage(db, logs)
 	return logs, total, nil
+}
+
+// applyUsageOrder keeps sorting global (before pagination), treats zero
+// latency/status values as missing measurements, and uses the requested
+// direction for deterministic ties. A fixed DESC tie-breaker made ascending
+// pages look locally reversed whenever several rows shared the same value.
+func applyUsageOrder(q *gorm.DB, filter usageQuery) *gorm.DB {
+	direction := strings.ToUpper(filter.Order)
+	column := "usage_logs." + filter.Sort
+	if filter.Sort == "first_token_ms" || filter.Sort == "duration_ms" || filter.Sort == "status_code" {
+		q = q.Order("CASE WHEN " + column + " IS NULL OR " + column + " <= 0 THEN 1 ELSE 0 END ASC")
+	}
+	return q.Order(column + " " + direction).Order("usage_logs.id " + direction)
 }
 
 // decorateUsage fills display-only fields resolved from related tables.
@@ -336,8 +348,7 @@ func prepareUsageExport(filter *usageQuery) error {
 func writeUsageCSV(c *gin.Context, db *gorm.DB, filter usageQuery, userID *int64, includeInternal bool) error {
 	q := usageScope(db, filter, userID)
 	var logs []model.UsageLog
-	order := "usage_logs." + filter.Sort + " " + strings.ToUpper(filter.Order) + ", usage_logs.id DESC"
-	if err := q.Order(order).Limit(filter.Size).Find(&logs).Error; err != nil {
+	if err := applyUsageOrder(q, filter).Limit(filter.Size).Find(&logs).Error; err != nil {
 		return err
 	}
 	decorateUsage(db, logs)
