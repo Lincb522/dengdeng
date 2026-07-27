@@ -72,7 +72,6 @@ onMounted(load)
     <div class="console-page-head">
       <div>
         <h1>代理配置</h1>
-        <p>代理单独维护，再按需绑定到上游账号；不会改变未绑定账号的出口。</p>
       </div>
       <button class="btn-primary" @click="openCreate">添加代理</button>
     </div>

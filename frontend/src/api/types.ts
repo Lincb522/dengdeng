@@ -482,6 +482,7 @@ export interface ApiKey {
   group_id: number
 	group_ids: number[]
   key_preview: string
+	secret_available: boolean
   name: string
   status: string
 	reasoning_effort: string

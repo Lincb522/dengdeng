@@ -209,7 +209,6 @@ async function submit() {
 
         <header class="login-panel-header">
           <h1 id="login-title">{{ mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建账户' : '重置密码' }}</h1>
-          <p>{{ mode === 'login' ? '使用你的邮箱继续' : mode === 'register' ? '验证邮箱后即可使用' : '验证邮箱后设置新密码' }}</p>
         </header>
 
         <div class="login-tabs" :class="{ 'login-tabs--single': !auth.allowRegister }" role="tablist" aria-label="账户操作">

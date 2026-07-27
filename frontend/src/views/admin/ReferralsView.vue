@@ -109,8 +109,7 @@ onMounted(load)
   <div>
     <div class="console-page-head">
       <div>
-        <h1>推广分成 Referrals</h1>
-        <p class="mt-1 text-sm text-slate-500">按实际 Token 消费计提，现金结算与 API 余额完全分离。</p>
+        <h1>推广分成</h1>
       </div>
     </div>
 

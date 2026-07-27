@@ -205,7 +205,6 @@ async function togglePublic(g: Group) {
     <div class="console-page-head">
       <div>
         <h1>分组管理</h1>
-        <p class="mt-1 text-sm text-slate-500">分组 = 平台 + 账号池 + 计费倍率</p>
       </div>
       <button class="btn-primary" @click="openCreate">新建分组</button>
     </div>
@@ -262,7 +261,6 @@ async function togglePublic(g: Group) {
     <AppModal
       :open="showForm"
       :title="editing ? '编辑分组' : '新建分组'"
-      description="设置账号池归属、开放范围与计费规则。"
       width="wide"
       :busy="saving"
       initial-focus="input"

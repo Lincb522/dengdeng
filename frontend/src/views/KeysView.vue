@@ -30,6 +30,9 @@ const setupPlain = ref('')
 const showSetup = ref(false)
 const copiedKeyID = ref<number | null>(null)
 const revealedKeyIDs = ref<Set<number>>(new Set())
+const keySecrets = ref<Record<number, string>>({})
+const secretLoadingIDs = ref<Set<number>>(new Set())
+const setupSecretLoading = ref(false)
 const settingKey = ref<ApiKey | null>(null)
 const savingSettings = ref(false)
 const settingsGroupsOpen = ref(false)
@@ -87,7 +90,7 @@ function keyPlatforms(key: ApiKey | null | undefined) {
   return [...new Set(keyGroups(key).map((group) => group.platform))]
 }
 
-function quickSetupStorageKey(keyID: number) {
+function legacyQuickSetupStorageKey(keyID: number) {
   return `dengdeng.quick-setup.key.${keyID}`
 }
 
@@ -96,21 +99,11 @@ function matchesKeyPreview(key: ApiKey, plain: string) {
 	return !!plain && (!prefix || plain.startsWith(prefix)) && (!suffix || plain.endsWith(suffix))
 }
 
-// The API server only stores a one-way hash. Keep the secret in this browser's
-// local storage so refreshes and browser restarts do not force a rotation.
-function rememberQuickSetupKey(key: ApiKey, plain: string) {
-  if (!plain) return
+// Older builds kept recoverable keys in browser storage. Read them only for a
+// one-time, hash-verified migration to encrypted server storage.
+function legacyStoredKey(key: ApiKey) {
   try {
-    localStorage.setItem(quickSetupStorageKey(key.id), plain)
-	sessionStorage.removeItem(quickSetupStorageKey(key.id))
-  } catch {
-    // Privacy modes may deny storage; quick setup still works in memory.
-  }
-}
-
-function rememberedQuickSetupKey(key: ApiKey) {
-  try {
-	const storageKey = quickSetupStorageKey(key.id)
+	const storageKey = legacyQuickSetupStorageKey(key.id)
 	const persistent = localStorage.getItem(storageKey) || ''
 	if (persistent) {
 		if (matchesKeyPreview(key, persistent)) return persistent
@@ -118,8 +111,6 @@ function rememberedQuickSetupKey(key: ApiKey) {
 	}
 	const legacy = sessionStorage.getItem(storageKey) || ''
 	if (legacy && matchesKeyPreview(key, legacy)) {
-		localStorage.setItem(storageKey, legacy)
-		sessionStorage.removeItem(storageKey)
 		return legacy
 	}
 	if (legacy) sessionStorage.removeItem(storageKey)
@@ -129,27 +120,78 @@ function rememberedQuickSetupKey(key: ApiKey) {
   }
 }
 
-function forgetQuickSetupKey(key: ApiKey) {
+function clearLegacyStoredKey(key: ApiKey) {
 	try {
-		localStorage.removeItem(quickSetupStorageKey(key.id))
-		sessionStorage.removeItem(quickSetupStorageKey(key.id))
+		localStorage.removeItem(legacyQuickSetupStorageKey(key.id))
+		sessionStorage.removeItem(legacyQuickSetupStorageKey(key.id))
 	} catch { /* storage is optional */ }
+}
+
+function cacheKeySecret(keyID: number, plain: string) {
+  if (!plain) return
+  keySecrets.value = { ...keySecrets.value, [keyID]: plain }
 }
 
 function plainForKey(key: ApiKey) {
   if (createdKey.value?.id === key.id && createdPlain.value) return createdPlain.value
   if (setupKey.value?.id === key.id && setupPlain.value) return setupPlain.value
-  return rememberedQuickSetupKey(key)
+  return keySecrets.value[key.id] || ''
+}
+
+function setSecretLoading(keyID: number, loading: boolean) {
+  const next = new Set(secretLoadingIDs.value)
+  if (loading) next.add(keyID)
+  else next.delete(keyID)
+  secretLoadingIDs.value = next
+}
+
+function markSecretAvailable(keyID: number) {
+  keys.value = keys.value.map((key) => key.id === keyID ? { ...key, secret_available: true } : key)
+  if (setupKey.value?.id === keyID) setupKey.value = { ...setupKey.value, secret_available: true }
+  if (createdKey.value?.id === keyID) createdKey.value = { ...createdKey.value, secret_available: true }
+}
+
+async function fetchKeySecret(key: ApiKey) {
+  const cached = plainForKey(key)
+  if (cached) return cached
+  if (!key.secret_available) return ''
+  setSecretLoading(key.id, true)
+  try {
+    const result = await api.get<{ plain: string }>(`/api/user/keys/${key.id}/secret`)
+    cacheKeySecret(key.id, result.plain)
+    return result.plain
+  } finally {
+    setSecretLoading(key.id, false)
+  }
+}
+
+async function migrateLegacySecrets(items: ApiKey[]) {
+  let migrated = 0
+  await Promise.all(items.filter((key) => !key.secret_available).map(async (key) => {
+    const plain = legacyStoredKey(key)
+    if (!plain) return
+    try {
+      await api.put(`/api/user/keys/${key.id}/secret`, { plain })
+      cacheKeySecret(key.id, plain)
+      clearLegacyStoredKey(key)
+      key.secret_available = true
+      migrated += 1
+    } catch {
+      // Keep a still-valid legacy copy when the server is temporarily unavailable.
+    }
+  }))
+  if (migrated) toast.show(`已迁移 ${migrated} 个旧密钥到账号`, 'success')
 }
 
 async function copyKey(key: ApiKey) {
-  const plain = plainForKey(key)
-  if (!plain) {
-    openQuickSetup(key)
-    toast.show('旧密钥没有可读取的明文，请先补入原密钥', 'error')
+  if (!key.secret_available) {
+    void openQuickSetup(key)
+    toast.show('该旧密钥需要补入一次原密钥', 'error')
     return
   }
   try {
+    const plain = await fetchKeySecret(key)
+    if (!plain) throw new Error('无法读取密钥')
     await copyText(plain)
     copiedKeyID.value = key.id
     toast.show('密钥已复制', 'success')
@@ -180,6 +222,7 @@ function toLocalDateTime(value: string | null | undefined) {
 
 async function load() {
   keys.value = await api.get<ApiKey[]>('/api/user/keys')
+	await migrateLegacySecrets(keys.value)
   groups.value = await api.get<Group[]>('/api/user/groups')
 	newGroupIDs.value = normalizeGroupSelection(newGroupIDs.value)
   if (groups.value.length && !newGroupIDs.value.length) {
@@ -211,7 +254,7 @@ async function createKey() {
 		  createdKey.value = result.key
 		  setupKey.value = result.key
 		  setupPlain.value = result.plain
-      rememberQuickSetupKey(result.key, result.plain)
+	  cacheKeySecret(result.key.id, result.plain)
       newName.value = ''
       newQuota.value = 0
       newDailyQuota.value = 0
@@ -233,14 +276,31 @@ async function toggleKey(k: ApiKey) {
 async function removeKey(k: ApiKey) {
   if (!confirm(`确认删除密钥「${k.name}」?该操作不可恢复。`)) return
   await withToast(() => api.delete(`/api/user/keys/${k.id}`), '已删除')
-	forgetQuickSetupKey(k)
+	const next = { ...keySecrets.value }
+	delete next[k.id]
+	keySecrets.value = next
+	clearLegacyStoredKey(k)
   await load()
 }
 
-function toggleKeyReveal(key: ApiKey) {
+async function toggleKeyReveal(key: ApiKey) {
 	const next = new Set(revealedKeyIDs.value)
-	if (next.has(key.id)) next.delete(key.id)
-	else next.add(key.id)
+	if (next.has(key.id)) {
+		next.delete(key.id)
+	} else {
+		if (!key.secret_available) {
+			void openQuickSetup(key)
+			toast.show('该旧密钥需要补入一次原密钥', 'error')
+			return
+		}
+		try {
+			if (!await fetchKeySecret(key)) throw new Error('无法读取密钥')
+		} catch (error) {
+			toast.show(error instanceof Error ? error.message : '读取密钥失败', 'error')
+			return
+		}
+		next.add(key.id)
+	}
 	revealedKeyIDs.value = next
 }
 
@@ -303,19 +363,28 @@ async function copyPlain() {
   }
 }
 
-function openQuickSetup(key: ApiKey) {
+async function openQuickSetup(key: ApiKey) {
 	const isCurrentKey = setupKey.value?.id === key.id
 	const currentPlain = setupPlain.value
 	setupKey.value = key
 	setupPlain.value = isCurrentKey && currentPlain
 		? currentPlain
-		: rememberedQuickSetupKey(key)
+		: plainForKey(key)
 	showSetup.value = true
+	if (!setupPlain.value && key.secret_available) {
+		setupSecretLoading.value = true
+		try {
+			setupPlain.value = await fetchKeySecret(key)
+		} catch (error) {
+			toast.show(error instanceof Error ? error.message : '读取密钥失败', 'error')
+		} finally {
+			setupSecretLoading.value = false
+		}
+	}
 }
 
 function closeQuickSetup() {
   showSetup.value = false
-  if (setupKey.value) setupPlain.value = rememberedQuickSetupKey(setupKey.value)
 }
 
 function requestRotateForSetup() {
@@ -335,7 +404,7 @@ async function rotateForSetup(key: ApiKey) {
 	setupPlain.value = result.plain
 	createdKey.value = result.key
 	createdPlain.value = result.plain
-	rememberQuickSetupKey(result.key, result.plain)
+	cacheKeySecret(result.key.id, result.plain)
 	showSetup.value = true
 	await load()
 }
@@ -360,17 +429,12 @@ function onSetupEffortUpdated(value: string) {
   void load()
 }
 
-function onSetupSecretForgot() {
+function onSetupSecretSaved(value: string) {
 	if (!setupKey.value) return
-	forgetQuickSetupKey(setupKey.value)
-	setupPlain.value = ''
-	if (createdKey.value?.id === setupKey.value.id) {
-		createdPlain.value = ''
-		createdKey.value = null
-	}
-	const next = new Set(revealedKeyIDs.value)
-	next.delete(setupKey.value.id)
-	revealedKeyIDs.value = next
+	setupPlain.value = value
+	cacheKeySecret(setupKey.value.id, value)
+	clearLegacyStoredKey(setupKey.value)
+	markSecretAvailable(setupKey.value.id)
 }
 </script>
 
@@ -379,7 +443,6 @@ function onSetupSecretForgot() {
     <div class="console-page-head">
       <div>
         <h1>API 密钥</h1>
-		<p class="mt-1 text-sm text-slate-500">{{ keyMultiGroupEnabled ? '一把密钥可绑定多个分组' : '每把密钥绑定一个分组' }}，并可独立设置总额度和每日额度；填 0 即不限制。</p>
       </div>
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
@@ -409,17 +472,17 @@ function onSetupSecretForgot() {
         <tbody>
           <tr v-for="k in keys" :key="k.id">
             <td class="whitespace-nowrap font-medium text-slate-200">{{ k.name }}</td>
-            <td>
-              <div class="key-secret-cell">
+			<td>
+			  <div class="key-secret-cell">
 				<code class="num" :class="{ 'is-revealed': revealedKeyIDs.has(k.id) && plainForKey(k) }">{{ revealedKeyIDs.has(k.id) && plainForKey(k) ? plainForKey(k) : k.key_preview }}</code>
-				<span v-if="plainForKey(k)" class="key-secret-saved">本机已保存</span>
-				<button v-if="plainForKey(k)" class="btn-ghost" @click="toggleKeyReveal(k)">{{ revealedKeyIDs.has(k.id) ? '隐藏' : '显示' }}</button>
+				<span class="key-secret-saved">{{ k.secret_available ? '账号已保存' : '待补入' }}</span>
+				<button v-if="k.secret_available" class="btn-ghost" :disabled="secretLoadingIDs.has(k.id)" @click="toggleKeyReveal(k)">{{ secretLoadingIDs.has(k.id) ? '读取中…' : (revealedKeyIDs.has(k.id) ? '隐藏' : '显示') }}</button>
                 <button
 				  class="btn-ghost"
-                  :title="plainForKey(k) ? '复制完整密钥' : '补入原密钥后即可复制'"
+                  :title="k.secret_available ? '复制完整密钥' : '补入原密钥并保存到账号'"
                   @click="copyKey(k)"
                 >
-                  {{ plainForKey(k) ? (copiedKeyID === k.id ? '已复制' : '复制') : '补入' }}
+                  {{ k.secret_available ? (copiedKeyID === k.id ? '已复制' : '复制') : '补入' }}
                 </button>
               </div>
             </td>
@@ -472,7 +535,7 @@ function onSetupSecretForgot() {
     <AppModal
       :open="showCreate"
       :title="createdPlain ? '密钥创建成功' : '新建 API 密钥'"
-      :description="createdPlain ? '明文只显示一次，请立即复制并妥善保存。' : '选择可用分组并为这把密钥设置独立限制。'"
+      :description="createdPlain ? '密钥已加密保存到账号，可随时在已登录设备查看和复制。' : undefined"
       width="standard"
       :busy="creatingKey"
       initial-focus="input"
@@ -506,7 +569,7 @@ function onSetupSecretForgot() {
       </div>
       <section v-else class="key-created-state" aria-live="polite">
         <span class="key-created-state__mark" aria-hidden="true">✓</span>
-        <div><strong>可以开始使用</strong><p>点击下方密钥即可复制。离开后服务端无法再次显示明文。</p></div>
+        <div><strong>可以开始使用</strong><p>密钥已加密保存到账号，换设备登录后仍可查看和复制。</p></div>
         <button type="button" class="key-created-secret" title="点击复制密钥" @click="copyPlain"><code>{{ createdPlain }}</code><span>复制</span></button>
       </section>
       <template #footer>
@@ -525,7 +588,6 @@ function onSetupSecretForgot() {
 		<AppModal
 			:open="!!settingKey"
 			title="API 密钥设置"
-			description="修改会立即作用于后续请求，不需要重新生成密钥。"
 			width="wide"
 			:busy="savingSettings"
 			@close="closeSettings"
@@ -557,6 +619,8 @@ function onSetupSecretForgot() {
     <KeyQuickSetupModal
       :show="showSetup"
 			:api-key="setupPlain"
+			:secret-available="setupKey?.secret_available || false"
+			:loading-secret="setupSecretLoading"
 			:key-id="setupKey?.id || null"
 			:key-name="setupKey?.name || ''"
 			:key-preview="setupKey?.key_preview || ''"
@@ -566,7 +630,7 @@ function onSetupSecretForgot() {
       @close="closeQuickSetup"
 			@rotate="requestRotateForSetup"
 			@effort-updated="onSetupEffortUpdated"
-			@forget="onSetupSecretForgot"
+			@secret-saved="onSetupSecretSaved"
 		/>
   </div>
 </template>

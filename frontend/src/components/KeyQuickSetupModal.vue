@@ -16,8 +16,8 @@ interface SetupFile {
   hint?: string
 }
 
-const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; keyPreview: string; platform: string; platforms: string[]; reasoningEffort: string }>()
-const emit = defineEmits<{ close: []; rotate: []; forget: []; 'effort-updated': [value: string] }>()
+const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; keyPreview: string; platform: string; platforms: string[]; reasoningEffort: string; secretAvailable: boolean; loadingSecret: boolean }>()
+const emit = defineEmits<{ close: []; rotate: []; 'secret-saved': [value: string]; 'effort-updated': [value: string] }>()
 const toast = useToast()
 
 const activeClient = ref<ClientID>('codex')
@@ -34,6 +34,8 @@ const activePlatform = ref(props.platform || 'openai')
 // 创建之后也能直接在这里调整默认思考强度，改动即时保存到该密钥。
 const reasoningEffort = ref('auto')
 const savingEffort = ref(false)
+const savingSecret = ref(false)
+const secretStored = ref(props.secretAvailable)
 
 const clientDownloads: Record<ClientID, { label: string; action: string; url: string }> = {
   claude: { label: 'Claude Code', action: '下载 Claude Code', url: 'https://github.com/anthropics/claude-code/releases/latest' },
@@ -103,65 +105,21 @@ async function changeReasoningEffort(event: Event) {
   }
 }
 
-function quickSetupStorageKey() {
-  return props.keyId ? `dengdeng.quick-setup.key.${props.keyId}` : ''
-}
-
-function matchesKeyPreview(value: string) {
-	const [prefix, suffix] = (props.keyPreview || '').split('...')
-	return !!value && (!prefix || value.startsWith(prefix)) && (!suffix || value.endsWith(suffix))
-}
-
-function readRememberedApiKey() {
-  const storageKey = quickSetupStorageKey()
-  if (!storageKey) return ''
-  try {
-	const persistent = localStorage.getItem(storageKey) || ''
-	if (persistent) {
-		if (matchesKeyPreview(persistent)) return persistent
-		localStorage.removeItem(storageKey)
-	}
-	const legacy = sessionStorage.getItem(storageKey) || ''
-	if (legacy && matchesKeyPreview(legacy)) {
-		localStorage.setItem(storageKey, legacy)
-		sessionStorage.removeItem(storageKey)
-		return legacy
-	}
-	if (legacy) sessionStorage.removeItem(storageKey)
-	return ''
-  } catch {
-    return ''
-  }
-}
-
-function rememberApiKey(value: string) {
-  const storageKey = quickSetupStorageKey()
-  if (!storageKey) return
-  try {
-    const normalized = validDengDengApiKey(value)
-	if (normalized) {
-		localStorage.setItem(storageKey, normalized)
-		sessionStorage.removeItem(storageKey)
-	} else if (!value.trim()) {
-		localStorage.removeItem(storageKey)
-		sessionStorage.removeItem(storageKey)
-	}
-  } catch {
-	// A restricted browser can still use the pasted key in memory.
-  }
-}
-
-function forgetApiKey() {
-	const storageKey = quickSetupStorageKey()
+async function saveRecoveredSecret(showMessage = true) {
+	if (!props.keyId || !configuredApiKey.value || secretStored.value || savingSecret.value) return !!secretStored.value
+	savingSecret.value = true
 	try {
-		if (storageKey) {
-			localStorage.removeItem(storageKey)
-			sessionStorage.removeItem(storageKey)
-		}
-	} catch { /* storage is optional */ }
-	workingApiKey.value = ''
-	emit('forget')
-	toast.show('已清除本机保存的密钥', 'success')
+		await api.put(`/api/user/keys/${props.keyId}/secret`, { plain: configuredApiKey.value })
+		secretStored.value = true
+		emit('secret-saved', configuredApiKey.value)
+		if (showMessage) toast.show('密钥已保存到账号', 'success')
+		return true
+	} catch (error) {
+		if (showMessage) toast.show(error instanceof Error ? localizeErrorMessage(error.message) : '保存密钥失败', 'error')
+		return false
+	} finally {
+		savingSecret.value = false
+	}
 }
 
 const clientOptions = computed(() => {
@@ -232,7 +190,7 @@ const activeDescription = computed(() => {
 
 const selectedModelLabel = computed(() => selectedModel.value || '暂未读取到模型')
 
-watch([() => props.show, () => props.platform, () => props.platforms.join(','), () => props.apiKey, () => props.keyId], ([show]) => {
+watch([() => props.show, () => props.platform, () => props.platforms.join(','), () => props.apiKey, () => props.keyId, () => props.secretAvailable], ([show]) => {
 	activePlatform.value = availablePlatforms.value.includes(props.platform) ? props.platform : (availablePlatforms.value[0] || 'openai')
   activeClient.value = clientOptions.value[0]?.id || 'codex'
   activeShell.value = 'unix'
@@ -244,15 +202,14 @@ watch([() => props.show, () => props.platform, () => props.platforms.join(','), 
   reasoningEffort.value = normalizeReasoningEffort(props.reasoningEffort)
   if (!show) return
   activeStep.value = 1
-  workingApiKey.value = props.apiKey.trim() || readRememberedApiKey()
-  if (configuredApiKey.value) void loadModels()
+	workingApiKey.value = props.apiKey.trim()
+	secretStored.value = props.secretAvailable
+	if (configuredApiKey.value) void loadModels()
 }, { immediate: true })
 
 watch(() => props.reasoningEffort, (value) => {
   reasoningEffort.value = normalizeReasoningEffort(value)
 })
-
-watch(workingApiKey, rememberApiKey)
 
 watch(activeClient, () => {
   activeShell.value = 'unix'
@@ -281,6 +238,11 @@ async function loadModels() {
     modelsError.value = invalidApiKeyInput.value ? '请输入完整的 dd- 密钥；浏览器可能自动填入了登录密码' : ''
     return
   }
+	if (!secretStored.value && !(await saveRecoveredSecret(false))) {
+		modelsState.value = 'error'
+		modelsError.value = '请先保存有效的 dd- 密钥'
+		return
+	}
   modelsState.value = 'loading'
   modelsError.value = ''
   try {
@@ -520,7 +482,7 @@ function nextStep() {
     title="密钥快速配置"
     :description="keyName"
     width="setup"
-    :busy="savingEffort"
+    :busy="savingEffort || savingSecret || loadingSecret"
     @close="emit('close')"
   >
     <div class="key-setup-flow">
@@ -533,7 +495,7 @@ function nextStep() {
       <section v-if="activeStep === 1" class="key-setup-step">
         <header><span>1</span><div><strong>确认密钥与平台</strong><small>核对接入信息后再读取模型。</small></div></header>
         <div class="key-setup-summary">
-          <div class="key-setup-secret key-setup-secret--full"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" placeholder="粘贴已有密钥" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey" class="btn-ghost is-danger" @click="forgetApiKey">清除本机</button></div></div>
+          <div class="key-setup-secret key-setup-secret--full"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" :disabled="loadingSecret" :placeholder="loadingSecret ? '正在读取密钥…' : '粘贴已有密钥'" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey && !secretStored" class="btn-primary" :disabled="savingSecret" @click="saveRecoveredSecret()">{{ savingSecret ? '保存中…' : '保存到账号' }}</button><small v-else-if="secretStored">账号已保存</small></div></div>
           <div class="key-setup-secret"><span>接口地址</span><code :title="activeEndpoint">{{ activeEndpoint }}</code><button class="btn-ghost" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
 		  <div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><small>{{ availablePlatforms.length }} 个</small></div>
 		  <div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度</span><select class="input key-setup-effort" aria-label="思考强度" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>{{ savingEffort ? '保存中…' : 'Effort' }}</small></div>
@@ -568,7 +530,7 @@ function nextStep() {
         </template>
       </section>
 
-      <div v-if="activeStep === 1 && !configuredApiKey" class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>服务端只保存单向哈希。密钥会保存在当前浏览器本机，可随时清除。</p><button class="btn-danger" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
+      <div v-if="activeStep === 1 && !configuredApiKey" class="key-setup-empty"><strong>粘贴已有密钥即可继续</strong><p>密钥会加密保存到账号，换设备登录后仍可查看和复制。</p><button class="btn-danger" @click="emit('rotate')">找不到原密钥，重新生成</button></div>
 
       <details v-if="activeStep === 3 && configuredApiKey" class="modal-disclosure key-setup-downloads">
         <summary><span><strong>客户端下载</strong><small>Claude、Codex、Gemini、Chatbox 等 {{ downloadClients.length }} 个工具</small></span></summary>

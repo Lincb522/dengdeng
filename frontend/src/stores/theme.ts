@@ -3,8 +3,8 @@ import { defineStore } from 'pinia'
 
 export type ColorMode = 'light' | 'dark' | 'system'
 export type ResolvedColorMode = Exclude<ColorMode, 'system'>
-export type ThemeID = 'dengdeng' | 'folio' | 'signal'
-export type ThemeLayout = 'rail' | 'topbar' | 'compact'
+export type ThemeID = 'dengdeng' | 'folio' | 'signal' | 'breeze' | 'immersive' | 'glass'
+export type ThemeLayout = 'rail' | 'topbar' | 'compact' | 'breeze' | 'immersive' | 'glass'
 export type ThemeDensity = 'comfortable' | 'balanced' | 'compact'
 
 export interface ThemePreset {
@@ -39,11 +39,38 @@ export const themePresets: readonly ThemePreset[] = [
   {
     id: 'signal',
     name: '信号',
-    description: '图标窄栏与紧凑工作区',
+    description: '分区导航与紧凑工作区',
     layout: 'compact',
     density: 'compact',
     colors: ['#f3f7f8', '#172126', '#23778a'],
     browserColors: ['#f3f7f8', '#0f171a'],
+  },
+  {
+    id: 'breeze',
+    name: '小清新',
+    description: '轻窄侧栏与薄荷工作区',
+    layout: 'breeze',
+    density: 'balanced',
+    colors: ['#f1fbf7', '#18332e', '#27866d'],
+    browserColors: ['#f1fbf7', '#10221f'],
+  },
+  {
+    id: 'immersive',
+    name: '沉浸式',
+    description: '全屏内容与低干扰顶栏',
+    layout: 'immersive',
+    density: 'comfortable',
+    colors: ['#eef1f6', '#151922', '#4a5f96'],
+    browserColors: ['#eef1f6', '#0e1118'],
+  },
+  {
+    id: 'glass',
+    name: '毛玻璃',
+    description: '通透浮层与柔和景深',
+    layout: 'glass',
+    density: 'balanced',
+    colors: ['#edf5ff', '#1d2940', '#5b68b5'],
+    browserColors: ['#e9f2ff', '#111827'],
   },
 ] as const
 

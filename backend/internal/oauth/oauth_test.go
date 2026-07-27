@@ -276,13 +276,20 @@ func TestGeminiImportedOAuthRefreshesWithConfiguredProvider(t *testing.T) {
 	}
 }
 
-func TestCallbackURLRequiresExplicitProductionURL(t *testing.T) {
+func TestOpenAICallbackURLsUseManualLoopbackCompletion(t *testing.T) {
 	manager := NewManager(nil, config.OAuthConfig{}, nil)
 	defer manager.Close()
-	if _, err := manager.CallbackURL(model.PlatformOpenAI, "relay.example.com", true); err == nil {
-		t.Fatal("production Host header should not determine an OAuth callback URL")
+	providerURL, completionURL, err := manager.CallbackURLs(model.PlatformOpenAI, "relay.example.com", true)
+	if err != nil {
+		t.Fatalf("production callback URLs: %v", err)
 	}
-	providerURL, completionURL, err := manager.CallbackURLs(model.PlatformOpenAI, "127.0.0.1:5173", false)
+	if providerURL != "http://localhost:1455/auth/callback" {
+		t.Fatalf("provider callback = %q", providerURL)
+	}
+	if completionURL != "https://relay.example.com/api/admin/oauth/openai/callback" {
+		t.Fatalf("completion callback = %q", completionURL)
+	}
+	providerURL, completionURL, err = manager.CallbackURLs(model.PlatformOpenAI, "127.0.0.1:5173", false)
 	if err != nil {
 		t.Fatalf("localhost callback: %v", err)
 	}
@@ -290,7 +297,7 @@ func TestCallbackURLRequiresExplicitProductionURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse provider callback: %v", err)
 	}
-	if parsedProvider.Host != "localhost:1455" && parsedProvider.Host != "localhost:1457" || parsedProvider.Path != "/auth/callback" {
+	if parsedProvider.Host != "localhost:1455" || parsedProvider.Path != "/auth/callback" {
 		t.Fatalf("provider callback = %q, want localhost OpenAI callback", providerURL)
 	}
 	if want := "http://127.0.0.1:5173/api/admin/oauth/openai/callback"; completionURL != want {
@@ -317,5 +324,19 @@ func TestLocalCallbackTargetForwardsToStateBoundCompletion(t *testing.T) {
 	forwarded, _ := url.Parse(target)
 	if forwarded.Host != "127.0.0.1:9100" || forwarded.Path != "/api/admin/oauth/openai/callback" || forwarded.Query().Get("code") != "provider-code" || forwarded.Query().Get("state") == "" {
 		t.Fatalf("unexpected forwarded callback: %s", target)
+	}
+}
+
+func TestParseAuthorizationCodeAcceptsCallbackURLAndClaudeCode(t *testing.T) {
+	code, state, err := parseAuthorizationCode("http://localhost:1455/auth/callback?code=provider-code&state=oauth-state")
+	if err != nil || code != "provider-code" || state != "oauth-state" {
+		t.Fatalf("callback URL parsed as code=%q state=%q err=%v", code, state, err)
+	}
+	code, state, err = parseAuthorizationCode("claude-code#claude-state")
+	if err != nil || code != "claude-code" || state != "claude-state" {
+		t.Fatalf("Claude code parsed as code=%q state=%q err=%v", code, state, err)
+	}
+	if _, _, err := parseAuthorizationCode("http://localhost:1455/auth/callback?error=access_denied"); err == nil {
+		t.Fatal("callback URL without code should fail")
 	}
 }

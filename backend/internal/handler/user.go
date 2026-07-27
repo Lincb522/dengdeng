@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -243,8 +244,59 @@ func (h *UserHandler) ListKeys(c *gin.Context) {
 	h.db.Preload("Group").Preload("Groups").Where("user_id = ?", user.ID).Order("id DESC").Find(&keys)
 	for i := range keys {
 		hydrateAPIKeyGroups(&keys[i])
+		keys[i].SecretAvailable = string(keys[i].KeySecret) != ""
 	}
 	util.OK(c, keys)
+}
+
+// RevealKeySecret returns the encrypted recovery copy to the authenticated
+// owner only. The normal list endpoint deliberately never contains plaintext.
+func (h *UserHandler) RevealKeySecret(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var key model.APIKey
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&key).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "key not found")
+		return
+	}
+	plain := string(key.KeySecret)
+	if plain == "" {
+		util.Fail(c, http.StatusConflict, "key secret is unavailable")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("Pragma", "no-cache")
+	util.OK(c, gin.H{"plain": plain})
+}
+
+// RecoverKeySecret upgrades legacy keys whose plaintext previously existed
+// only in browser storage. The supplied value must match the immutable hash,
+// so a user cannot accidentally attach another credential to this key row.
+func (h *UserHandler) RecoverKeySecret(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	var key model.APIKey
+	if err := h.db.Where("id = ? AND user_id = ?", c.Param("id"), user.ID).First(&key).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "key not found")
+		return
+	}
+	var req struct {
+		Plain string `json:"plain" binding:"required,max=256"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid key secret")
+		return
+	}
+	plain := strings.TrimSpace(req.Plain)
+	actual, expected := []byte(util.HashAPIKey(plain)), []byte(key.KeyHash)
+	if len(actual) != len(expected) || subtle.ConstantTimeCompare(actual, expected) != 1 {
+		util.Fail(c, http.StatusBadRequest, "key secret does not match")
+		return
+	}
+	if err := h.db.Model(&key).Update("key_secret", crypto.EncryptedString(plain)).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "save key secret failed")
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	util.OK(c, gin.H{"saved": true})
 }
 
 type createKeyReq struct {
@@ -313,6 +365,7 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 		GroupID:         groups[0].ID,
 		KeyHash:         hash,
 		KeyPreview:      preview,
+		KeySecret:       crypto.EncryptedString(plain),
 		Name:            req.Name,
 		Status:          model.StatusActive,
 		ReasoningEffort: reasoningEffort,
@@ -331,7 +384,7 @@ func (h *UserHandler) CreateKey(c *gin.Context) {
 	key.Group = &groups[0]
 	key.Groups = groups
 	key.GroupIDs = groupIDs
-	// plaintext is returned exactly once, at creation time
+	key.SecretAvailable = true
 	util.OK(c, gin.H{"key": key, "plain": plain})
 }
 
@@ -625,9 +678,8 @@ func (h *UserHandler) DeleteKey(c *gin.Context) {
 }
 
 // RotateKey replaces the credential material without changing its quotas,
-// group binding, or historical usage. We retain only a hash by design, so an
-// existing key can never be shown again; rotation is the safe way to recover a
-// copy for a new CLI installation.
+// group binding, or historical usage, and stores the new recovery copy using
+// the same at-rest encryption as other provider credentials.
 func (h *UserHandler) RotateKey(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var key model.APIKey
@@ -637,13 +689,15 @@ func (h *UserHandler) RotateKey(c *gin.Context) {
 	}
 	plain, hash, preview := util.NewAPIKey()
 	if err := h.db.Model(&key).Updates(map[string]any{
-		"key_hash": hash, "key_preview": preview, "last_used_at": nil,
+		"key_hash": hash, "key_preview": preview,
+		"key_secret": crypto.EncryptedString(plain), "last_used_at": nil,
 	}).Error; err != nil {
 		util.Fail(c, http.StatusInternalServerError, "rotate key failed")
 		return
 	}
 	h.db.Preload("Group").Preload("Groups").First(&key, key.ID)
 	hydrateAPIKeyGroups(&key)
+	key.SecretAvailable = true
 	util.OK(c, gin.H{"key": key, "plain": plain})
 }
 

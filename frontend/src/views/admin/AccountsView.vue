@@ -483,20 +483,21 @@ async function startOAuthLogin() {
   }
 }
 
-async function completeClaudeOAuth() {
-  if (platformOfSelectedGroup.value !== 'anthropic' || !oauthPendingState.value || !oauthAuthorizationCode.value.trim()) return
+async function completeOAuthLogin() {
+  const platform = platformOfSelectedGroup.value
+  if ((platform !== 'anthropic' && platform !== 'openai') || !oauthPendingState.value || !oauthAuthorizationCode.value.trim()) return
   oauthCompleting.value = true
   try {
-    await api.post('/api/admin/oauth/anthropic/complete', {
+    await api.post(`/api/admin/oauth/${platform}/complete`, {
       state: oauthPendingState.value,
       code: oauthAuthorizationCode.value.trim(),
     })
-    toast.show('Claude 登录成功，账号已添加', 'success')
+    toast.show(`${PLATFORM_LABELS[platform]} 登录成功，账号已添加`, 'success')
     showForm.value = false
     resetOAuthCompletion()
     await loadAccounts()
   } catch (error) {
-    toast.show(error instanceof Error ? error.message : 'Claude 授权码验证失败', 'error')
+    toast.show(error instanceof Error ? error.message : `${PLATFORM_LABELS[platform]} OAuth 验证失败`, 'error')
   } finally {
     oauthCompleting.value = false
   }
@@ -961,7 +962,6 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     <div class="console-page-head accounts-page-head">
       <div>
         <h1>上游账号</h1>
-        <p class="mt-1 text-sm text-slate-500">一个账号可用于多个同平台分组；自定义排序不会影响上游调度优先级。</p>
       </div>
       <div class="accounts-toolbar">
         <select v-model.number="filterGroup" class="input accounts-toolbar-select" aria-label="分组筛选" @change="updateAccountFilters">
@@ -1102,7 +1102,6 @@ async function refreshAccountQuota(account: UpstreamAccount) {
     <AppModal
       :open="showForm"
       :title="editing ? '编辑上游账号' : '添加上游账号'"
-      :description="editing ? '调整账号可用分组、凭据与连接策略。' : '新增凭据或复用已有账号，并配置可用分组。'"
       width="wide"
       :busy="savingAccount || oauthStarting || oauthCompleting"
       @close="closeAccountForm"
@@ -1166,18 +1165,18 @@ async function refreshAccountQuota(account: UpstreamAccount) {
             <div v-if="!editing" class="oauth-primary-path">
               <div>
                 <strong>登录 {{ oauthProviderLabel }}</strong>
-                <p v-if="platformOfSelectedGroup === 'anthropic'">在 Claude 页面完成授权，复制页面显示的授权码并粘贴回来。</p>
-                <p v-else>在新窗口完成授权，回调后自动加密保存。</p>
+                <p v-if="platformOfSelectedGroup === 'anthropic'">完成授权后，复制页面显示的授权码。</p>
+                <p v-else>完成授权后，即使 localhost 页面无法打开，也请复制浏览器地址栏里的完整地址。</p>
               </div>
               <button type="button" class="btn-primary" :disabled="!form.group_id || !oauthAvailable || oauthStarting || oauthCompleting" @click="startOAuthLogin">{{ oauthStarting ? '正在跳转…' : (oauthAwaitingCode ? '重新授权' : '去登录') }}</button>
             </div>
-            <div v-if="!editing && platformOfSelectedGroup === 'anthropic' && oauthAwaitingCode" class="oauth-code-completion">
+            <div v-if="!editing && oauthAwaitingCode" class="oauth-code-completion">
               <label class="modal-field">
-                <span class="label">Claude 授权码</span>
-                <input v-model.trim="oauthAuthorizationCode" class="input font-mono text-xs" autocomplete="off" placeholder="粘贴授权页显示的授权码" @keyup.enter="completeClaudeOAuth" />
-                <small class="modal-field__hint">可以直接粘贴完整的“授权码#state”，系统会自动校验。</small>
+                <span class="label">{{ platformOfSelectedGroup === 'openai' ? 'OpenAI 回调地址' : 'Claude 授权码' }}</span>
+                <input v-model.trim="oauthAuthorizationCode" class="input font-mono text-xs" autocomplete="off" :placeholder="platformOfSelectedGroup === 'openai' ? 'http://localhost:1455/auth/callback?code=…&state=…' : '粘贴授权页显示的授权码'" @keyup.enter="completeOAuthLogin" />
+                <small class="modal-field__hint">{{ platformOfSelectedGroup === 'openai' ? '复制地址栏中的完整 localhost 回调地址；页面显示无法访问不影响完成登录。' : '可以直接粘贴完整的“授权码#state”，系统会自动校验。' }}</small>
               </label>
-              <button type="button" class="btn-primary" :disabled="oauthCompleting || !oauthAuthorizationCode.trim()" @click="completeClaudeOAuth">{{ oauthCompleting ? '验证中…' : '完成登录' }}</button>
+              <button type="button" class="btn-primary" :disabled="oauthCompleting || !oauthAuthorizationCode.trim()" @click="completeOAuthLogin">{{ oauthCompleting ? '验证中…' : '完成登录' }}</button>
             </div>
             <div v-if="editing" class="modal-note"><strong>已保存 OAuth 凭据。</strong> 如需替换，可在下方手动凭据中录入新 Token。</div>
             <details class="modal-disclosure" :open="manualOAuthOpen" @toggle="manualOAuthOpen = ($event.currentTarget as HTMLDetailsElement).open">

@@ -190,7 +190,7 @@ onMounted(load)
 <template>
   <div class="payment-center max-w-6xl">
     <div class="console-page-head">
-      <div><h1>支付中心</h1><p class="mt-1 text-sm text-slate-500">收支、订单与渠道统一管理。</p></div>
+      <h1>支付中心</h1>
       <button class="btn-ghost text-xs" :disabled="ledgerBusy" @click="load">刷新数据</button>
     </div>
 

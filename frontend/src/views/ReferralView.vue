@@ -148,8 +148,7 @@ onMounted(load)
   <div>
     <div class="console-page-head">
       <div>
-        <h1>推广中心 Referral</h1>
-        <p class="mt-1 text-sm text-slate-500">实际 Token 消费计提，现金结算，不进入 API 余额。</p>
+        <h1>推广中心</h1>
       </div>
     </div>
 
@@ -173,7 +172,7 @@ onMounted(load)
 			<div class="mt-2 num text-2xl font-semibold text-amber">{{ cashMoney(data.cash.locked_minor, data.cash.currency) }}</div>
 		</article>
         <article class="card p-5">
-          <div class="label">推广用户 Referrals</div>
+          <div class="label">推广用户</div>
           <div class="mt-2 num text-2xl font-semibold text-slate-200">{{ primaryCode?.referred_users || 0 }}</div>
         </article>
         <article class="card p-5">
@@ -184,7 +183,7 @@ onMounted(load)
 
 	  <section class="card mb-6 p-6">
 		<div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-			<div><h2 class="text-sm font-semibold text-slate-200">现金结算 Cash Payout</h2><p class="mt-1 text-xs text-slate-500">微信 OpenID 必须属于本站商户绑定的 AppID，审核通过后才可提现。</p></div>
+			<div><h2 class="text-sm font-semibold text-slate-200">现金结算</h2><p class="mt-1 text-xs text-slate-500">微信 OpenID 必须属于本站商户绑定的 AppID，审核通过后才可提现。</p></div>
 			<button v-if="data.payout_account?.status === 'verified'" class="btn-primary" :disabled="payoutBusy || !data.cash.enabled || data.cash.available_minor < data.cash.min_payout_minor" @click="requestPayout">{{ payoutBusy ? '处理中…' : `提现 ${cashMoney(data.cash.available_minor, data.cash.currency)}` }}</button>
 		</div>
 		<div v-if="data.payout_account" class="flex flex-wrap items-center gap-3 text-sm">
@@ -233,7 +232,6 @@ onMounted(load)
         <header class="referral-promotion__head">
           <div>
             <h2>推广文案 Promotion Copy</h2>
-            <p>已自动带入你的推广链接和推广码。</p>
           </div>
           <button
             class="btn-primary referral-promotion__copy"

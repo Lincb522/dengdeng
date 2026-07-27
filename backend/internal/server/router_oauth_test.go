@@ -17,7 +17,7 @@ import (
 	"dengdeng/internal/util"
 )
 
-func TestOAuthCallbackCreatesUpstreamAccount(t *testing.T) {
+func TestOpenAIOAuthPastedCallbackCreatesUpstreamAccount(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/token" {
 			http.NotFound(w, r)
@@ -93,7 +93,9 @@ func TestOAuthCallbackCreatesUpstreamAccount(t *testing.T) {
 	}
 	var startBody struct {
 		Data struct {
-			AuthorizeURL string `json:"authorize_url"`
+			AuthorizeURL   string `json:"authorize_url"`
+			State          string `json:"state"`
+			CompletionMode string `json:"completion_mode"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(start.Body.Bytes(), &startBody); err != nil {
@@ -107,36 +109,27 @@ func TestOAuthCallbackCreatesUpstreamAccount(t *testing.T) {
 	if state == "" {
 		t.Fatalf("missing state in authorize URL: %s", startBody.Data.AuthorizeURL)
 	}
+	if startBody.Data.State != state || startBody.Data.CompletionMode != "code" {
+		t.Fatalf("unexpected OAuth completion payload: %#v", startBody.Data)
+	}
 	redirectURI, err := url.Parse(authorizeURL.Query().Get("redirect_uri"))
 	if err != nil {
 		t.Fatalf("parse redirect URI: %v", err)
 	}
-	if (redirectURI.Host != "localhost:1455" && redirectURI.Host != "localhost:1457") || redirectURI.Path != "/auth/callback" {
+	if redirectURI.Host != "localhost:1455" || redirectURI.Path != "/auth/callback" {
 		t.Fatalf("redirect URI = %q, want OpenAI local callback", redirectURI)
 	}
 
-	bridgeQuery := redirectURI.Query()
-	bridgeQuery.Set("state", state)
-	bridgeQuery.Set("code", "provider-code")
-	redirectURI.RawQuery = bridgeQuery.Encode()
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	bridgeResponse, err := client.Get(redirectURI.String())
-	if err != nil {
-		t.Fatalf("call local bridge: %v", err)
-	}
-	defer bridgeResponse.Body.Close()
-	if bridgeResponse.StatusCode != http.StatusFound {
-		t.Fatalf("local bridge status=%d", bridgeResponse.StatusCode)
-	}
-	forwarded, err := url.Parse(bridgeResponse.Header.Get("Location"))
-	if err != nil {
-		t.Fatalf("parse forwarded callback: %v", err)
-	}
-	callback := httptest.NewRequest(http.MethodGet, forwarded.RequestURI(), nil)
-	callbackRecorder := httptest.NewRecorder()
-	router.ServeHTTP(callbackRecorder, callback)
-	if callbackRecorder.Code != http.StatusOK || !bytes.Contains(callbackRecorder.Body.Bytes(), []byte("OAuth 登录成功")) {
-		t.Fatalf("callback status=%d body=%s", callbackRecorder.Code, callbackRecorder.Body.String())
+	callbackQuery := redirectURI.Query()
+	callbackQuery.Set("state", state)
+	callbackQuery.Set("code", "provider-code")
+	redirectURI.RawQuery = callbackQuery.Encode()
+	complete := callJSON(t, router, http.MethodPost, "/api/admin/oauth/openai/complete", map[string]any{
+		"state": state,
+		"code":  redirectURI.String(),
+	}, loginBody.Data.Token)
+	if complete.Code != http.StatusOK {
+		t.Fatalf("oauth complete status=%d body=%s", complete.Code, complete.Body.String())
 	}
 	var account model.UpstreamAccount
 	if err := db.Where("group_id = ?", groupBody.Data.ID).First(&account).Error; err != nil {

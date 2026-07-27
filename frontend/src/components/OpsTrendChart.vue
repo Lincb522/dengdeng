@@ -80,7 +80,6 @@ const successRate = computed(() => totalRequests.value ? ((totalRequests.value -
     <header class="data-chart-head">
       <div>
         <h3 id="ops-chart-title">请求走势</h3>
-        <p>每根柱代表一个时间段，红色部分为失败请求。</p>
       </div>
       <div class="data-chart-legend" aria-label="图例">
         <span><i class="is-success"></i>成功</span>

@@ -91,7 +91,6 @@ async function remove(p: ModelPrice) {
     <div class="console-page-head">
       <div>
         <h1>模型定价</h1>
-				<p class="mt-1 text-sm text-slate-500">文本与图像 Token 单位为 USD / 1M；每张图为 USD / 张。设定每张图价格后，会覆盖图像 Token 三项，避免重复计费。</p>
       </div>
       <button class="btn-primary" @click="openCreate">新增规则</button>
     </div>

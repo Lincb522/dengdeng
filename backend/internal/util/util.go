@@ -34,7 +34,8 @@ func RandomToken(n int) string {
 	return string(buf)
 }
 
-// NewAPIKey returns (plaintext, sha256hex, preview). Only the hash is stored.
+// NewAPIKey returns (plaintext, sha256hex, preview). The hash is used for
+// authentication; callers may separately retain an encrypted recovery copy.
 func NewAPIKey() (string, string, string) {
 	plain := "dd-" + RandomToken(48)
 	return plain, HashAPIKey(plain), plain[:10] + "..." + plain[len(plain)-4:]

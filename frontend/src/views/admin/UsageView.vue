@@ -105,7 +105,6 @@ onMounted(async () => {
     <div class="console-page-head usage-page-head">
       <div>
         <h1>全站用量</h1>
-        <p>可按时间、用户、路由池或结果查询；导出与列表使用同一组条件。</p>
       </div>
       <div class="flex items-center gap-2">
         <button class="btn-ghost !px-3 !py-1.5 text-xs" @click="expanded = !expanded">{{ expanded ? '收起条件' : '更多条件' }}</button>

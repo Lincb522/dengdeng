@@ -117,7 +117,6 @@ onMounted(load)
     <div class="console-page-head">
       <div>
         <h1>告警与巡检</h1>
-        <p class="mt-1 text-sm text-slate-500">告警由非计费健康探测驱动：同一故障会持续更新，恢复后自动关闭，不会重复刷屏。</p>
       </div>
       <div class="flex gap-2"><button class="btn-ghost" :disabled="loading" @click="load">刷新</button><button class="btn-primary" @click="openCreate">新建规则</button></div>
     </div>

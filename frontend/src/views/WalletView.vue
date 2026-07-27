@@ -134,7 +134,6 @@ onBeforeUnmount(() => {
   <div class="max-w-4xl">
     <div class="console-page-head">
       <h1>钱包</h1>
-      <p class="mt-1 text-sm text-slate-500">管理余额、充值记录和兑换码</p>
     </div>
 
     <div class="card mb-6 flex items-center justify-between p-6">

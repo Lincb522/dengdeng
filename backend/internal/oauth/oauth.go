@@ -264,6 +264,9 @@ func newTokenRequest(ctx context.Context, platform, tokenURL string, values url.
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	if platform == model.PlatformOpenAI {
+		req.Header.Set("User-Agent", "codex-cli/0.91.0")
+	}
 	return req, nil
 }
 
@@ -430,14 +433,25 @@ type loginState struct {
 const loginStateTTL = 10 * time.Minute
 
 // CallbackURLs returns the provider-facing URI and the console completion URI.
-// The built-in OpenAI client accepts localhost loopback callbacks at
-// /auth/callback (with an arbitrary local port), but rejects 127.0.0.1 and
-// application-specific callback paths. The local bridge route then redirects
-// back to the console completion URL without exposing any credential.
+// The built-in OpenAI client accepts a localhost loopback callback at
+// /auth/callback but rejects application-specific remote callback paths. The
+// console therefore accepts the copied callback URL for server-side exchange.
 func (m *Manager) CallbackURLs(platform, requestHost string, isTLS bool) (providerURL, completionURL string, err error) {
 	prov, ok := m.provider(platform)
 	if !ok || prov.AuthorizeURL == "" || prov.TokenURL == "" || prov.ClientID == "" {
 		return "", "", fmt.Errorf("oauth login is not configured for %s", platform)
+	}
+	if platform == model.PlatformOpenAI && prov.BuiltinClient && prov.RedirectURL == "" && prov.ClientID == providers[model.PlatformOpenAI].ClientID {
+		// The Codex public client only accepts its registered localhost callback.
+		// On a remote deployment that localhost belongs to the administrator's
+		// browser, not this server, so the UI completes the flow by pasting the
+		// final callback URL back into the authenticated console.
+		scheme := "http"
+		if isTLS {
+			scheme = "https"
+		}
+		return fmt.Sprintf("http://localhost:%d/auth/callback", openAILocalPort),
+			fmt.Sprintf("%s://%s/api/admin/oauth/%s/callback", scheme, requestHost, platform), nil
 	}
 	if platform == model.PlatformAnthropic && prov.BuiltinClient {
 		host, port, err := splitHostPort(requestHost)
@@ -477,14 +491,6 @@ func (m *Manager) CallbackURLs(platform, requestHost string, isTLS bool) (provid
 	scheme := "http"
 	if isTLS {
 		scheme = "https"
-	}
-	if platform == model.PlatformOpenAI && prov.BuiltinClient {
-		bridgePort, err := m.ensureOpenAILocalBridge()
-		if err != nil {
-			return "", "", err
-		}
-		return fmt.Sprintf("http://localhost:%d/auth/callback", bridgePort),
-			fmt.Sprintf("%s://%s/api/admin/oauth/%s/callback", scheme, requestHost, platform), nil
 	}
 	if port == "" && host == "::1" {
 		requestHost = "[::1]"
@@ -602,20 +608,18 @@ func (m *Manager) BeginLoginWithCompletion(platform, redirectURL, completionURL 
 // CompleteLogin consumes a callback state, exchanges the authorization code,
 // and returns the credentials for the handler to persist.
 func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code string) (*LoginResult, error) {
+	code, codeState, err := parseAuthorizationCode(code)
+	if err != nil {
+		return nil, err
+	}
+	if codeState != "" && codeState != state {
+		return nil, errors.New("oauth authorization state does not match")
+	}
 	flow, err := m.takeState(platform, state)
 	if err != nil {
 		return nil, err
 	}
 	prov, _ := m.provider(platform)
-	code = strings.TrimSpace(code)
-	codeState := ""
-	if index := strings.Index(code, "#"); index >= 0 {
-		codeState = strings.TrimSpace(code[index+1:])
-		code = strings.TrimSpace(code[:index])
-	}
-	if platform == model.PlatformAnthropic && codeState != "" && codeState != state {
-		return nil, errors.New("oauth authorization state does not match")
-	}
 	values := url.Values{
 		"grant_type":    {"authorization_code"},
 		"code":          {code},
@@ -667,6 +671,30 @@ func (m *Manager) CompleteLogin(ctx context.Context, platform, state, code strin
 		result.AccountID = tokens.Organization.UUID
 	}
 	return result, nil
+}
+
+func parseAuthorizationCode(raw string) (code, state string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", errors.New("oauth authorization code is required")
+	}
+	if parsed, parseErr := url.Parse(raw); parseErr == nil && parsed.Scheme != "" {
+		code = strings.TrimSpace(parsed.Query().Get("code"))
+		state = strings.TrimSpace(parsed.Query().Get("state"))
+		if code == "" {
+			return "", state, errors.New("oauth callback URL does not contain an authorization code")
+		}
+		return code, state, nil
+	}
+	code = raw
+	if index := strings.Index(code, "#"); index >= 0 {
+		state = strings.TrimSpace(code[index+1:])
+		code = strings.TrimSpace(code[:index])
+	}
+	if code == "" {
+		return "", state, errors.New("oauth authorization code is required")
+	}
+	return code, state, nil
 }
 
 // CancelLogin consumes a pending state after a provider-side denial. It

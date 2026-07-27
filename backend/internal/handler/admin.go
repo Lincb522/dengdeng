@@ -1968,7 +1968,7 @@ func (h *AdminHandler) StartOAuthLogin(c *gin.Context) {
 	payload := gin.H{"authorize_url": authorizeURL, "completion_mode": "callback"}
 	if parsed, parseErr := url.Parse(authorizeURL); parseErr == nil {
 		payload["state"] = parsed.Query().Get("state")
-		if platform == model.PlatformAnthropic && parsed.Query().Get("code") == "true" {
+		if platform == model.PlatformOpenAI || (platform == model.PlatformAnthropic && parsed.Query().Get("code") == "true") {
 			payload["completion_mode"] = "code"
 		}
 	}
@@ -2080,8 +2080,9 @@ func (h *AdminHandler) persistOAuthAccount(platform string, result *oauth.LoginR
 	return &account, nil
 }
 
-// FinishOAuthLogin completes providers such as Claude whose fixed callback
-// page displays an authorization code for the administrator to paste back.
+// FinishOAuthLogin completes providers whose registered callback cannot return
+// directly to a remote console. It accepts either a code or the full callback
+// URL copied from the browser address bar.
 func (h *AdminHandler) FinishOAuthLogin(c *gin.Context) {
 	platform := c.Param("platform")
 	var req struct {
@@ -2095,7 +2096,7 @@ func (h *AdminHandler) FinishOAuthLogin(c *gin.Context) {
 	result, err := h.oauth.CompleteLogin(c.Request.Context(), platform, strings.TrimSpace(req.State), strings.TrimSpace(req.Code))
 	if err != nil {
 		log.Printf("[oauth] complete %s login failed: %v", platform, err)
-		util.Fail(c, http.StatusBadRequest, "OAuth 登录未完成，请重新发起授权并粘贴新的授权码")
+		util.Fail(c, http.StatusBadRequest, "OAuth 登录未完成，请重新发起授权并粘贴新的回调地址或授权码")
 		return
 	}
 	account, err := h.persistOAuthAccount(platform, result)

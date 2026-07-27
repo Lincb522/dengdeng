@@ -97,7 +97,6 @@ onMounted(load)
     <div class="console-page-head">
       <div>
         <h1>数据库备份</h1>
-        <p>自动留存 SQLite 一致性快照，手动备份不受清理策略影响。</p>
       </div>
       <div class="backup-head-actions">
         <button class="btn-ghost" :disabled="loading" @click="load">刷新</button>

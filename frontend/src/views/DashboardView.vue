@@ -96,7 +96,6 @@ onMounted(loadDashboard)
       <div>
         <div class="dashboard-date"><span></span>{{ dateLabel }} · 服务正常</div>
         <h1>总览</h1>
-        <p>账户资金、调用趋势与接入状态。</p>
       </div>
       <div class="dashboard-head-actions">
         <RouterLink class="btn-ghost" to="/usage">用量明细</RouterLink>
@@ -132,7 +131,7 @@ onMounted(loadDashboard)
         <UsageChart class="dashboard-usage" :daily="summary?.daily ?? []" />
 
         <aside class="dashboard-panel dashboard-access">
-          <div class="dashboard-panel-head"><div><h2>接入状态</h2><p>当前账户的可用资源</p></div><span class="dashboard-live-dot" title="服务正常"></span></div>
+          <div class="dashboard-panel-head"><h2>接入状态</h2><span class="dashboard-live-dot" title="服务正常"></span></div>
           <div class="dashboard-access-list">
             <div><span>活跃密钥</span><strong>{{ activeKeys.length }} <small>/ {{ keys.length }}</small></strong></div>
             <div><span>可用分组</span><strong>{{ activeGroups.length }} <small>/ {{ groups.length }}</small></strong></div>
@@ -148,7 +147,7 @@ onMounted(loadDashboard)
 
       <section class="dashboard-lower-grid">
         <article class="dashboard-panel dashboard-token-mix">
-          <div class="dashboard-panel-head"><div><h2>30 天 Token 结构</h2><p>计费前的输入与输出用量</p></div><strong>{{ formatTokens(monthTokens) }}</strong></div>
+          <div class="dashboard-panel-head"><h2>30 天 Token 结构</h2><strong>{{ formatTokens(monthTokens) }}</strong></div>
           <div class="dashboard-token-bar" aria-hidden="true"><i :style="{ width: `${inputShare}%` }"></i><b :style="{ width: `${outputShare}%` }"></b></div>
           <div class="dashboard-token-legend">
             <div><span class="is-input"></span><p>输入 Token<small>{{ formatTokens(summary?.month.input_tokens ?? 0) }} · {{ inputShare }}%</small></p></div>
@@ -158,7 +157,7 @@ onMounted(loadDashboard)
         </article>
 
         <nav class="dashboard-panel dashboard-shortcuts" aria-label="常用入口">
-          <div class="dashboard-panel-head"><div><h2>常用入口</h2><p>继续完成接入与管理</p></div></div>
+          <div class="dashboard-panel-head"><h2>常用入口</h2></div>
           <RouterLink to="/keys"><span>API 密钥<small>创建、限额与快速配置</small></span><b>→</b></RouterLink>
           <RouterLink to="/models"><span>模型广场<small>查看模型能力和可用分组</small></span><b>→</b></RouterLink>
           <RouterLink to="/wallet"><span>钱包<small>充值、兑换与账单记录</small></span><b>→</b></RouterLink>

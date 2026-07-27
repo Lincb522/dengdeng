@@ -91,7 +91,6 @@ onMounted(load)
     <div class="public-models-main">
       <header class="public-models-heading">
         <h1>模型广场</h1>
-        <p>价格、上下文与当前可用分组</p>
       </header>
 
       <section class="model-plaza-toolbar" aria-label="模型筛选">

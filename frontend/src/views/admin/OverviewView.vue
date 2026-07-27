@@ -18,7 +18,6 @@ onMounted(async () => {
     <div class="console-page-head">
       <div>
         <h1>运营总览</h1>
-        <p>站点的账号池、请求与流水概况。</p>
       </div>
       <span class="tag-amber hidden sm:inline-flex">管理视图</span>
     </div>

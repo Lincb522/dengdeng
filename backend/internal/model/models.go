@@ -208,8 +208,13 @@ type APIKey struct {
 	GroupIDs   []int64 `gorm:"-" json:"group_ids"`
 	KeyHash    string  `gorm:"uniqueIndex;size:64;not null" json:"-"`
 	KeyPreview string  `gorm:"size:32;not null" json:"key_preview"`
-	Name       string  `gorm:"size:64;not null" json:"name"`
-	Status     string  `gorm:"size:16;not null;default:active" json:"status"`
+	// KeySecret keeps a recoverable copy encrypted at rest. KeyHash remains the
+	// only value used by gateway authentication; list responses never expose
+	// the secret and only report whether it can be retrieved by its owner.
+	KeySecret       crypto.EncryptedString `gorm:"size:512" json:"-"`
+	SecretAvailable bool                   `gorm:"-" json:"secret_available"`
+	Name            string                 `gorm:"size:64;not null" json:"name"`
+	Status          string                 `gorm:"size:16;not null;default:active" json:"status"`
 	// ReasoningEffort is the OpenAI-compatible default for this key. "auto"
 	// leaves the client's request untouched; a client-supplied value always wins.
 	ReasoningEffort string `gorm:"size:16;not null;default:auto" json:"reasoning_effort"`

@@ -59,7 +59,6 @@ function selectMode(mode: ColorMode) {
       >
         <header class="theme-panel__head">
           <strong>界面主题</strong>
-          <span>布局、密度与组件会一起改变</span>
         </header>
 
         <div class="theme-preset-list">

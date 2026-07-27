@@ -397,7 +397,6 @@ onMounted(load)
     <div class="console-page-head settings-page-head">
       <div>
         <h1>系统设置</h1>
-        <p>管理站点对外展示、注册策略与登录前需要确认的协议。</p>
       </div>
       <button class="btn-primary" :disabled="loading || saving" @click="save">{{ saving ? '保存中…' : (activeSection === 'gateway' || activeSection === 'operations' ? '保存运行策略' : '保存设置') }}</button>
     </div>

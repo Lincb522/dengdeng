@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"dengdeng/internal/config"
+	"dengdeng/internal/crypto"
 	"dengdeng/internal/model"
 	"dengdeng/internal/service"
 	"dengdeng/internal/store"
@@ -18,6 +19,9 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	cfg := config.Default()
 	cfg.JWT.Secret = "router-multi-group-key-secret"
 	cfg.Database.Path = filepath.Join(t.TempDir(), "test.db")
+	if err := crypto.Init("", cfg.JWT.Secret); err != nil {
+		t.Fatalf("crypto.Init: %v", err)
+	}
 	db, err := store.Open(cfg)
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -61,7 +65,8 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	}, loginBody.Data.Token)
 	var created struct {
 		Data struct {
-			Key model.APIKey `json:"key"`
+			Key   model.APIKey `json:"key"`
+			Plain string       `json:"plain"`
 		} `json:"data"`
 	}
 	if create.Code != http.StatusOK || json.Unmarshal(create.Body.Bytes(), &created) != nil {
@@ -69,6 +74,55 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	}
 	if created.Data.Key.GroupID != groups[0].ID || len(created.Data.Key.GroupIDs) != 3 || len(created.Data.Key.Groups) != 3 {
 		t.Fatalf("unexpected created key groups: %#v", created.Data.Key)
+	}
+	if created.Data.Plain == "" || !created.Data.Key.SecretAvailable {
+		t.Fatalf("created key did not report a recoverable secret: %#v", created.Data.Key)
+	}
+	var storedSecret string
+	if err := db.Raw("SELECT key_secret FROM api_keys WHERE id = ?", created.Data.Key.ID).Scan(&storedSecret).Error; err != nil {
+		t.Fatalf("read encrypted secret: %v", err)
+	}
+	if storedSecret == "" || storedSecret == created.Data.Plain {
+		t.Fatalf("secret is not encrypted at rest: %q", storedSecret)
+	}
+	reveal := callJSON(t, router, http.MethodGet, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", nil, loginBody.Data.Token)
+	var revealed struct {
+		Data struct {
+			Plain string `json:"plain"`
+		} `json:"data"`
+	}
+	if reveal.Code != http.StatusOK || json.Unmarshal(reveal.Body.Bytes(), &revealed) != nil || revealed.Data.Plain != created.Data.Plain {
+		t.Fatalf("reveal status=%d body=%s", reveal.Code, reveal.Body.String())
+	}
+	if reveal.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("reveal response is cacheable: %q", reveal.Header().Get("Cache-Control"))
+	}
+	list := callJSON(t, router, http.MethodGet, "/api/user/keys", nil, loginBody.Data.Token)
+	var listed struct {
+		Data []map[string]any `json:"data"`
+	}
+	if list.Code != http.StatusOK || json.Unmarshal(list.Body.Bytes(), &listed) != nil || len(listed.Data) == 0 {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	if _, exists := listed.Data[0]["key_secret"]; exists {
+		t.Fatalf("list response leaked key_secret: %s", list.Body.String())
+	}
+
+	// Simulate a pre-encryption row and verify the browser migration endpoint.
+	if err := db.Model(&model.APIKey{}).Where("id = ?", created.Data.Key.ID).Update("key_secret", "").Error; err != nil {
+		t.Fatalf("clear legacy secret: %v", err)
+	}
+	legacyReveal := callJSON(t, router, http.MethodGet, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", nil, loginBody.Data.Token)
+	if legacyReveal.Code != http.StatusConflict {
+		t.Fatalf("legacy reveal status=%d body=%s", legacyReveal.Code, legacyReveal.Body.String())
+	}
+	wrongRecovery := callJSON(t, router, http.MethodPut, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", map[string]any{"plain": "dd-not-the-key"}, loginBody.Data.Token)
+	if wrongRecovery.Code != http.StatusBadRequest {
+		t.Fatalf("wrong recovery status=%d body=%s", wrongRecovery.Code, wrongRecovery.Body.String())
+	}
+	recovery := callJSON(t, router, http.MethodPut, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", map[string]any{"plain": created.Data.Plain}, loginBody.Data.Token)
+	if recovery.Code != http.StatusOK {
+		t.Fatalf("recovery status=%d body=%s", recovery.Code, recovery.Body.String())
 	}
 	var bindingCount int64
 	if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ?", created.Data.Key.ID).Count(&bindingCount).Error; err != nil || bindingCount != 3 {

@@ -152,6 +152,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			user.GET("/keys", userH.ListKeys)
 			user.POST("/keys", userH.CreateKey)
 			user.PUT("/keys/:id", userH.UpdateKey)
+			user.GET("/keys/:id/secret", userH.RevealKeySecret)
+			user.PUT("/keys/:id/secret", userH.RecoverKeySecret)
 			user.POST("/keys/:id/rotate", stepUp, userH.RotateKey)
 			user.DELETE("/keys/:id", userH.DeleteKey)
 			user.GET("/model-catalog", userH.ModelCatalogue)

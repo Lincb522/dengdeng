@@ -78,7 +78,6 @@ async function remove(cd: RedeemCode) {
     <div class="console-page-head">
       <div>
         <h1>兑换码</h1>
-        <p class="mt-1 text-sm text-slate-500">支持按额度、有效天数或调用次数发放</p>
       </div>
       <button class="btn-primary" @click="showForm = true">批量生成</button>
     </div>
