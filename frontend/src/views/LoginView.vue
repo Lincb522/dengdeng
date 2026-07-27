@@ -6,6 +6,7 @@ import { useAuth } from '../stores/auth'
 import { useToast } from '../stores/toast'
 import BrandMark from '../components/BrandMark.vue'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
+import ThemeToggle from '../components/ThemeToggle.vue'
 
 const auth = useAuth()
 const toast = useToast()
@@ -283,6 +284,7 @@ async function submit() {
         </form>
       </section>
     </main>
+	<ThemeToggle class="theme-toggle-float" />
 
     <Teleport to="body">
       <div v-if="agreementVisible && agreementRequired" class="agreement-backdrop" role="presentation">

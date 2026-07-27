@@ -11,7 +11,41 @@ const editing = ref<Group | null>(null)
 const saving = ref(false)
 const cacheOpen = ref(false)
 const advancedOpen = ref(false)
+const deletingID = ref<number | null>(null)
+const deleteGroup = ref<Group | null>(null)
+const deleteDependencies = ref<GroupDependenciesResponse | null>(null)
+const deleteTargetGroupID = ref(0)
 const reasoningEfforts = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+type DeleteGroupResult = {
+  deleted: boolean
+  deleted_keys: number
+  retained_keys: number
+  deleted_accounts: number
+  retained_accounts: number
+  target_group_id: number
+}
+
+type GroupDependencySummary = {
+  api_keys: number
+  shared_api_keys: number
+  exclusive_api_keys: number
+  accounts: number
+  shared_accounts: number
+  exclusive_accounts: number
+  subscriptions: number
+  user_rates: number
+  image_models: number
+  alert_rules: number
+}
+
+type GroupDependenciesResponse = {
+  group: Group
+  dependencies: GroupDependencySummary
+  total_dependencies: number
+  can_delete_directly: boolean
+  target_groups: Group[]
+}
 
 const form = ref({
   name: '',
@@ -112,9 +146,50 @@ async function save() {
 }
 
 async function remove(g: Group) {
-  if (!confirm(`确认删除分组「${g.name}」？同时属于其他分组的账号会保留，仅属于该分组的账号会一并删除。`)) return
-  await withToast(() => api.delete(`/api/admin/groups/${g.id}`), '已删除')
-  await load()
+  if (deletingID.value !== null) return
+  deletingID.value = g.id
+  try {
+    const dependencies = await withToast(() => api.get<GroupDependenciesResponse>(`/api/admin/groups/${g.id}/dependencies`))
+    if (!dependencies) return
+    if (dependencies.can_delete_directly) {
+      if (!confirm(`确认删除空分组「${g.name}」？`)) return
+      const deleted = await withToast(() => api.delete<DeleteGroupResult>(`/api/admin/groups/${g.id}`), '分组已删除')
+      if (deleted !== null) await load()
+      return
+    }
+    deleteGroup.value = g
+    deleteDependencies.value = dependencies
+    deleteTargetGroupID.value = dependencies.target_groups.find((item) => item.status === 'active')?.id || 0
+  } finally {
+    deletingID.value = null
+  }
+}
+
+function closeDeleteDialog() {
+  if (deletingID.value !== null) return
+  deleteGroup.value = null
+  deleteDependencies.value = null
+  deleteTargetGroupID.value = 0
+}
+
+async function confirmUnbindAndDelete() {
+  const group = deleteGroup.value
+  if (!group || deletingID.value !== null) return
+  deletingID.value = group.id
+  let deleted: DeleteGroupResult | null = null
+  try {
+    const target = deleteTargetGroupID.value > 0 ? `&target_group_id=${deleteTargetGroupID.value}` : ''
+    deleted = await withToast(
+      () => api.delete<DeleteGroupResult>(`/api/admin/groups/${group.id}?force=true${target}`),
+      deleteTargetGroupID.value > 0 ? '关联资源已迁移，原分组已删除' : '绑定已解除，分组已删除',
+    )
+  } finally {
+    deletingID.value = null
+  }
+  if (deleted !== null) {
+    closeDeleteDialog()
+    await load()
+  }
 }
 
 async function togglePublic(g: Group) {
@@ -174,7 +249,7 @@ async function togglePublic(g: Group) {
             <td class="text-right">
               <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="togglePublic(g)">{{ g.is_public ? '设为私有' : '对外开放' }}</button>
               <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="openEdit(g)">编辑</button>
-              <button class="btn-danger ml-2 !px-2.5 !py-1 text-xs" @click="remove(g)">删除</button>
+              <button class="btn-danger ml-2 !px-2.5 !py-1 text-xs" :disabled="deletingID !== null" @click="remove(g)">{{ deletingID === g.id ? '删除中…' : '删除' }}</button>
             </td>
           </tr>
           <tr v-if="!groups.length">
@@ -244,6 +319,46 @@ async function togglePublic(g: Group) {
       <template #footer>
         <button type="button" class="btn-ghost" :disabled="saving" @click="closeForm">取消</button>
         <button type="button" class="btn-primary" :disabled="saving || !form.name" @click="save">{{ saving ? '保存中…' : (editing ? '保存修改' : '创建分组') }}</button>
+      </template>
+    </AppModal>
+
+    <AppModal
+      :open="!!deleteGroup && !!deleteDependencies"
+      title="删除前取消绑定"
+      :description="deleteGroup ? `分组「${deleteGroup.name}」仍有关联资源，请先确认处理方式。` : ''"
+      width="standard"
+      :busy="deletingID !== null"
+      @close="closeDeleteDialog"
+    >
+      <div v-if="deleteDependencies" class="group-delete-dialog">
+        <dl class="group-delete-summary">
+          <div><dt>API 密钥</dt><dd>{{ deleteDependencies.dependencies.api_keys }}<small>专属 {{ deleteDependencies.dependencies.exclusive_api_keys }} · 共享 {{ deleteDependencies.dependencies.shared_api_keys }}</small></dd></div>
+          <div><dt>上游账号</dt><dd>{{ deleteDependencies.dependencies.accounts }}<small>专属 {{ deleteDependencies.dependencies.exclusive_accounts }} · 共享 {{ deleteDependencies.dependencies.shared_accounts }}</small></dd></div>
+          <div v-if="deleteDependencies.dependencies.subscriptions"><dt>用户订阅</dt><dd>{{ deleteDependencies.dependencies.subscriptions }}</dd></div>
+          <div v-if="deleteDependencies.dependencies.user_rates"><dt>专属倍率</dt><dd>{{ deleteDependencies.dependencies.user_rates }}</dd></div>
+          <div v-if="deleteDependencies.dependencies.image_models"><dt>图像路由</dt><dd>{{ deleteDependencies.dependencies.image_models }}</dd></div>
+          <div v-if="deleteDependencies.dependencies.alert_rules"><dt>告警规则</dt><dd>{{ deleteDependencies.dependencies.alert_rules }}</dd></div>
+        </dl>
+
+        <label class="modal-field">
+          <span class="label">专属资源迁移到</span>
+          <select v-model.number="deleteTargetGroupID" class="input">
+            <option :value="0">不迁移，删除专属密钥和账号</option>
+            <option v-for="target in deleteDependencies.target_groups" :key="target.id" :value="target.id">{{ target.name }} · {{ target.status === 'active' ? '启用' : '停用' }}</option>
+          </select>
+          <small class="modal-field__hint">共享密钥和账号只解除当前分组；专属资源、用户订阅、倍率、图像路由与告警会迁移到所选分组。</small>
+        </label>
+
+        <p v-if="deleteTargetGroupID === 0" class="group-delete-warning">
+          不迁移将删除 {{ deleteDependencies.dependencies.exclusive_api_keys }} 个专属密钥和 {{ deleteDependencies.dependencies.exclusive_accounts }} 个专属账号。历史用量仍会保留。
+        </p>
+        <p v-else class="group-delete-target">
+          专属资源将迁移到「{{ deleteDependencies.target_groups.find((item) => item.id === deleteTargetGroupID)?.name }}」，迁移完成后删除原分组。
+        </p>
+      </div>
+      <template #footer>
+        <button type="button" class="btn-ghost" :disabled="deletingID !== null" @click="closeDeleteDialog">返回</button>
+        <button type="button" class="btn-danger" :disabled="deletingID !== null" @click="confirmUnbindAndDelete">{{ deletingID !== null ? '处理中…' : '取消绑定并删除' }}</button>
       </template>
     </AppModal>
   </div>

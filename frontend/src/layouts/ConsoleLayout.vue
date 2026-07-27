@@ -9,6 +9,8 @@ import { formatMoney } from '../api/types'
 const auth = useAuth()
 const route = useRoute()
 const railOpen = ref(false)
+const topNavOpen = ref('')
+const topNavigation = ref<HTMLElement | null>(null)
 
 const userNav = [
   { to: '/dashboard', label: '总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
@@ -60,11 +62,19 @@ const customMenuItems = computed(() => (auth.siteCustomization.custom_menu_items
 	if (item.visibility === 'user') return !isAdmin.value
 	return true
 }))
+const navigationGroups = computed(() => {
+	const groups = [{ label: '工作区', items: visibleUserNav.value }]
+	if (isAdmin.value) groups.push(...adminNavGroups)
+	return groups
+})
+const allNavigationItems = computed(() => navigationGroups.value.flatMap((group) => group.items))
+const currentNavigation = computed(() => allNavigationItems.value.find((item) => isActive(item.to)))
 
 watch(
   () => route.fullPath,
   () => {
     railOpen.value = false
+    topNavOpen.value = ''
   },
 )
 
@@ -73,17 +83,32 @@ function closeRail() {
 }
 
 function handleKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape') closeRail()
+	if (event.key === 'Escape') {
+		closeRail()
+		topNavOpen.value = ''
+	}
+}
+
+function handleDocumentPointer(event: PointerEvent) {
+	if (!topNavigation.value?.contains(event.target as Node)) topNavOpen.value = ''
 }
 
 onMounted(() => {
   void auth.loadPublicSettings()
   window.addEventListener('keydown', handleKeydown)
+	document.addEventListener('pointerdown', handleDocumentPointer)
 })
-onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => {
+	window.removeEventListener('keydown', handleKeydown)
+	document.removeEventListener('pointerdown', handleDocumentPointer)
+})
 
 function isActive(to: string) {
   return route.path === to || route.path.startsWith(to + '/')
+}
+
+function toggleTopNavigation(label: string) {
+	topNavOpen.value = topNavOpen.value === label ? '' : label
 }
 </script>
 
@@ -119,12 +144,12 @@ function isActive(to: string) {
         <nav class="rail-nav" aria-label="主导航">
           <section class="rail-nav-group">
             <p class="rail-section">工作区</p>
-			<RouterLink v-for="item in visibleUserNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
+			<RouterLink v-for="item in visibleUserNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }" :title="item.label">
               <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
               <span>{{ item.label }}</span>
               <i class="rail-link-mark"></i>
             </RouterLink>
-			<a v-for="item in customMenuItems" :key="item.id" :href="item.url" class="rail-link" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined">
+			<a v-for="item in customMenuItems" :key="item.id" :href="item.url" class="rail-link" :title="item.name" :target="item.url.startsWith('http') ? '_blank' : undefined" :rel="item.url.startsWith('http') ? 'noopener' : undefined">
 				<span class="rail-link-icon"><svg viewBox="0 0 24 24"><path d="M10 6H5a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-5h-2v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h5V6zm3-4v2h5.6l-9.3 9.3 1.4 1.4L20 5.4V11h2V2h-9z" /></svg></span>
 				<span>{{ item.name }}</span><i class="rail-link-mark"></i>
 			</a>
@@ -133,7 +158,7 @@ function isActive(to: string) {
           <template v-if="isAdmin">
             <section v-for="group in adminNavGroups" :key="group.label" class="rail-nav-group">
               <p class="rail-section">{{ group.label }}</p>
-              <RouterLink v-for="item in group.items" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }">
+              <RouterLink v-for="item in group.items" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }" :title="item.label">
                 <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
                 <span>{{ item.label }}</span>
                 <i class="rail-link-mark"></i>
@@ -159,6 +184,41 @@ function isActive(to: string) {
         </div>
       </aside>
 
+		<header ref="topNavigation" class="top-shellbar">
+			<RouterLink to="/dashboard" class="top-shellbar__brand" :aria-label="`${auth.siteName} 总览`">
+				<BrandMark :size="31" />
+				<span><strong>{{ auth.siteName }}</strong><small>蹬蹬ai</small></span>
+			</RouterLink>
+
+			<nav class="top-shellbar__nav" aria-label="主导航">
+				<div v-for="group in navigationGroups" :key="group.label" class="top-shellbar__group">
+					<button
+						type="button"
+						:class="{ 'is-active': group.items.some((item) => isActive(item.to)) }"
+						:aria-expanded="topNavOpen === group.label"
+						@click.stop="toggleTopNavigation(group.label)"
+					>
+						{{ group.label }}
+						<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
+					</button>
+					<div v-if="topNavOpen === group.label" class="top-shellbar__menu">
+						<RouterLink v-for="item in group.items" :key="item.to" :to="item.to" :class="{ 'is-active': isActive(item.to) }">
+							<span><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
+							{{ item.label }}
+						</RouterLink>
+					</div>
+				</div>
+			</nav>
+
+			<div class="top-shellbar__account">
+				<div class="top-shellbar__balance"><span>余额</span><strong class="num">{{ balance }}</strong></div>
+				<ThemeToggle />
+				<button type="button" class="top-shellbar__logout" aria-label="退出登录" title="退出登录" @click="auth.logout()">
+					<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg>
+				</button>
+			</div>
+		</header>
+
       <section class="workspace">
         <header class="workspace-bar">
           <div class="flex items-center gap-3">
@@ -174,7 +234,8 @@ function isActive(to: string) {
             </button>
             <div class="workspace-context">
               <span class="workspace-dot"></span>
-              <span>服务运行正常</span>
+			  <span class="workspace-context__status">服务运行正常</span>
+			  <strong v-if="currentNavigation">{{ currentNavigation.label }}</strong>
             </div>
           </div>
           <div class="workspace-user">

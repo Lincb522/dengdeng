@@ -162,6 +162,7 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 		"gpt-5.5-pro":                {1_050_000, 128_000},
 		"gpt-image-2":                {0, 0},
 		"claude-fable-5":             {1_000_000, 128_000},
+		"claude-opus-5":              {1_000_000, 128_000},
 		"claude-opus-4-8":            {1_000_000, 128_000},
 		"claude-opus-4-7":            {1_000_000, 128_000},
 		"claude-opus-4-6":            {1_000_000, 128_000},

@@ -581,20 +581,242 @@ func (h *AdminHandler) UpdateGroup(c *gin.Context) {
 	util.OK(c, g)
 }
 
-func (h *AdminHandler) DeleteGroup(c *gin.Context) {
-	id := c.Param("id")
-	var keyCount int64
-	h.db.Model(&model.APIKeyGroup{}).Where("group_id = ?", id).Count(&keyCount)
-	if keyCount == 0 {
-		// Keep the legacy column in the guard for databases that have not yet
-		// completed the relation backfill.
-		h.db.Model(&model.APIKey{}).Where("group_id = ?", id).Count(&keyCount)
+type groupDependencySummary struct {
+	APIKeys           int64 `json:"api_keys"`
+	SharedAPIKeys     int64 `json:"shared_api_keys"`
+	ExclusiveAPIKeys  int64 `json:"exclusive_api_keys"`
+	Accounts          int64 `json:"accounts"`
+	SharedAccounts    int64 `json:"shared_accounts"`
+	ExclusiveAccounts int64 `json:"exclusive_accounts"`
+	Subscriptions     int64 `json:"subscriptions"`
+	UserRates         int64 `json:"user_rates"`
+	ImageModels       int64 `json:"image_models"`
+	AlertRules        int64 `json:"alert_rules"`
+}
+
+func (summary groupDependencySummary) total() int64 {
+	return summary.APIKeys + summary.Accounts + summary.Subscriptions + summary.UserRates + summary.ImageModels + summary.AlertRules
+}
+
+func loadGroupDependencies(db *gorm.DB, groupID int64) (groupDependencySummary, error) {
+	var summary groupDependencySummary
+	var keys []model.APIKey
+	keyIDs := db.Model(&model.APIKeyGroup{}).Select("api_key_id").Where("group_id = ?", groupID)
+	if err := db.Where("id IN (?) OR group_id = ?", keyIDs, groupID).Find(&keys).Error; err != nil {
+		return summary, err
 	}
-	if keyCount > 0 {
-		util.Fail(c, http.StatusBadRequest, "group still has API keys bound to it")
+	for _, key := range keys {
+		var alternatives int64
+		if err := db.Model(&model.APIKeyGroup{}).Where("api_key_id = ? AND group_id <> ?", key.ID, groupID).Count(&alternatives).Error; err != nil {
+			return summary, err
+		}
+		summary.APIKeys++
+		if alternatives > 0 {
+			summary.SharedAPIKeys++
+		} else {
+			summary.ExclusiveAPIKeys++
+		}
+	}
+
+	var accounts []model.UpstreamAccount
+	accountIDs := db.Model(&model.UpstreamAccountGroup{}).Select("upstream_account_id").Where("group_id = ?", groupID)
+	if err := db.Where("id IN (?) OR group_id = ?", accountIDs, groupID).Find(&accounts).Error; err != nil {
+		return summary, err
+	}
+	for _, account := range accounts {
+		var alternatives int64
+		if err := db.Model(&model.UpstreamAccountGroup{}).Where("upstream_account_id = ? AND group_id <> ?", account.ID, groupID).Count(&alternatives).Error; err != nil {
+			return summary, err
+		}
+		summary.Accounts++
+		if alternatives > 0 {
+			summary.SharedAccounts++
+		} else {
+			summary.ExclusiveAccounts++
+		}
+	}
+
+	counts := []struct {
+		model any
+		query string
+		value *int64
+	}{
+		{model: &model.UserGroupSubscription{}, query: "group_id = ?", value: &summary.Subscriptions},
+		{model: &model.UserGroupRate{}, query: "group_id = ?", value: &summary.UserRates},
+		{model: &model.ModelConfig{}, query: "image_group_id = ?", value: &summary.ImageModels},
+		{model: &model.AlertRule{}, query: "group_id = ?", value: &summary.AlertRules},
+	}
+	for _, item := range counts {
+		if err := db.Model(item.model).Where(item.query, groupID).Count(item.value).Error; err != nil {
+			return summary, err
+		}
+	}
+	return summary, nil
+}
+
+func (h *AdminHandler) GroupDependencies(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		util.Fail(c, http.StatusBadRequest, "invalid group id")
 		return
 	}
+	var group model.Group
+	if err := h.db.First(&group, id).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "group not found")
+		return
+	}
+	summary, err := loadGroupDependencies(h.db, id)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load group dependencies failed")
+		return
+	}
+	var targets []model.Group
+	if err := h.db.Where("platform = ? AND id <> ?", group.Platform, group.ID).Order("status ASC, name ASC").Find(&targets).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load target groups failed")
+		return
+	}
+	util.OK(c, gin.H{
+		"group":               group,
+		"dependencies":        summary,
+		"total_dependencies":  summary.total(),
+		"can_delete_directly": summary.total() == 0,
+		"target_groups":       targets,
+	})
+}
+
+func (h *AdminHandler) DeleteGroup(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		util.Fail(c, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	var group model.Group
+	if err := h.db.First(&group, id).Error; err != nil {
+		util.Fail(c, http.StatusNotFound, "group not found")
+		return
+	}
+	force := strings.EqualFold(strings.TrimSpace(c.Query("force")), "true")
+	targetGroupID, err := strconv.ParseInt(strings.TrimSpace(c.DefaultQuery("target_group_id", "0")), 10, 64)
+	if err != nil || targetGroupID < 0 || targetGroupID == id {
+		util.Fail(c, http.StatusBadRequest, "invalid target group")
+		return
+	}
+	if targetGroupID > 0 {
+		var target model.Group
+		if err := h.db.First(&target, targetGroupID).Error; err != nil {
+			util.Fail(c, http.StatusBadRequest, "target group not found")
+			return
+		}
+		if target.Platform != group.Platform {
+			util.Fail(c, http.StatusBadRequest, "target group platform mismatch")
+			return
+		}
+	}
+	summary, err := loadGroupDependencies(h.db, id)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load group dependencies failed")
+		return
+	}
+	if summary.total() > 0 && !force {
+		util.Fail(c, http.StatusConflict, "group still has bound resources; unbind them before deletion")
+		return
+	}
+	var deletedKeys, retainedKeys, deletedAccounts, retainedAccounts int64
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		var keyMemberships []model.APIKeyGroup
+		if err := tx.Where("group_id = ?", id).Find(&keyMemberships).Error; err != nil {
+			return err
+		}
+		for _, membership := range keyMemberships {
+			var key model.APIKey
+			if err := tx.First(&key, membership.APIKeyID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					if err := tx.Delete(&membership).Error; err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			}
+			var alternatives []model.APIKeyGroup
+			if err := tx.Where("api_key_id = ? AND group_id <> ?", membership.APIKeyID, id).Order("group_id ASC").Find(&alternatives).Error; err != nil {
+				return err
+			}
+			if len(alternatives) == 0 {
+				if targetGroupID > 0 {
+					binding := model.APIKeyGroup{APIKeyID: key.ID, GroupID: targetGroupID}
+					if err := tx.Where("api_key_id = ? AND group_id = ?", key.ID, targetGroupID).FirstOrCreate(&binding).Error; err != nil {
+						return err
+					}
+					if err := tx.Model(&key).Update("group_id", targetGroupID).Error; err != nil {
+						return err
+					}
+					if err := tx.Where("api_key_id = ? AND group_id = ?", key.ID, id).Delete(&model.APIKeyGroup{}).Error; err != nil {
+						return err
+					}
+					retainedKeys++
+					continue
+				}
+				if err := tx.Where("api_key_id = ?", key.ID).Delete(&model.APIKeyGroup{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Delete(&key).Error; err != nil {
+					return err
+				}
+				deletedKeys++
+				continue
+			}
+			if key.GroupID == id {
+				if err := tx.Model(&key).Update("group_id", alternatives[0].GroupID).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("api_key_id = ? AND group_id = ?", key.ID, id).Delete(&model.APIKeyGroup{}).Error; err != nil {
+				return err
+			}
+			retainedKeys++
+		}
+
+		// Handle legacy keys that still point at the group but have no join row.
+		var legacyKeys []model.APIKey
+		if err := tx.Where("group_id = ?", id).Find(&legacyKeys).Error; err != nil {
+			return err
+		}
+		for _, key := range legacyKeys {
+			var alternatives []model.APIKeyGroup
+			if err := tx.Where("api_key_id = ? AND group_id <> ?", key.ID, id).Order("group_id ASC").Find(&alternatives).Error; err != nil {
+				return err
+			}
+			if len(alternatives) > 0 {
+				if err := tx.Model(&key).Update("group_id", alternatives[0].GroupID).Error; err != nil {
+					return err
+				}
+				retainedKeys++
+				continue
+			}
+			if targetGroupID > 0 {
+				binding := model.APIKeyGroup{APIKeyID: key.ID, GroupID: targetGroupID}
+				if err := tx.Where("api_key_id = ? AND group_id = ?", key.ID, targetGroupID).FirstOrCreate(&binding).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&key).Update("group_id", targetGroupID).Error; err != nil {
+					return err
+				}
+				retainedKeys++
+				continue
+			}
+			if err := tx.Where("api_key_id = ?", key.ID).Delete(&model.APIKeyGroup{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&key).Error; err != nil {
+				return err
+			}
+			deletedKeys++
+		}
+		if err := tx.Where("group_id = ?", id).Delete(&model.APIKeyGroup{}).Error; err != nil {
+			return err
+		}
+
 		var memberships []model.UpstreamAccountGroup
 		if err := tx.Where("group_id = ?", id).Find(&memberships).Error; err != nil {
 			return err
@@ -605,27 +827,162 @@ func (h *AdminHandler) DeleteGroup(c *gin.Context) {
 				return err
 			}
 			if len(alternatives) == 0 {
+				if targetGroupID > 0 {
+					binding := model.UpstreamAccountGroup{UpstreamAccountID: membership.UpstreamAccountID, GroupID: targetGroupID}
+					if err := tx.Where("upstream_account_id = ? AND group_id = ?", membership.UpstreamAccountID, targetGroupID).FirstOrCreate(&binding).Error; err != nil {
+						return err
+					}
+					if err := tx.Model(&model.UpstreamAccount{}).Where("id = ?", membership.UpstreamAccountID).Update("group_id", targetGroupID).Error; err != nil {
+						return err
+					}
+					if err := tx.Where("upstream_account_id = ? AND group_id = ?", membership.UpstreamAccountID, id).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+						return err
+					}
+					retainedAccounts++
+					continue
+				}
+				if err := tx.Where("upstream_account_id = ?", membership.UpstreamAccountID).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+					return err
+				}
 				if err := tx.Delete(&model.UpstreamAccount{}, membership.UpstreamAccountID).Error; err != nil {
 					return err
 				}
+				deletedAccounts++
 				continue
 			}
-			if err := tx.Model(&model.UpstreamAccount{}).Where("id = ?", membership.UpstreamAccountID).Update("group_id", alternatives[0].GroupID).Error; err != nil {
+			if err := tx.Model(&model.UpstreamAccount{}).
+				Where("id = ? AND group_id = ?", membership.UpstreamAccountID, id).
+				Update("group_id", alternatives[0].GroupID).Error; err != nil {
 				return err
 			}
+			if err := tx.Where("upstream_account_id = ? AND group_id = ?", membership.UpstreamAccountID, id).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+				return err
+			}
+			retainedAccounts++
+		}
+
+		// Handle legacy accounts that still point at the group but have no join row.
+		var legacyAccounts []model.UpstreamAccount
+		if err := tx.Where("group_id = ?", id).Find(&legacyAccounts).Error; err != nil {
+			return err
+		}
+		for _, account := range legacyAccounts {
+			var alternatives []model.UpstreamAccountGroup
+			if err := tx.Where("upstream_account_id = ? AND group_id <> ?", account.ID, id).Order("group_id ASC").Find(&alternatives).Error; err != nil {
+				return err
+			}
+			if len(alternatives) > 0 {
+				if err := tx.Model(&account).Update("group_id", alternatives[0].GroupID).Error; err != nil {
+					return err
+				}
+				retainedAccounts++
+				continue
+			}
+			if targetGroupID > 0 {
+				binding := model.UpstreamAccountGroup{UpstreamAccountID: account.ID, GroupID: targetGroupID}
+				if err := tx.Where("upstream_account_id = ? AND group_id = ?", account.ID, targetGroupID).FirstOrCreate(&binding).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&account).Update("group_id", targetGroupID).Error; err != nil {
+					return err
+				}
+				retainedAccounts++
+				continue
+			}
+			if err := tx.Where("upstream_account_id = ?", account.ID).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&account).Error; err != nil {
+				return err
+			}
+			deletedAccounts++
 		}
 		if err := tx.Where("group_id = ?", id).Delete(&model.UpstreamAccountGroup{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("group_id = ?", id).Delete(&model.UserGroupRate{}).Error; err != nil {
-			return err
+		if targetGroupID > 0 {
+			var rates []model.UserGroupRate
+			if err := tx.Where("group_id = ?", id).Find(&rates).Error; err != nil {
+				return err
+			}
+			for _, rate := range rates {
+				var existing int64
+				if err := tx.Model(&model.UserGroupRate{}).Where("user_id = ? AND group_id = ?", rate.UserID, targetGroupID).Count(&existing).Error; err != nil {
+					return err
+				}
+				if existing == 0 {
+					if err := tx.Model(&rate).Update("group_id", targetGroupID).Error; err != nil {
+						return err
+					}
+				} else if err := tx.Delete(&rate).Error; err != nil {
+					return err
+				}
+			}
+
+			var subscriptions []model.UserGroupSubscription
+			if err := tx.Where("group_id = ?", id).Find(&subscriptions).Error; err != nil {
+				return err
+			}
+			for _, subscription := range subscriptions {
+				var existing model.UserGroupSubscription
+				err := tx.Where("user_id = ? AND group_id = ?", subscription.UserID, targetGroupID).First(&existing).Error
+				switch {
+				case errors.Is(err, gorm.ErrRecordNotFound):
+					if err := tx.Model(&subscription).Update("group_id", targetGroupID).Error; err != nil {
+						return err
+					}
+				case err != nil:
+					return err
+				default:
+					if subscription.ExpiresAt.After(existing.ExpiresAt) {
+						if err := tx.Model(&existing).Update("expires_at", subscription.ExpiresAt).Error; err != nil {
+							return err
+						}
+					}
+					if err := tx.Delete(&subscription).Error; err != nil {
+						return err
+					}
+				}
+			}
+			if err := tx.Model(&model.AlertRule{}).Where("group_id = ?", id).Update("group_id", targetGroupID).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.ModelConfig{}).Where("image_group_id = ?", id).Update("image_group_id", targetGroupID).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Where("group_id = ?", id).Delete(&model.UserGroupRate{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("group_id = ?", id).Delete(&model.UserGroupSubscription{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Where("group_id = ?", id).Delete(&model.AlertRule{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.ModelConfig{}).Where("image_group_id = ?", id).Update("image_group_id", 0).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Delete(&model.Group{}, id).Error
 	}); err != nil {
 		util.Fail(c, http.StatusInternalServerError, "delete group failed")
 		return
 	}
-	util.OK(c, gin.H{"deleted": true})
+	if h.scheduler != nil {
+		h.scheduler.InvalidateGroup(id)
+		if targetGroupID > 0 {
+			h.scheduler.InvalidateGroup(targetGroupID)
+		}
+	}
+	util.OK(c, gin.H{
+		"deleted":           true,
+		"deleted_keys":      deletedKeys,
+		"retained_keys":     retainedKeys,
+		"deleted_accounts":  deletedAccounts,
+		"retained_accounts": retainedAccounts,
+		"target_group_id":   targetGroupID,
+	})
 }
 
 // ---- upstream accounts ----

@@ -104,5 +104,6 @@ export function useAnchoredPopover(align: 'start' | 'end' = 'end') {
 		show,
 		scheduleClose,
 		togglePinned,
+		close,
 	}
 }

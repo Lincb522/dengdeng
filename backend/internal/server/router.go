@@ -196,6 +196,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.GET("/groups", adminH.ListGroups)
 			admin.POST("/groups", adminH.CreateGroup)
 			admin.PUT("/groups/:id", adminH.UpdateGroup)
+			admin.GET("/groups/:id/dependencies", adminH.GroupDependencies)
 			admin.DELETE("/groups/:id", adminH.DeleteGroup)
 			admin.GET("/accounts", adminH.ListAccounts)
 			admin.POST("/accounts", adminH.CreateAccount)
