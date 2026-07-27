@@ -3,88 +3,13 @@ import { defineStore } from 'pinia'
 
 export type ColorMode = 'light' | 'dark' | 'system'
 export type ResolvedColorMode = Exclude<ColorMode, 'system'>
-export type ThemeID = 'dengdeng' | 'folio' | 'signal' | 'breeze' | 'immersive' | 'glass'
-export type ThemeLayout = 'rail' | 'topbar' | 'compact' | 'breeze' | 'immersive' | 'glass'
-export type ThemeDensity = 'comfortable' | 'balanced' | 'compact'
-
-export interface ThemePreset {
-  id: ThemeID
-  name: string
-  description: string
-  layout: ThemeLayout
-  density: ThemeDensity
-  colors: [string, string, string]
-  browserColors: [string, string]
-}
-
-export const themePresets: readonly ThemePreset[] = [
-  {
-    id: 'dengdeng',
-    name: '暖光',
-    description: '完整侧栏与舒展内容区',
-    layout: 'rail',
-    density: 'comfortable',
-    colors: ['#fffaf1', '#30261e', '#c98a20'],
-    browserColors: ['#fffaf1', '#181613'],
-  },
-  {
-    id: 'folio',
-    name: '刊页',
-    description: '顶部导航与平面化信息布局',
-    layout: 'topbar',
-    density: 'balanced',
-    colors: ['#f5f3ef', '#202224', '#b94c36'],
-    browserColors: ['#f5f3ef', '#171918'],
-  },
-  {
-    id: 'signal',
-    name: '信号',
-    description: '分区导航与紧凑工作区',
-    layout: 'compact',
-    density: 'compact',
-    colors: ['#f3f7f8', '#172126', '#23778a'],
-    browserColors: ['#f3f7f8', '#0f171a'],
-  },
-  {
-    id: 'breeze',
-    name: '小清新',
-    description: '双层导航与轻量工作台',
-    layout: 'breeze',
-    density: 'balanced',
-    colors: ['#f1fbf7', '#18332e', '#27866d'],
-    browserColors: ['#f1fbf7', '#10221f'],
-  },
-  {
-    id: 'immersive',
-    name: '沉浸式',
-    description: '全屏画布与底部命令坞',
-    layout: 'immersive',
-    density: 'comfortable',
-    colors: ['#eef1f6', '#151922', '#4a5f96'],
-    browserColors: ['#eef1f6', '#0e1118'],
-  },
-  {
-    id: 'glass',
-    name: '毛玻璃',
-    description: '浮动图标坞与透明面板',
-    layout: 'glass',
-    density: 'balanced',
-    colors: ['#edf5ff', '#1d2940', '#5b68b5'],
-    browserColors: ['#e9f2ff', '#111827'],
-  },
-] as const
 
 const legacyModeStorageKey = 'dengdeng.theme'
 const modeStorageKey = 'dengdeng.color-mode'
-const presetStorageKey = 'dengdeng.ui-theme'
-const defaultPreset: ThemeID = 'dengdeng'
+const retiredPresetStorageKey = 'dengdeng.ui-theme'
 
 function isColorMode(value: string | null): value is ColorMode {
   return value === 'light' || value === 'dark' || value === 'system'
-}
-
-function isThemeID(value: string | null): value is ThemeID {
-  return themePresets.some((preset) => preset.id === value)
 }
 
 function readStorage(key: string) {
@@ -99,15 +24,21 @@ function writeStorage(key: string, value: string) {
   try {
     localStorage.setItem(key, value)
   } catch {
-    // The active page still receives the theme when storage is unavailable.
+    // The active page still receives the display mode when storage is unavailable.
+  }
+}
+
+function removeStorage(key: string) {
+  try {
+    localStorage.removeItem(key)
+  } catch {
+    // Storage can be unavailable in privacy-restricted browser contexts.
   }
 }
 
 export const useTheme = defineStore('theme', () => {
   const colorMode = ref<ColorMode>('system')
   const resolvedMode = ref<ResolvedColorMode>('light')
-  const themeID = ref<ThemeID>(defaultPreset)
-  const activeTheme = computed(() => themePresets.find((preset) => preset.id === themeID.value) ?? themePresets[0])
   const isDark = computed(() => resolvedMode.value === 'dark')
   let mediaQuery: MediaQueryList | null = null
 
@@ -118,28 +49,20 @@ export const useTheme = defineStore('theme', () => {
 
   function apply() {
     const nextMode = resolveMode(colorMode.value)
-    const preset = activeTheme.value
     resolvedMode.value = nextMode
     document.documentElement.dataset.theme = nextMode
-    document.documentElement.dataset.uiTheme = preset.id
-    document.documentElement.dataset.layout = preset.layout
-    document.documentElement.dataset.density = preset.density
+    delete document.documentElement.dataset.uiTheme
+    delete document.documentElement.dataset.layout
+    delete document.documentElement.dataset.density
     document.documentElement.style.colorScheme = nextMode
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-      ?.setAttribute('content', preset.browserColors[nextMode === 'dark' ? 1 : 0])
+      ?.setAttribute('content', nextMode === 'dark' ? '#181613' : '#fffaf1')
   }
 
   function setColorMode(next: ColorMode) {
     colorMode.value = next
     writeStorage(modeStorageKey, next)
     writeStorage(legacyModeStorageKey, next === 'system' ? resolveMode(next) : next)
-    apply()
-  }
-
-  function setTheme(next: ThemeID) {
-    if (!isThemeID(next)) return
-    themeID.value = next
-    writeStorage(presetStorageKey, next)
     apply()
   }
 
@@ -154,9 +77,7 @@ export const useTheme = defineStore('theme', () => {
       ? savedMode
       : isColorMode(legacyMode) && legacyMode !== 'system' ? legacyMode : 'system'
 
-    const savedPreset = readStorage(presetStorageKey)
-    themeID.value = isThemeID(savedPreset) ? savedPreset : defaultPreset
-
+    removeStorage(retiredPresetStorageKey)
     mediaQuery?.removeEventListener('change', handleSystemModeChange)
     mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
     mediaQuery?.addEventListener('change', handleSystemModeChange)
@@ -171,12 +92,9 @@ export const useTheme = defineStore('theme', () => {
     colorMode,
     resolvedMode,
     mode: resolvedMode,
-    themeID,
-    activeTheme,
     isDark,
     init,
     toggle,
     setColorMode,
-    setTheme,
   }
 })
