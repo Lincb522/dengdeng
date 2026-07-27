@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, setToken } from '../api/client'
+import { isAppError } from '../api/errors'
 import { useAuth } from '../stores/auth'
 import { useToast } from '../stores/toast'
 import BrandMark from '../components/BrandMark.vue'
@@ -186,6 +187,11 @@ async function submit() {
     }
     router.push('/dashboard')
   } catch (e) {
+    if (mode.value === 'login' && isAppError(e) && e.code === 'auth.terms_required') {
+      await auth.loadPublicSettings()
+      acceptedAgreement.value = false
+      agreementVisible.value = agreementRequired.value
+    }
     toast.showError(e, mode.value === 'login' ? '登录失败' : mode.value === 'register' ? '注册失败' : '密码重置失败')
   } finally {
     busy.value = false
