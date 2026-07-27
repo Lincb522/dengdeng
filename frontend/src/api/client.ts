@@ -1,6 +1,7 @@
 // 轻量 fetch 封装:统一鉴权头、错误提示与 401 跳转。
 import { useToast } from '../stores/toast'
 import { AppError, resolveApiError } from './errors'
+import { reportClientError } from './errorReporting'
 
 export { AppError as ApiError } from './errors'
 
@@ -32,7 +33,9 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new AppError(resolveApiError(0, null))
+    const error = new AppError(resolveApiError(0, null))
+    reportClientError(error, 'network', `${method} ${path}`)
+    throw error
   }
 
   let payload: any = null
@@ -91,7 +94,9 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   try {
     response = await fetch(path, { headers })
   } catch {
-    throw new AppError(resolveApiError(0, null))
+    const error = new AppError(resolveApiError(0, null))
+    reportClientError(error, 'network', `GET ${path}`)
+    throw error
   }
   if (!response.ok) {
     let payload: unknown = null

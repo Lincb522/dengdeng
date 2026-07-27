@@ -32,6 +32,7 @@ const router = createRouter({
             { path: 'monitoring', name: 'admin-monitoring', component: () => import('../views/admin/MonitoringView.vue') },
             { path: 'alerts', name: 'admin-alerts', component: () => import('../views/admin/AlertsView.vue') },
             { path: 'backups', name: 'admin-backups', component: () => import('../views/admin/BackupsView.vue') },
+            { path: 'errors', name: 'admin-errors', component: () => import('../views/admin/ErrorCenterView.vue') },
             { path: 'updates', name: 'admin-updates', component: () => import('../views/admin/UpdatesView.vue') },
             { path: 'groups', name: 'admin-groups', component: () => import('../views/admin/GroupsView.vue') },
             { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AccountsView.vue') },

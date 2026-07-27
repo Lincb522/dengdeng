@@ -39,15 +39,15 @@ const adminNav = [
   { to: '/admin/settings', label: '系统设置', icon: 'M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.28h-4l-.37 2.65c-.61.24-1.17.57-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.65-.07.98s.02.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.41 1.08.74 1.69.98L11 20.72h4l.37-2.65c.61-.24 1.17-.57 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z' },
   { to: '/admin/usage', label: '全站用量', icon: 'M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.5h-15V5H3v16h18v-1.5h-1.5z' },
   { to: '/admin/updates', label: '版本更新', icon: 'M12 3a9 9 0 0 0-8.6 6.35L1 7v6h6l-2.1-2.1A7 7 0 1 1 5 15H3a9 9 0 1 0 9-12zm1 4h-2v6l5 3 1-1.7-4-2.3V7z' },
+  { to: '/admin/errors', label: '错误中心', icon: 'M11 2h2v11h-2V2zm0 14h2v2h-2v-2zM4.93 4.93l1.42 1.42A8 8 0 1 0 17.65 6.35l1.42-1.42A10 10 0 1 1 4.93 4.93z' },
 ]
 
 const adminNavGroups = [
   { label: '运行中心', items: [adminNav[0], adminNav[1], adminNav[14], adminNav[2]] },
   { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[12], adminNav[7], adminNav[8]] },
   { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10], adminNav[11]] },
-  { label: '系统维护', items: [adminNav[3], adminNav[13], adminNav[15]] },
+  { label: '系统维护', items: [adminNav[16], adminNav[3], adminNav[13], adminNav[15]] },
 ]
-const adminEntry = { to: '/admin/overview', label: '管理后台', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' }
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const isAdminRoute = computed(() => route.path.startsWith('/admin'))
@@ -66,7 +66,6 @@ const customMenuItems = computed(() => (auth.siteCustomization.custom_menu_items
 const allNavigationItems = computed(() => [
 	...visibleUserNav.value,
 	...(isAdmin.value ? adminNav : []),
-	...(isAdmin.value ? [adminEntry] : []),
 ])
 const currentNavigation = computed(() => allNavigationItems.value.find((item) => isActive(item.to)))
 
@@ -141,7 +140,7 @@ function isActive(to: string) {
 			</a>
           </section>
 
-          <template v-if="isAdmin && isAdminRoute">
+          <template v-if="isAdmin">
             <section v-for="group in adminNavGroups" :key="group.label" class="rail-nav-group">
               <p class="rail-section">{{ group.label }}</p>
               <RouterLink v-for="item in group.items" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }" :title="item.label">
@@ -151,13 +150,6 @@ function isActive(to: string) {
               </RouterLink>
             </section>
           </template>
-		  <section v-else-if="isAdmin" class="rail-nav-group rail-nav-group--admin-entry">
-			<p class="rail-section">管理</p>
-			<RouterLink :to="adminEntry.to" class="rail-link" :title="adminEntry.label">
-				<span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="adminEntry.icon" /></svg></span>
-				<span>{{ adminEntry.label }}</span><i class="rail-link-mark"></i>
-			</RouterLink>
-		  </section>
         </nav>
 
         <div class="rail-account">

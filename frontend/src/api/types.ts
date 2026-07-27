@@ -979,6 +979,7 @@ export interface OpsErrorLog {
 	business_limited: boolean
 	retryable: boolean
 	error_message: string
+	upstream_error_chain?: string
 	duration_ms: number
 	first_token_ms: number
 	resolved_at?: string
@@ -988,6 +989,52 @@ export interface OpsErrorLog {
 	key_name?: string
 	group_name?: string
 	account_name?: string
+}
+
+export interface SiteErrorLog {
+	id: number
+	level: string
+	category?: string
+	component: string
+	error_code?: string
+	message: string
+	details?: string
+	method?: string
+	path?: string
+	status_code?: number
+	request_id?: string
+	client_ip?: string
+	user_agent?: string
+	user_id?: number
+	user_email?: string
+	resolved_at?: string
+	resolved_by?: string
+	created_at: string
+}
+
+export interface ErrorCenterCategory {
+	name: string
+	count: number
+}
+
+export interface ErrorCenterScopeSummary {
+	total: number
+	open: number
+	resolved: number
+	critical: number
+	last_hour: number
+	retryable?: number
+	business_limited?: number
+	categories: ErrorCenterCategory[]
+}
+
+export interface ErrorCenterSummary {
+	generated_at: string
+	range: string
+	start: string
+	end: string
+	site: ErrorCenterScopeSummary
+	api: ErrorCenterScopeSummary
 }
 
 export interface SchedulerDiagnostic {

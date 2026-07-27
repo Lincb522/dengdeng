@@ -924,17 +924,27 @@ type OpsAlertSilence struct {
 }
 
 type OpsSystemLog struct {
-	ID        int64     `gorm:"primaryKey" json:"id"`
-	Level     string    `gorm:"size:16;index" json:"level"`
-	Component string    `gorm:"size:64;index" json:"component"`
-	Message   string    `gorm:"size:2048" json:"message"`
-	RequestID string    `gorm:"size:32;index" json:"request_id,omitempty"`
-	UserID    int64     `gorm:"index" json:"user_id,omitempty"`
-	APIKeyID  int64     `gorm:"index" json:"api_key_id,omitempty"`
-	AccountID int64     `gorm:"index" json:"account_id,omitempty"`
-	Platform  string    `gorm:"size:16;index" json:"platform,omitempty"`
-	Model     string    `gorm:"size:128;index" json:"model,omitempty"`
-	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	ID         int64      `gorm:"primaryKey" json:"id"`
+	Level      string     `gorm:"size:16;index" json:"level"`
+	Category   string     `gorm:"size:32;index" json:"category,omitempty"`
+	Component  string     `gorm:"size:64;index" json:"component"`
+	ErrorCode  string     `gorm:"size:96;index" json:"error_code,omitempty"`
+	Message    string     `gorm:"size:2048" json:"message"`
+	Details    string     `gorm:"type:text" json:"details,omitempty"`
+	Method     string     `gorm:"size:16;index" json:"method,omitempty"`
+	Path       string     `gorm:"size:512;index" json:"path,omitempty"`
+	StatusCode int        `gorm:"index" json:"status_code,omitempty"`
+	RequestID  string     `gorm:"size:32;index" json:"request_id,omitempty"`
+	ClientIP   string     `gorm:"size:64;index" json:"client_ip,omitempty"`
+	UserAgent  string     `gorm:"size:512" json:"user_agent,omitempty"`
+	UserID     int64      `gorm:"index" json:"user_id,omitempty"`
+	APIKeyID   int64      `gorm:"index" json:"api_key_id,omitempty"`
+	AccountID  int64      `gorm:"index" json:"account_id,omitempty"`
+	Platform   string     `gorm:"size:16;index" json:"platform,omitempty"`
+	Model      string     `gorm:"size:128;index" json:"model,omitempty"`
+	ResolvedAt *time.Time `gorm:"index" json:"resolved_at,omitempty"`
+	ResolvedBy string     `gorm:"size:255" json:"resolved_by,omitempty"`
+	CreatedAt  time.Time  `gorm:"index" json:"created_at"`
 }
 
 type RedeemCode struct {

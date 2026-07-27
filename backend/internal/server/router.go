@@ -36,8 +36,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		panic("invalid SERVER_TRUSTED_PROXIES: " + err.Error())
 	}
 	r.RemoteIPHeaders = append([]string(nil), forwardedHeaders...)
-	r.Use(gin.Recovery())
 	r.Use(middleware.RequestID())
+	r.Use(middleware.SiteErrorCapture(db))
+	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.PublicCORS())
 
@@ -105,6 +106,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	paymentH := handler.NewPaymentHandler(payments)
 	adminPaymentH := handler.NewAdminPaymentHandler(payments)
 	referralCashH := handler.NewReferralCashHandler(referralCash)
+	siteErrorH := handler.NewSiteErrorHandler(db)
 
 	r.GET("/health", func(c *gin.Context) {
 		build := version.Info()
@@ -126,6 +128,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		api.GET("/models", middleware.RateLimit(120, time.Minute), userH.PublicModelCatalogue)
 		// Throttle unauthenticated auth endpoints to blunt credential stuffing.
 		api.GET("/settings", middleware.RateLimit(120, time.Minute), authH.PublicSettings)
+		api.POST("/site-errors", middleware.RateLimit(60, time.Minute), siteErrorH.Report)
 		authGroup := api.Group("", middleware.RateLimit(20, time.Minute))
 		authGroup.POST("/auth/register/code", authH.SendRegistrationCode)
 		authGroup.POST("/auth/register", authH.Register)
@@ -190,6 +193,11 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.GET("/ops/job-heartbeats", adminH.OpsJobHeartbeats)
 			admin.GET("/ops/system-logs", adminH.OpsSystemLogs)
 			admin.DELETE("/ops/system-logs", adminH.ClearOpsSystemLogs)
+			admin.GET("/errors/summary", adminH.ErrorCenterSummary)
+			admin.GET("/errors/site", adminH.SiteErrors)
+			admin.POST("/errors/site/:id/resolve", adminH.ResolveSiteError)
+			admin.GET("/errors/api", adminH.OpsErrors)
+			admin.POST("/errors/api/:id/resolve", adminH.ResolveOpsError)
 			admin.POST("/ops/probe", adminH.TriggerAccountProbes)
 			admin.POST("/ops/accounts/:id/probe", adminH.ProbeAccount)
 			admin.GET("/users", adminH.ListUsers)

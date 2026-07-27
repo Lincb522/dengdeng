@@ -45,6 +45,8 @@ func writeError(c *gin.Context, status int, code, msg string, retryAfter time.Du
 	if strings.TrimSpace(code) == "" {
 		code = errorCodeFor(status, msg)
 	}
+	c.Set("ctx_error_code", code)
+	c.Set("ctx_error_message", msg)
 	seconds := int64(0)
 	if retryAfter > 0 {
 		seconds = int64(math.Ceil(retryAfter.Seconds()))
