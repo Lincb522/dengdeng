@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, withToast } from '../../api/client'
+import { resolveApiError } from '../../api/errors'
 import type { ErrorCenterScopeSummary, ErrorCenterSummary, OpsErrorLog, SiteErrorLog } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import AppModal from '../../components/AppModal.vue'
@@ -25,8 +26,13 @@ const level = ref('')
 const platform = ref('')
 const errorType = ref('')
 const keyword = ref('')
+const selectedIDs = ref<number[]>([])
+const batchResolving = ref(false)
 
 const items = computed<ErrorItem[]>(() => scope.value === 'site' ? siteItems.value : apiItems.value)
+const selectableItems = computed(() => items.value.filter((item) => !item.resolved_at))
+const selectedIDSet = computed(() => new Set(selectedIDs.value))
+const allPageSelected = computed(() => selectableItems.value.length > 0 && selectableItems.value.every((item) => selectedIDSet.value.has(item.id)))
 const scopeSummary = computed<ErrorCenterScopeSummary>(() => summary.value?.[scope.value] || {
   total: 0, open: 0, resolved: 0, critical: 0, last_hour: 0, retryable: 0, business_limited: 0, categories: [],
 })
@@ -50,8 +56,95 @@ const categoryLabels: Record<string, string> = {
   upstream: '上游响应',
 }
 
+const componentLabels: Record<string, string> = {
+  'frontend.vue': '页面组件',
+  'frontend.promise': '异步任务',
+  'frontend.window': '页面脚本',
+  'frontend.network': '网络请求',
+  'frontend.browser': '浏览器运行',
+  'site.authentication': '登录与鉴权接口',
+  'site.administration': '管理端接口',
+  'site.user_console': '用户端接口',
+  'site.payment': '支付接口',
+  'site.referral': '推广接口',
+  'site.public_site': '公开接口',
+  'ops.collector': '运行数据采集器',
+}
+
+const phaseLabels: Record<string, string> = {
+  request: '请求校验',
+  authentication: '身份验证',
+  routing: '账号调度',
+  upstream: '上游调用',
+  response: '响应处理',
+}
+
+const sourceLabels: Record<string, string> = {
+  client: '客户端请求',
+  scheduler: '调度器',
+  provider: '上游服务',
+  gateway: '中转网关',
+  proxy: '网络代理',
+  system: '系统任务',
+}
+
 function categoryLabel(value: string) {
-  return categoryLabels[value] || value || '未分类'
+  return categoryLabels[value] || componentLabels[value] || value || '未分类'
+}
+
+function componentLabel(value: string) {
+  return componentLabels[value] || categoryLabel(value.replace(/^site\./, '').replace(/^frontend\./, 'frontend'))
+}
+
+function phaseLabel(value: string) {
+  return phaseLabels[value] || value || '未知阶段'
+}
+
+function sourceLabel(value: string) {
+  return sourceLabels[value] || value || '未知来源'
+}
+
+function statusLabel(value?: number) {
+  if (!value) return '页面运行错误'
+  const labels: Record<number, string> = {
+    400: '请求内容有误',
+    401: '身份验证失败',
+    402: '额度或余额不足',
+    403: '权限不足',
+    404: '接口不存在',
+    409: '状态冲突',
+    413: '请求内容过大',
+    422: '请求内容无法处理',
+    429: '请求过于频繁',
+    500: '站点内部错误',
+    502: '上游响应异常',
+    503: '服务暂不可用',
+    504: '上游响应超时',
+    529: '上游服务繁忙',
+  }
+  return `HTTP ${value} · ${labels[value] || (value >= 500 ? '服务端错误' : '请求失败')}`
+}
+
+function localizedSiteError(item: SiteErrorLog) {
+  return resolveApiError(item.status_code || 0, {
+    message: item.message,
+    error_code: item.error_code || '',
+  })
+}
+
+function localizedAPIError(item: OpsErrorLog) {
+  const resolved = resolveApiError(item.status_code || 0, { message: item.error_message })
+  if (item.error_type === 'authentication' && resolved.code === 'auth.required') {
+    return resolveApiError(item.status_code || 0, {
+      message: item.error_message,
+      error_code: 'upstream.authentication_failed',
+    })
+  }
+  return resolved
+}
+
+function originalDiffers(localized: string, original?: string) {
+  return Boolean(original?.trim() && original.trim() !== localized.trim())
 }
 
 function levelLabel(value: string) {
@@ -92,6 +185,7 @@ function buildListQuery() {
 
 async function load() {
   loading.value = true
+  selectedIDs.value = []
   try {
     summary.value = await api.get<ErrorCenterSummary>(`/api/admin/errors/summary?range=${range.value}`)
     const endpoint = scope.value === 'site' ? '/api/admin/errors/site' : '/api/admin/errors/api'
@@ -113,6 +207,7 @@ function selectScope(value: Scope) {
   platform.value = ''
   errorType.value = ''
   keyword.value = ''
+  selectedIDs.value = []
 }
 
 function changePage(value: number) {
@@ -142,6 +237,29 @@ async function resolve(item: ErrorItem) {
   if (result !== null) {
     selected.value = null
     await load()
+  }
+}
+
+function toggleSelection(id: number) {
+  selectedIDs.value = selectedIDSet.value.has(id)
+    ? selectedIDs.value.filter((item) => item !== id)
+    : [...selectedIDs.value, id]
+}
+
+function togglePageSelection() {
+  selectedIDs.value = allPageSelected.value ? [] : selectableItems.value.map((item) => item.id)
+}
+
+async function resolveSelected() {
+  if (!selectedIDs.value.length || batchResolving.value) return
+  batchResolving.value = true
+  try {
+    const endpoint = scope.value === 'site' ? '/api/admin/errors/site/resolve-batch' : '/api/admin/errors/api/resolve-batch'
+    const count = selectedIDs.value.length
+    const result = await withToast(() => api.post(endpoint, { ids: selectedIDs.value }), `已处理 ${count} 条错误`)
+    if (result !== null) await load()
+  } finally {
+    batchResolving.value = false
   }
 }
 
@@ -247,17 +365,31 @@ onMounted(load)
     <section class="ops-console-section error-records">
       <header>
         <h2>{{ scope === 'site' ? '站点错误记录' : 'API 调用错误记录' }}</h2>
-        <span>共 {{ total }} 条</span>
+        <div class="error-record-actions">
+          <span>共 {{ total }} 条</span>
+          <label class="error-select-page">
+            <input type="checkbox" :checked="allPageSelected" :disabled="!selectableItems.length || batchResolving" @change="togglePageSelection" />
+            选择本页
+          </label>
+          <button class="btn-primary" :disabled="!selectedIDs.length || batchResolving" @click="resolveSelected">
+            {{ batchResolving ? '处理中' : `批量处理${selectedIDs.length ? ` (${selectedIDs.length})` : ''}` }}
+          </button>
+        </div>
       </header>
       <div class="overflow-x-auto">
         <table v-if="scope === 'site'" v-responsive-table class="table-base error-center-table">
           <thead><tr><th>时间</th><th>级别 / 分类</th><th>页面 / 接口</th><th>错误</th><th>用户 / IP</th><th>请求编号</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="item in siteItems" :key="item.id">
-              <td class="whitespace-nowrap text-xs text-slate-500">{{ formatTime(item.created_at) }}</td>
+              <td class="whitespace-nowrap text-xs text-slate-500">
+                <div class="error-row-time">
+                  <input v-if="!item.resolved_at" type="checkbox" :checked="selectedIDSet.has(item.id)" :aria-label="`选择 ${formatTime(item.created_at)} 的站点错误`" @change="toggleSelection(item.id)" />
+                  <time>{{ formatTime(item.created_at) }}</time>
+                </div>
+              </td>
               <td><span :class="levelClass(item.level)">{{ levelLabel(item.level) }}</span><small>{{ categoryLabel(item.category || item.component) }}</small></td>
-              <td><strong class="error-cell-path">{{ item.method || '—' }} {{ item.path || '—' }}</strong><small>{{ item.component }}</small></td>
-              <td><strong class="error-cell-message">{{ item.message }}</strong><small>{{ item.error_code || (item.status_code ? `HTTP ${item.status_code}` : '前端运行错误') }}</small></td>
+              <td><strong class="error-cell-path">{{ item.method || '—' }} {{ item.path || '—' }}</strong><small>{{ componentLabel(item.component) }}</small></td>
+              <td><strong class="error-cell-message" :title="item.message">{{ localizedSiteError(item).message }}</strong><small>{{ statusLabel(item.status_code) }}</small></td>
               <td><strong>{{ item.user_email || '未登录' }}</strong><small>{{ item.client_ip || '—' }}</small></td>
               <td><code>{{ item.request_id || '—' }}</code></td>
               <td><span :class="item.resolved_at ? 'tag-green' : 'tag-amber'">{{ item.resolved_at ? '已处理' : '未处理' }}</span></td>
@@ -271,12 +403,17 @@ onMounted(load)
           <thead><tr><th>时间</th><th>级别 / 类型</th><th>用户 / 密钥</th><th>模型 / 端点</th><th>分组 / 账号</th><th>错误</th><th>请求编号</th><th>状态</th><th>操作</th></tr></thead>
           <tbody>
             <tr v-for="item in apiItems" :key="item.id">
-              <td class="whitespace-nowrap text-xs text-slate-500">{{ formatTime(item.created_at) }}</td>
+              <td class="whitespace-nowrap text-xs text-slate-500">
+                <div class="error-row-time">
+                  <input v-if="!item.resolved_at" type="checkbox" :checked="selectedIDSet.has(item.id)" :aria-label="`选择 ${formatTime(item.created_at)} 的 API 错误`" @change="toggleSelection(item.id)" />
+                  <time>{{ formatTime(item.created_at) }}</time>
+                </div>
+              </td>
               <td><span :class="levelClass(item.severity)">{{ item.severity }}</span><small>{{ categoryLabel(item.error_type) }}</small></td>
               <td><strong>{{ item.user_email || '—' }}</strong><small>{{ item.key_name || '未命名密钥' }}</small></td>
               <td><strong class="error-cell-path">{{ item.model || '—' }}</strong><small>{{ item.request_path || '—' }}</small></td>
               <td><strong>{{ item.group_name || '—' }}</strong><small>{{ item.account_name || '未选中账号' }}</small></td>
-              <td><strong class="error-cell-message">{{ item.error_message || '请求失败' }}</strong><small>{{ item.status_code }} · {{ item.error_source }}</small></td>
+              <td><strong class="error-cell-message" :title="item.error_message">{{ localizedAPIError(item).message }}</strong><small>{{ statusLabel(item.status_code) }} · {{ sourceLabel(item.error_source) }}</small></td>
               <td><code>{{ item.request_id || '—' }}</code></td>
               <td><span :class="item.resolved_at ? 'tag-green' : 'tag-amber'">{{ item.resolved_at ? '已处理' : '未处理' }}</span></td>
               <td><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="selected = item">详情</button></td>
@@ -294,11 +431,13 @@ onMounted(load)
           <div><dt>发生时间</dt><dd>{{ formatTime(selectedSite.created_at) }}</dd></div>
           <div><dt>分类</dt><dd>{{ categoryLabel(selectedSite.category || selectedSite.component) }} · {{ levelLabel(selectedSite.level) }}</dd></div>
           <div><dt>页面 / 接口</dt><dd><code>{{ selectedSite.method }} {{ selectedSite.path }}</code></dd></div>
-          <div><dt>状态 / 错误码</dt><dd>{{ selectedSite.status_code || '前端' }} · <code>{{ selectedSite.error_code || 'frontend.runtime_error' }}</code></dd></div>
+          <div><dt>状态 / 错误码</dt><dd>{{ statusLabel(selectedSite.status_code) }} · <code>{{ selectedSite.error_code || (selectedSite.method === 'CLIENT' ? 'frontend.runtime_error' : '未提供') }}</code></dd></div>
           <div><dt>用户 / IP</dt><dd>{{ selectedSite.user_email || '未登录' }} · {{ selectedSite.client_ip || '—' }}</dd></div>
           <div><dt>请求编号</dt><dd><code>{{ selectedSite.request_id || '—' }}</code></dd></div>
           <div class="is-wide"><dt>浏览器</dt><dd>{{ selectedSite.user_agent || '—' }}</dd></div>
-          <div class="is-wide"><dt>错误信息</dt><dd>{{ selectedSite.message }}</dd></div>
+          <div class="is-wide"><dt>错误信息</dt><dd>{{ localizedSiteError(selectedSite).message }}</dd></div>
+          <div v-if="localizedSiteError(selectedSite).action" class="is-wide"><dt>处理建议</dt><dd>{{ localizedSiteError(selectedSite).action }}</dd></div>
+          <div v-if="originalDiffers(localizedSiteError(selectedSite).message, selectedSite.message)" class="is-wide"><dt>原始错误</dt><dd><pre>{{ selectedSite.message }}</pre></dd></div>
           <div v-if="selectedSite.details" class="is-wide"><dt>运行堆栈</dt><dd><pre>{{ selectedSite.details }}</pre></dd></div>
         </dl>
       </div>
@@ -306,14 +445,16 @@ onMounted(load)
         <dl>
           <div><dt>发生时间</dt><dd>{{ formatTime(selectedAPI.created_at) }}</dd></div>
           <div><dt>平台 / 模型</dt><dd>{{ PLATFORM_LABELS[selectedAPI.platform] || selectedAPI.platform }} · {{ selectedAPI.model }}</dd></div>
-          <div><dt>错误链路</dt><dd>{{ selectedAPI.error_phase }} / {{ selectedAPI.error_type }} / {{ selectedAPI.error_source }}</dd></div>
-          <div><dt>状态 / 耗时</dt><dd>HTTP {{ selectedAPI.status_code }} · {{ formatLatency(selectedAPI.duration_ms) }}</dd></div>
+          <div><dt>错误链路</dt><dd>{{ phaseLabel(selectedAPI.error_phase) }} / {{ categoryLabel(selectedAPI.error_type) }} / {{ sourceLabel(selectedAPI.error_source) }}</dd></div>
+          <div><dt>状态 / 耗时</dt><dd>{{ statusLabel(selectedAPI.status_code) }} · {{ formatLatency(selectedAPI.duration_ms) }}</dd></div>
           <div><dt>用户 / 密钥</dt><dd>{{ selectedAPI.user_email || '—' }} · {{ selectedAPI.key_name || '—' }}</dd></div>
           <div><dt>分组 / 账号</dt><dd>{{ selectedAPI.group_name || '—' }} · {{ selectedAPI.account_name || '未选中账号' }}</dd></div>
           <div><dt>请求 IP</dt><dd>{{ selectedAPI.client_ip || '—' }} · {{ selectedAPI.ip_location || '地区未知' }}</dd></div>
           <div><dt>请求编号</dt><dd><code>{{ selectedAPI.request_id }}</code></dd></div>
-          <div class="is-wide"><dt>错误信息</dt><dd>{{ selectedAPI.error_message }}</dd></div>
-          <div v-if="selectedAPI.upstream_error_chain" class="is-wide"><dt>上游错误链</dt><dd><pre>{{ selectedAPI.upstream_error_chain }}</pre></dd></div>
+          <div class="is-wide"><dt>错误信息</dt><dd>{{ localizedAPIError(selectedAPI).message }}</dd></div>
+          <div v-if="localizedAPIError(selectedAPI).action" class="is-wide"><dt>处理建议</dt><dd>{{ localizedAPIError(selectedAPI).action }}</dd></div>
+          <div v-if="originalDiffers(localizedAPIError(selectedAPI).message, selectedAPI.error_message)" class="is-wide"><dt>原始错误</dt><dd><pre>{{ selectedAPI.error_message }}</pre></dd></div>
+          <div v-if="selectedAPI.upstream_error_chain && selectedAPI.upstream_error_chain !== selectedAPI.error_message" class="is-wide"><dt>原始上游错误链</dt><dd><pre>{{ selectedAPI.upstream_error_chain }}</pre></dd></div>
         </dl>
       </div>
       <template #footer>

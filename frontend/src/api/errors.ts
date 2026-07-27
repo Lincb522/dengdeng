@@ -111,10 +111,13 @@ function formatWait(seconds: number) {
 const errorCopy: Record<string, ErrorCopy> = {
   'network.offline': { title: '网络连接失败', message: '无法连接服务器。', action: '请检查网络和服务地址后重试。', retryable: true },
   'client.runtime': { title: '页面运行异常', message: '当前页面没有正常完成操作。', action: '请刷新页面；如果仍然出现，请提供请求编号或截图。', retryable: true },
+  'frontend.runtime_error': { title: '页面运行异常', message: '当前页面没有正常完成操作。', action: '请刷新页面；如果仍然出现，请提供请求编号或截图。', retryable: true },
   'client.chunk_load': { title: '页面资源加载失败', message: '站点可能刚刚更新。', action: '请刷新页面以加载最新版本。', retryable: true },
   'request.invalid': { title: '提交内容有误', message: '请检查填写内容后重试。' },
+  'request.invalid_value': { title: '参数取值不受支持', message: '请求中包含当前接口不支持的参数或取值。', action: '请检查接口格式、字段类型和可选值。' },
   'request.invalid_json': { title: '请求格式错误', message: '提交内容不是有效的 JSON。' },
   'request.too_large': { title: '请求内容过大', message: '上下文或附件超过服务器允许的大小。', action: '请缩短上下文或减少附件后重试。' },
+  'request.content_rejected': { title: '请求内容未通过上游检查', message: '上游拒绝处理当前输入内容。', action: '请调整输入内容后重试。' },
   'request.rate_limited': { title: '操作过于频繁', message: '当前请求已被暂时限制。', retryable: true },
   'request.concurrency_limited': { title: '请求正在排队', message: '当前并发已满。', action: '请等待其他请求结束后重试。', retryable: true },
   'auth.invalid_credentials': { title: '登录失败', message: '邮箱或密码不正确。', action: '请重新输入，连续错误 5 次会暂时锁定登录。' },
@@ -149,11 +152,15 @@ const errorCopy: Record<string, ErrorCopy> = {
   'group.not_found': { title: '分组不存在', message: '所选分组可能已经被删除。' },
   'group.disabled': { title: '分组已停用', message: '请选择其他开放分组。' },
   'account.not_found': { title: '上游账号不存在', message: '该账号可能已经被删除。' },
+  'model.unsupported': { title: '当前账号不支持该模型', message: '所选模型与上游账号、套餐或接口不兼容。', action: '请更换模型、上游账号或分组。' },
   'quota.unavailable': { title: '额度不可用', message: '账户、密钥或上游额度不足。', action: '请检查余额和额度设置。' },
   'upstream.unavailable': { title: '暂无可用上游账号', message: '所选分组当前没有可用账号。', action: '请稍后重试或切换分组。', retryable: true },
   'upstream.busy': { title: '上游账号繁忙', message: '可用账号当前并发已满。', action: '请稍后重试。', retryable: true },
+  'upstream.authentication_failed': { title: '上游账号认证失败', message: '上游账号的登录状态、令牌或接口权限不可用。', action: '请刷新账号凭据、重新登录或更换账号。', retryable: true },
   'upstream.rate_limited': { title: '上游请求受限', message: '上游账号正在冷却。', action: '请等待额度窗口恢复或切换账号。', retryable: true },
   'upstream.failed': { title: '上游服务异常', message: '上游没有正常完成请求。', action: '请稍后重试；管理员可在用量明细查看错误链路。', retryable: true },
+  'upstream.empty_response': { title: '上游返回了空响应', message: '请求已到达上游，但没有收到可用的回复内容。', action: '请重试；如果持续出现，请检查账号和协议转换配置。', retryable: true },
+  'upstream.invalid_response': { title: '上游响应格式异常', message: '上游返回的内容无法正常解析。', action: '请检查代理、协议转换和上游服务状态。', retryable: true },
   'payment.order_not_found': { title: '订单不存在', message: '订单可能已过期或已被清理。' },
   'payment.disabled': { title: '支付暂不可用', message: '在线支付渠道尚未启用。' },
   'payment.failed': { title: '支付操作失败', message: '订单没有正常创建或核验。', action: '请不要重复付款，先刷新订单状态。', retryable: true },
@@ -198,6 +205,12 @@ function fallbackCode(status: number, raw: string) {
   if (normalized.includes('incorrect email') || normalized.includes('incorrect password')) return 'auth.invalid_credentials'
   if (normalized.includes('payload too large') || normalized.includes('request entity too large')) return 'request.too_large'
   if (normalized.includes('context_length') || normalized.includes('maximum context')) return 'request.too_large'
+  if (normalized.includes('invalid value') || normalized.includes('supported values are') || normalized.includes('invalid tool parameters')) return 'request.invalid_value'
+  if (normalized.includes('not supported') || normalized.includes('unsupported model') || normalized.includes('model does not exist')) return 'model.unsupported'
+  if (normalized.includes('empty or malformed response') || normalized.includes('empty response') || normalized.includes('without output') || normalized.includes('without an image result')) return 'upstream.empty_response'
+  if (normalized.includes('invalid json') || normalized.includes('non-json response') || normalized.includes('response conversion failed')) return 'upstream.invalid_response'
+  if (normalized.includes('content policy') || normalized.includes('safety policy') || normalized.includes('content_filter')) return 'request.content_rejected'
+  if (normalized.includes('insufficient permissions') || normalized.includes('missing_scope')) return 'permission.denied'
   if (normalized.includes('insufficient') && (normalized.includes('quota') || normalized.includes('balance'))) return 'quota.unavailable'
   if (normalized.includes('rate limit') || normalized.includes('too many requests')) return 'upstream.rate_limited'
   if (normalized.includes('concurrency') || normalized.includes('busy')) return 'request.concurrency_limited'

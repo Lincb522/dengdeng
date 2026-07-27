@@ -3748,9 +3748,18 @@ body.has-app-modal { overflow: hidden; }
 .error-filter-grid .input { width: 100%; min-height: 2.15rem; font-size: .66rem; }
 .error-filter-grid .btn-primary { min-height: 2.15rem; font-size: .66rem; }
 .error-records { min-width: 0; }
-.error-records > .overflow-x-auto { scrollbar-gutter: stable; }
+.error-records > .overflow-x-auto { width: 100%; max-width: 100%; scrollbar-gutter: stable; }
 .error-records > .mt-4 { margin: 0; padding: .62rem .78rem; border-top: 1px solid var(--line); }
-.error-center-table { min-width: 76rem; }
+.error-record-actions { display: flex; align-items: center; justify-content: flex-end; gap: .55rem; }
+.error-record-actions > span { color: var(--ink-faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .54rem; }
+.error-record-actions .btn-primary { min-height: 1.9rem; padding: 0 .65rem; font-size: .59rem; }
+.error-select-page,
+.error-row-time { display: inline-flex; align-items: center; gap: .42rem; }
+.error-select-page { color: var(--ink-soft); font-size: .6rem; font-weight: 720; white-space: nowrap; }
+.error-select-page input,
+.error-row-time input { width: .86rem; height: .86rem; flex: 0 0 auto; accent-color: var(--accent); }
+.error-row-time time { white-space: nowrap; }
+.error-center-table { width: 100%; min-width: 76rem; }
 .error-center-table td { vertical-align: middle; }
 .error-center-table td > strong,
 .error-center-table td > small { display: block; max-width: 13rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3823,6 +3832,13 @@ body.has-app-modal { overflow: hidden; }
 	.error-metric-strip > div:nth-child(odd) { border-left: 0; }
 	.error-metric-strip > div:last-child:nth-child(odd) { grid-column: 1 / -1; }
 	.error-filter-grid { grid-template-columns: minmax(0, 1fr); }
+	.error-records > header { align-items: flex-start; flex-direction: column; padding-block: .55rem; }
+	.error-record-actions { width: 100%; justify-content: flex-start; flex-wrap: wrap; }
+	.error-record-actions .btn-primary { min-height: 2.15rem; margin-left: auto; }
+	.error-records > .overflow-x-auto { overflow-x: hidden; }
+	.workspace-main .error-center-table,
+	.workspace-main .error-center-table tbody { width: 100% !important; max-width: 100% !important; box-sizing: border-box; }
+	.workspace-main .error-center-table tbody tr { max-width: 100%; }
 	.error-detail dl { grid-template-columns: minmax(0, 1fr); }
 	.error-detail dl > div.is-wide { grid-column: auto; }
 }

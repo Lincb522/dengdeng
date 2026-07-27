@@ -27,6 +27,10 @@ type clientErrorReport struct {
 	RequestID string `json:"request_id"`
 }
 
+type resolveErrorsBatchRequest struct {
+	IDs []int64 `json:"ids" binding:"required"`
+}
+
 func NewSiteErrorHandler(db *gorm.DB) *siteErrorHandler {
 	return &siteErrorHandler{db: db}
 }
@@ -280,6 +284,55 @@ func (h *AdminHandler) ResolveSiteError(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"resolved": true, "resolved_at": now})
+}
+
+func (h *AdminHandler) ResolveSiteErrorsBatch(c *gin.Context) {
+	h.resolveErrorsBatch(c, &model.OpsSystemLog{})
+}
+
+func (h *AdminHandler) ResolveAPIErrorsBatch(c *gin.Context) {
+	h.resolveErrorsBatch(c, &model.OpsErrorLog{})
+}
+
+func (h *AdminHandler) resolveErrorsBatch(c *gin.Context, target any) {
+	var req resolveErrorsBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		util.FailCode(c, http.StatusBadRequest, "request.invalid", "请选择需要处理的错误")
+		return
+	}
+	ids := make([]int64, 0, len(req.IDs))
+	seen := make(map[int64]struct{}, len(req.IDs))
+	for _, id := range req.IDs {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		util.FailCode(c, http.StatusBadRequest, "request.invalid", "请选择需要处理的错误")
+		return
+	}
+	if len(ids) > 500 {
+		util.FailCode(c, http.StatusBadRequest, "request.invalid", "单次最多处理 500 条错误")
+		return
+	}
+	actor := middleware.CurrentUser(c)
+	now := time.Now().UTC()
+	result := h.db.Model(target).Where("id IN ? AND resolved_at IS NULL", ids).
+		Updates(map[string]any{"resolved_at": now, "resolved_by": actor.Email})
+	if result.Error != nil {
+		util.Fail(c, http.StatusInternalServerError, "batch resolve errors failed")
+		return
+	}
+	util.OK(c, gin.H{
+		"requested":   len(ids),
+		"resolved":    result.RowsAffected,
+		"resolved_at": now,
+	})
 }
 
 func trimErrorCenterText(value string, limit int) string {
