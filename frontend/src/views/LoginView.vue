@@ -84,7 +84,7 @@ async function sendVerificationCode() {
     beginCooldown(result.resend_after || 60)
     toast.show('验证码已发送', 'success')
   } catch (e) {
-    toast.show(e instanceof Error ? e.message : '发送失败', 'error')
+    toast.showError(e, '验证码发送失败')
   } finally {
     sendingCode.value = false
 		turnstileToken.value = ''
@@ -103,7 +103,7 @@ async function sendResetCode() {
 		beginCooldown(result.resend_after || 60)
 		toast.show('验证码已发送', 'success')
 	} catch (e) {
-		toast.show(e instanceof Error ? e.message : '发送失败', 'error')
+		toast.showError(e, '验证码发送失败')
 	} finally {
 		sendingCode.value = false
 		turnstileToken.value = ''
@@ -126,7 +126,7 @@ async function startOAuth(provider: string) {
 		const result = await api.post<{ authorization_url: string }>(`/api/auth/oauth/${provider}/start`, { terms_revision: agreement.value.revision, turnstile_token: turnstileToken.value })
 		window.location.assign(result.authorization_url)
 	} catch (e) {
-		toast.show(e instanceof Error ? e.message : '第三方登录失败', 'error')
+		toast.showError(e, '第三方登录失败')
 		busy.value = false
 		turnstileToken.value = ''
 		turnstileNonce.value += 1
@@ -143,7 +143,7 @@ async function completeOAuth() {
 		pendingOAuthCode.value = ''
 		await router.push('/dashboard')
 	} catch (e) {
-		toast.show(e instanceof Error ? e.message : '第三方登录确认失败', 'error')
+		toast.showError(e, '第三方登录确认失败')
 	} finally {
 		busy.value = false
 	}
@@ -186,7 +186,7 @@ async function submit() {
     }
     router.push('/dashboard')
   } catch (e) {
-    toast.show(e instanceof Error ? e.message : '操作失败', 'error')
+    toast.showError(e, mode.value === 'login' ? '登录失败' : mode.value === 'register' ? '注册失败' : '密码重置失败')
   } finally {
     busy.value = false
 		turnstileToken.value = ''

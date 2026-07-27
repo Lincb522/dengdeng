@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { api, copyText } from '../api/client'
 import { localizedApiError, localizeErrorMessage } from '../api/errors'
+import { buildCCSwitchImportConfig, buildCCSwitchImportLink } from '../api/ccswitch'
 import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS } from '../api/reasoning'
 import { PLATFORM_LABELS } from '../api/types'
 import { useToast } from '../stores/toast'
@@ -16,7 +17,7 @@ interface SetupFile {
   hint?: string
 }
 
-const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; keyPreview: string; platform: string; platforms: string[]; reasoningEffort: string; secretAvailable: boolean; loadingSecret: boolean }>()
+const props = defineProps<{ show: boolean; apiKey: string; keyId: number | null; keyName: string; keyPreview: string; platform: string; platforms: string[]; reasoningEffort: string; secretAvailable: boolean; loadingSecret: boolean; allowCcsImport: boolean }>()
 const emit = defineEmits<{ close: []; rotate: []; 'secret-saved': [value: string]; 'effort-updated': [value: string] }>()
 const toast = useToast()
 
@@ -49,7 +50,7 @@ const clientDownloads: Record<ClientID, { label: string; action: string; url: st
   nextchat: { label: 'NextChat', action: '下载 NextChat', url: 'https://github.com/ChatGPTNextWeb/NextChat/releases/latest' },
   continue: { label: 'Continue', action: '打开扩展商店', url: 'https://marketplace.visualstudio.com/items?itemName=Continue.continue' },
 }
-const downloadClients: ClientID[] = [
+const allDownloadClients: ClientID[] = [
   'claude',
   'codex',
   'gemini',
@@ -61,6 +62,7 @@ const downloadClients: ClientID[] = [
   'opencode',
   'ccswitch',
 ]
+const downloadClients = computed(() => allDownloadClients.filter((client) => props.allowCcsImport || client !== 'ccswitch'))
 
 const origin = computed(() => window.location.origin.replace(/\/$/, ''))
 const apiBase = computed(() => `${origin.value}/v1`)
@@ -124,21 +126,23 @@ async function saveRecoveredSecret(showMessage = true) {
 
 const clientOptions = computed(() => {
   if (activePlatform.value === 'anthropic') {
-    return [
+    const items: Array<{ id: ClientID; label: string }> = [
       { id: 'claude' as const, label: 'Claude Code' },
       { id: 'codex' as const, label: 'Codex CLI' },
       { id: 'opencode' as const, label: 'OpenCode' },
       { id: 'ccswitch' as const, label: 'CCSwitch' },
     ]
+    return items.filter((item) => props.allowCcsImport || item.id !== 'ccswitch')
   }
   if (activePlatform.value === 'gemini') {
-    return [
+    const items: Array<{ id: ClientID; label: string }> = [
       { id: 'gemini' as const, label: 'Gemini CLI' },
       { id: 'opencode' as const, label: 'OpenCode' },
       { id: 'ccswitch' as const, label: 'CCSwitch' },
     ]
+    return items.filter((item) => props.allowCcsImport || item.id !== 'ccswitch')
   }
-  return [
+  const items: Array<{ id: ClientID; label: string }> = [
     { id: 'codex' as const, label: 'Codex CLI' },
     { id: 'claude' as const, label: 'Claude Code' },
     { id: 'chatbox' as const, label: 'Chatbox' },
@@ -149,6 +153,7 @@ const clientOptions = computed(() => {
     { id: 'opencode' as const, label: 'OpenCode' },
     { id: 'ccswitch' as const, label: 'CCSwitch' },
   ]
+  return items.filter((item) => props.allowCcsImport || item.id !== 'ccswitch')
 })
 
 const shellOptions = computed(() => {
@@ -399,54 +404,15 @@ const currentFiles = computed<SetupFile[]>(() => {
   return []
 })
 
-const ccSwitchUsageScript = `({
-  request: {
-    url: "{{baseUrl}}/v1/usage",
-    method: "GET",
-    headers: { "Authorization": "Bearer {{apiKey}}" }
-  },
-  extractor: function(response) {
-    const remaining = response?.remaining ?? response?.quota?.remaining ?? response?.balance;
-    const unit = response?.unit ?? response?.quota?.unit ?? "USD";
-    return {
-      isValid: response?.is_active ?? response?.isValid ?? true,
-      remaining,
-      unit
-    };
-  }
-})`
-
-const ccSwitchConfig = computed(() => {
-  const app = activePlatform.value === 'anthropic' ? 'claude' : activePlatform.value === 'gemini' ? 'gemini' : 'codex'
-  const endpoint = isOpenAICompatible.value ? apiBase.value : origin.value
-  return {
-    resource: 'provider',
-    app,
-    name: `DengDeng AI · ${props.keyName || 'API Key'}`,
-    homepage: origin.value,
-    endpoint,
-    apiKey: configuredApiKey.value,
-    model: selectedModel.value || undefined,
-    configFormat: 'json',
-    usageEnabled: true,
-    // CCSwitch treats the provider endpoint and the usage-query base URL as
-    // separate values. Codex needs /v1 for relay traffic, while the custom
-    // script below appends /v1/usage itself.
-    usageBaseUrl: origin.value,
-    usageApiKey: configuredApiKey.value,
-    usageScript: window.btoa(ccSwitchUsageScript),
-    usageAutoInterval: 30,
-    enabled: true,
-  }
-})
-
-const ccSwitchLink = computed(() => {
-  const params = new URLSearchParams()
-  Object.entries(ccSwitchConfig.value).forEach(([key, value]) => {
-    if (value !== undefined) params.set(key, String(value))
-  })
-  return `ccswitch://v1/import?${params.toString()}`
-})
+const ccSwitchOptions = computed(() => ({
+  origin: origin.value,
+  apiKey: configuredApiKey.value,
+  platform: activePlatform.value,
+  keyName: props.keyName,
+  model: selectedModel.value || undefined,
+}))
+const ccSwitchConfig = computed(() => buildCCSwitchImportConfig(ccSwitchOptions.value))
+const ccSwitchLink = computed(() => buildCCSwitchImportLink(ccSwitchOptions.value))
 
 async function copy(value: string, id: string) {
   try {
@@ -525,7 +491,7 @@ function nextStep() {
           <div v-if="currentFiles[activeFileIndex]" class="key-setup-code"><div><span :title="currentFiles[activeFileIndex].path">{{ currentFiles[activeFileIndex].path }}</span><button @click="copy(currentFiles[activeFileIndex].content, `${activeClient}-${activeFileIndex}`)">{{ copied === `${activeClient}-${activeFileIndex}` ? '已复制' : '复制配置' }}</button></div><p v-if="currentFiles[activeFileIndex].hint">{{ currentFiles[activeFileIndex].hint }}</p><pre>{{ currentFiles[activeFileIndex].content }}</pre></div>
         </template>
         <template v-else>
-          <div class="key-setup-ccswitch"><strong>导入到 CCSwitch</strong><p>将导入 {{ ccSwitchConfig.app }} 配置，模型为 {{ selectedModelLabel }}；用量查询不消耗上游额度。</p><div class="key-setup-ccswitch-actions"><button class="btn-primary" @click="openCCSwitch">打开 CCSwitch</button><button class="btn-ghost" @click="copy(ccSwitchLink, 'ccswitch-link')">{{ copied === 'ccswitch-link' ? '已复制' : '复制导入链接' }}</button></div></div>
+          <div class="key-setup-ccswitch"><strong>导入到 CCSwitch</strong><p>将导入 {{ ccSwitchConfig.app }} 配置，模型为 {{ selectedModelLabel }}；用量查询不消耗上游额度。</p><div class="key-setup-ccswitch-actions"><button class="btn-primary" @click="openCCSwitch">一键导入 CCS</button><button class="btn-ghost" @click="copy(ccSwitchLink, 'ccswitch-link')">{{ copied === 'ccswitch-link' ? '已复制' : '复制导入链接' }}</button></div></div>
           <div class="key-setup-code"><div><span>导入配置预览</span><button @click="copy(JSON.stringify(ccSwitchConfig, null, 2), 'ccswitch-config')">{{ copied === 'ccswitch-config' ? '已复制' : '复制 JSON' }}</button></div><pre>{{ JSON.stringify(ccSwitchConfig, null, 2) }}</pre></div>
         </template>
       </section>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { api, copyText, withToast } from '../api/client'
+import { buildCCSwitchImportLink } from '../api/ccswitch'
 import type { ApiKey, Group } from '../api/types'
 import { formatMoney, PLATFORM_LABELS } from '../api/types'
 import { normalizeReasoningEffort, REASONING_OPTIONS } from '../api/reasoning'
@@ -15,6 +16,7 @@ const auth = useAuth()
 const keyMultiGroupEnabled = computed(() => auth.keyMultiGroupEnabled)
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const customEndpoints = computed(() => auth.siteCustomization.custom_endpoints || [])
+const allowCCSwitch = computed(() => !auth.siteCustomization.hide_ccs_import_button)
 const keys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const showCreate = ref(false)
@@ -390,6 +392,28 @@ async function openQuickSetup(key: ApiKey) {
 	}
 }
 
+async function importCCSwitch(key: ApiKey) {
+  if (!key.secret_available) {
+    void openQuickSetup(key)
+    toast.show('请先补入一次原密钥，再导入 CCS', 'error')
+    return
+  }
+  try {
+    const plain = await fetchKeySecret(key)
+    if (!plain) throw new Error('无法读取密钥')
+    const platform = keyGroups(key)[0]?.platform || 'openai'
+    const link = buildCCSwitchImportLink({
+      origin: window.location.origin,
+      apiKey: plain,
+      platform,
+      keyName: key.name,
+    })
+    window.location.assign(link)
+  } catch (error) {
+    toast.show(error instanceof Error ? error.message : '导入 CCS 失败', 'error')
+  }
+}
+
 function closeQuickSetup() {
   showSetup.value = false
 }
@@ -517,6 +541,7 @@ function onSetupSecretSaved(value: string) {
 					<button type="button" class="btn-ghost" @click="openSettings(k)">编辑</button>
 					<button type="button" class="btn-ghost is-warning" @click="toggleKey(k)">{{ k.status === 'active' ? '停用' : '启用' }}</button>
 					<button type="button" class="btn-ghost is-primary" @click="openQuickSetup(k)">使用</button>
+					<button v-if="allowCCSwitch" type="button" class="btn-ghost is-ccs" :disabled="secretLoadingIDs.has(k.id)" @click="importCCSwitch(k)">一键导入 CCS</button>
 					<button type="button" class="btn-ghost is-primary" :disabled="secretLoadingIDs.has(k.id)" @click="toggleKeyReveal(k)">{{ secretLoadingIDs.has(k.id) ? '读取中…' : (revealedKeyIDs.has(k.id) ? '隐藏密钥' : '查看密钥') }}</button>
 					<button type="button" class="btn-danger" @click="removeKey(k)">删除</button>
 				</div>
@@ -630,6 +655,7 @@ function onSetupSecretSaved(value: string) {
 			:api-key="setupPlain"
 			:secret-available="setupKey?.secret_available || false"
 			:loading-secret="setupSecretLoading"
+			:allow-ccs-import="allowCCSwitch"
 			:key-id="setupKey?.id || null"
 			:key-name="setupKey?.name || ''"
 			:key-preview="setupKey?.key_preview || ''"

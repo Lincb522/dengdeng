@@ -59,12 +59,21 @@ func NewAuthHandlerWithMailer(db *gorm.DB, cfg *config.Config, mailer service.Re
 	}
 }
 
-// locked reports whether the email is currently locked out.
-func (h *AuthHandler) locked(email string) bool {
+// lockoutRemaining reports the exact remaining lockout duration for an email.
+// Returning the duration lets the client show a useful countdown.
+func (h *AuthHandler) lockoutRemaining(email string) time.Duration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	a := h.attempts[email]
-	return a != nil && a.failures >= maxLoginFailures && time.Now().Before(a.until)
+	if a == nil || a.failures < maxLoginFailures {
+		return 0
+	}
+	remaining := time.Until(a.until)
+	if remaining <= 0 {
+		delete(h.attempts, email)
+		return 0
+	}
+	return remaining
 }
 
 func (h *AuthHandler) recordFailure(email string) {
@@ -216,7 +225,7 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 	var latest model.EmailVerification
 	if err := h.db.Where("email = ? AND purpose = ?", email, registrationCodePurpose).
 		Order("id DESC").First(&latest).Error; err == nil && now.Sub(latest.CreatedAt) < codeCooldown {
-		util.Fail(c, http.StatusTooManyRequests, "please wait before requesting another code")
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.code_rate_limited", "please wait before requesting another code", codeCooldown-now.Sub(latest.CreatedAt))
 		return
 	}
 	code, err := newVerificationCode()
@@ -272,7 +281,7 @@ func (h *AuthHandler) SendPasswordResetCode(c *gin.Context) {
 	now := time.Now()
 	var latest model.EmailVerification
 	if err := h.db.Where("email = ? AND purpose = ?", email, passwordResetCodePurpose).Order("id DESC").First(&latest).Error; err == nil && now.Sub(latest.CreatedAt) < codeCooldown {
-		util.Fail(c, http.StatusTooManyRequests, "please wait before requesting another code")
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.code_rate_limited", "please wait before requesting another code", codeCooldown-now.Sub(latest.CreatedAt))
 		return
 	}
 	code, err := newVerificationCode()
@@ -520,29 +529,29 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 	email := normalizedEmail(req.Email)
 
-	if h.locked(email) {
-		util.Fail(c, http.StatusTooManyRequests, "too many failed attempts, try again later")
+	if remaining := h.lockoutRemaining(email); remaining > 0 {
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.too_many_attempts", "too many failed attempts, try again later", remaining)
 		return
 	}
 
 	var user model.User
 	if err := h.db.Where("email = ?", email).First(&user).Error; err != nil {
 		h.recordFailure(email)
-		util.Fail(c, http.StatusUnauthorized, "incorrect email or password")
+		util.FailCode(c, http.StatusUnauthorized, "auth.invalid_credentials", "incorrect email or password")
 		return
 	}
 	if !util.CheckPassword(user.PasswordHash, req.Password) {
 		h.recordFailure(email)
-		util.Fail(c, http.StatusUnauthorized, "incorrect email or password")
+		util.FailCode(c, http.StatusUnauthorized, "auth.invalid_credentials", "incorrect email or password")
 		return
 	}
 	if user.Status != model.StatusActive {
-		util.Fail(c, http.StatusForbidden, "account disabled")
+		util.FailCode(c, http.StatusForbidden, "auth.account_disabled", "account disabled")
 		return
 	}
 	if user.TOTPEnabled && !util.ValidateTOTP(string(user.TOTPSecret), req.TOTPCode, time.Now()) {
 		h.recordFailure(email)
-		util.Fail(c, http.StatusUnauthorized, "authenticator code is required or invalid")
+		util.FailCode(c, http.StatusUnauthorized, "auth.totp_invalid", "authenticator code is required or invalid")
 		return
 	}
 	settings, err := h.settings.Get()

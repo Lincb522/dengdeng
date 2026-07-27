@@ -64,7 +64,7 @@ func newFixedWindowLimiter(limit int, w time.Duration) *fixedWindowLimiter {
 	return &fixedWindowLimiter{hits: make(map[string]*window), limit: limit, window: w, lastGC: time.Now()}
 }
 
-func (l *fixedWindowLimiter) allow(key string) bool {
+func (l *fixedWindowLimiter) allow(key string) (bool, time.Duration) {
 	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -81,21 +81,21 @@ func (l *fixedWindowLimiter) allow(key string) bool {
 	w, ok := l.hits[key]
 	if !ok || now.After(w.reset) {
 		l.hits[key] = &window{count: 1, reset: now.Add(l.window)}
-		return true
+		return true, 0
 	}
 	if w.count >= l.limit {
-		return false
+		return false, time.Until(w.reset)
 	}
 	w.count++
-	return true
+	return true, 0
 }
 
 // RateLimit throttles by client IP. Use for unauthenticated endpoints.
 func RateLimit(limit int, w time.Duration) gin.HandlerFunc {
 	limiter := newFixedWindowLimiter(limit, w)
 	return func(c *gin.Context) {
-		if !limiter.allow(c.ClientIP()) {
-			util.Fail(c, http.StatusTooManyRequests, "too many requests, please slow down")
+		if allowed, retryAfter := limiter.allow(c.ClientIP()); !allowed {
+			util.FailRetry(c, http.StatusTooManyRequests, "request.rate_limited", "too many requests, please slow down", retryAfter)
 			c.Abort()
 			return
 		}

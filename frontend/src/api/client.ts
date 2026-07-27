@@ -1,6 +1,8 @@
 // 轻量 fetch 封装:统一鉴权头、错误提示与 401 跳转。
 import { useToast } from '../stores/toast'
-import { localizedApiError, localizeErrorMessage } from './errors'
+import { AppError, resolveApiError } from './errors'
+
+export { AppError as ApiError } from './errors'
 
 const TOKEN_KEY = 'dd_token'
 
@@ -14,14 +16,6 @@ export function setToken(token: string) {
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
-}
-
-export class ApiError extends Error {
-  status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.status = status
-  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -38,7 +32,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     })
   } catch {
-    throw new ApiError(0, localizedApiError(0, null))
+    throw new AppError(resolveApiError(0, null))
   }
 
   let payload: any = null
@@ -49,12 +43,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
 
   if (!resp.ok) {
-    const msg = localizedApiError(resp.status, payload)
+    const error = resolveApiError(resp.status, payload, resp.headers)
     if (resp.status === 401 && !path.startsWith('/api/auth')) {
       clearToken()
       window.location.href = '/login'
     }
-    throw new ApiError(resp.status, msg)
+    throw new AppError(error)
   }
   return payload?.data as T
 }
@@ -97,13 +91,12 @@ export async function downloadFile(path: string, fallbackName: string): Promise<
   try {
     response = await fetch(path, { headers })
   } catch {
-    throw new ApiError(0, localizedApiError(0, null))
+    throw new AppError(resolveApiError(0, null))
   }
   if (!response.ok) {
     let payload: unknown = null
     try { payload = await response.json() } catch { /* ignore non-JSON response */ }
-    const message = localizedApiError(response.status, payload)
-    throw new ApiError(response.status, message)
+    throw new AppError(resolveApiError(response.status, payload, response.headers))
   }
   const disposition = response.headers.get('Content-Disposition') || ''
   const match = disposition.match(/filename="?([^";]+)"?/i)
@@ -126,8 +119,7 @@ export async function withToast<T>(fn: () => Promise<T>, success?: string): Prom
     if (success) toast.show(success, 'success')
     return result
   } catch (e) {
-		const status = e instanceof ApiError ? e.status : 0
-		toast.show(e instanceof Error ? localizeErrorMessage(e.message, status) : '操作失败，请稍后重试', 'error')
+		toast.showError(e, '操作失败，请稍后重试')
     return null
   }
 }

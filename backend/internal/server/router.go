@@ -125,8 +125,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		// account and has a read-oriented limit separate from login attempts.
 		api.GET("/models", middleware.RateLimit(120, time.Minute), userH.PublicModelCatalogue)
 		// Throttle unauthenticated auth endpoints to blunt credential stuffing.
+		api.GET("/settings", middleware.RateLimit(120, time.Minute), authH.PublicSettings)
 		authGroup := api.Group("", middleware.RateLimit(20, time.Minute))
-		authGroup.GET("/settings", authH.PublicSettings)
 		authGroup.POST("/auth/register/code", authH.SendRegistrationCode)
 		authGroup.POST("/auth/register", authH.Register)
 		authGroup.POST("/auth/login", authH.Login)

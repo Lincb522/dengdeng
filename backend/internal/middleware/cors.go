@@ -29,9 +29,9 @@ func PublicCORS() gin.HandlerFunc {
 			allowHeaders = "Authorization, Content-Type, Accept, OpenAI-Beta, anthropic-version, anthropic-beta, x-api-key, x-goog-api-key"
 		}
 		h.Set("Access-Control-Allow-Headers", allowHeaders)
-		// Let browser SDKs and web clients surface the support correlation ID
-		// returned by the relay without exposing any credential-bearing header.
-		h.Set("Access-Control-Expose-Headers", "Content-Type, X-Request-ID")
+		// Let browser SDKs and web clients surface retry timing and support
+		// correlation IDs without exposing any credential-bearing header.
+		h.Set("Access-Control-Expose-Headers", "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID")
 		h.Set("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == http.MethodOptions {
