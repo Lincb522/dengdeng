@@ -4919,3 +4919,231 @@ body.has-app-modal { overflow: hidden; }
 	:root[data-layout='glass'] .dashboard-ledger-balance a { color: var(--accent); }
 	:root[data-layout='glass'] .dashboard-ledger-stats small { color: var(--ink-faint); }
 }
+
+/* Product visual system ---------------------------------------------------
+   Ordinary product pages feel calm and tactile. Only monitoring keeps the
+   dense operations-console treatment. */
+.app-shell:not(.is-monitoring-route) :is(.btn, .btn-primary, .btn-ghost, .btn-danger) {
+	min-height: 2.55rem;
+	border-radius: .68rem;
+	font-weight: 760;
+}
+.app-shell:not(.is-monitoring-route) .input {
+	min-height: 2.65rem;
+	border-radius: .62rem;
+	background: color-mix(in srgb, var(--surface) 86%, var(--canvas));
+}
+.app-shell:not(.is-monitoring-route) :is(.console-page-head, .dashboard-head) {
+	margin-bottom: 1.45rem;
+	padding-bottom: 0;
+	border-bottom: 0;
+}
+.app-shell:not(.is-monitoring-route) :is(.console-page-head, .dashboard-head) h1 {
+	font-size: 1.65rem;
+	font-weight: 790;
+	letter-spacing: -.028em;
+	text-wrap: balance;
+}
+.app-shell:not(.is-monitoring-route) .console-page-head p { max-width: 68ch; color: var(--ink-soft); font-size: .82rem; line-height: 1.55; }
+.app-shell.is-product-route .workspace-context__status { display: none; }
+.app-shell.is-product-route .workspace-context strong { display: inline; }
+.app-shell:not(.is-monitoring-route) :is(.card, .dashboard-panel, .data-chart) {
+	border-color: transparent;
+	box-shadow: none;
+}
+.app-shell:not(.is-monitoring-route) .card {
+	border-radius: .85rem;
+	background: color-mix(in srgb, var(--surface) 92%, var(--canvas));
+}
+.app-shell:not(.is-monitoring-route) .table-base thead th {
+	background: transparent;
+	color: var(--ink-faint);
+	font-size: .61rem;
+	font-weight: 760;
+}
+.app-shell:not(.is-monitoring-route) .table-base tbody tr { border-top-color: color-mix(in srgb, var(--line) 70%, transparent); }
+.app-shell:not(.is-monitoring-route) .table-base tbody tr:hover { background: color-mix(in srgb, var(--accent-soft) 42%, transparent); }
+
+/* The user dashboard becomes a relaxed product home instead of a control wall. */
+.app-shell.is-product-route .dashboard-page { width: min(86rem, 100%); margin: 0 auto; }
+.app-shell.is-product-route .dashboard-date { display: none; }
+.app-shell.is-product-route .dashboard-head-actions { gap: .45rem; }
+.app-shell.is-product-route .dashboard-ledger {
+	grid-template-columns: minmax(15rem, 1.15fr) minmax(0, 2.85fr);
+	border: 0;
+	border-radius: .95rem;
+	background: color-mix(in srgb, var(--surface) 72%, var(--accent-soft));
+	color: var(--ink);
+}
+.app-shell.is-product-route .dashboard-ledger-balance {
+	min-height: 9.6rem;
+	padding: 1.45rem 1.55rem;
+	background: var(--ink);
+	color: var(--surface);
+}
+.app-shell.is-product-route .dashboard-ledger-label { color: color-mix(in srgb, var(--surface) 72%, transparent); }
+.app-shell.is-product-route .dashboard-ledger-value { color: var(--surface); font-size: 2rem; letter-spacing: -.035em; }
+.app-shell.is-product-route .dashboard-ledger-balance a { color: color-mix(in srgb, var(--accent-soft) 78%, white); }
+.app-shell.is-product-route .dashboard-ledger-stats > div { border-left-color: color-mix(in srgb, var(--line) 56%, transparent); }
+.app-shell.is-product-route .dashboard-ledger-stats dt { color: var(--ink-soft); }
+.app-shell.is-product-route .dashboard-ledger-stats dd { color: var(--ink); }
+.app-shell.is-product-route .dashboard-ledger-stats small { color: var(--ink-faint); }
+.app-shell.is-product-route .dashboard-main-grid { grid-template-columns: minmax(0, 1.6fr) minmax(17rem, .48fr); gap: 1rem; margin-top: 1rem; }
+.app-shell.is-product-route .dashboard-lower-grid { grid-template-columns: minmax(0, 1.35fr) minmax(17rem, .65fr); gap: 1rem; margin-top: 1rem; }
+.app-shell.is-product-route .dashboard-panel {
+	border-radius: .9rem;
+	background: color-mix(in srgb, var(--surface) 88%, var(--canvas));
+}
+.app-shell.is-product-route .dashboard-usage { min-height: 16rem; }
+.app-shell.is-product-route .dashboard-access { background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface)); }
+.app-shell.is-product-route .dashboard-shortcuts { background: transparent; }
+.app-shell.is-product-route .dashboard-shortcuts > a { border-color: color-mix(in srgb, var(--line) 68%, transparent); }
+
+/* Warm light: floating, quiet and closer to a personal workspace. */
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .side-rail {
+	border: 0;
+	background: color-mix(in srgb, var(--surface) 90%, transparent);
+	box-shadow: 0 4px 8px color-mix(in srgb, var(--shadow) 76%, transparent);
+}
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .rail-brand { border-bottom-color: color-mix(in srgb, var(--line) 56%, transparent); }
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .rail-nav-group + .rail-nav-group { border-top-color: transparent; }
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .rail-link { min-height: 2.62rem; }
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .rail-link.is-active { background: var(--accent-soft); color: var(--ink); box-shadow: none; }
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .rail-link.is-active .rail-link-icon { background: var(--surface); color: var(--accent); }
+:root[data-ui-theme='dengdeng'] .app-shell:not(.is-monitoring-route) .workspace-main { border: 0; background: transparent; box-shadow: none; }
+:root[data-ui-theme='dengdeng'] .app-shell.is-product-route .dashboard-ledger-balance { background: oklch(86% .105 78); color: oklch(27% .045 65); }
+:root[data-ui-theme='dengdeng'] .app-shell.is-product-route .dashboard-ledger-label { color: oklch(45% .05 65); }
+:root[data-ui-theme='dengdeng'] .app-shell.is-product-route .dashboard-ledger-value { color: oklch(25% .05 65); }
+:root[data-ui-theme='dengdeng'] .app-shell.is-product-route .dashboard-ledger-balance a { color: oklch(38% .095 60); }
+
+/* Folio: editorial rhythm, rules instead of cards, no floating dashboard chrome. */
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .top-shellbar { min-height: 4.65rem; background: var(--surface); backdrop-filter: none; -webkit-backdrop-filter: none; }
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .top-shellbar__group > button { font-size: .72rem; }
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .workspace-main { padding-top: 2rem; }
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .card,
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .dashboard-panel { border-radius: 0; background: transparent; }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger { border-block: 1px solid var(--ink); border-radius: 0; background: transparent; }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-balance { background: transparent; color: var(--ink); }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-label,
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-stats dt { color: var(--ink-soft); }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-value,
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-stats dd { color: var(--ink); }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-ledger-balance a { color: var(--accent); }
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-main-grid,
+:root[data-ui-theme='folio'] .app-shell.is-product-route .dashboard-lower-grid { gap: 1.6rem; }
+:root[data-ui-theme='folio'] .app-shell:not(.is-monitoring-route) .table-base thead th { border-bottom-color: var(--ink); }
+
+/* Signal: high-contrast product navigation, no black terminal sidebar. */
+:root[data-ui-theme='signal'] {
+	--canvas: oklch(97% .006 235);
+	--canvas-deep: oklch(93.5% .012 235);
+	--surface: oklch(99.2% .003 235);
+	--surface-muted: oklch(94.5% .012 235);
+	--ink: oklch(23% .028 245);
+	--ink-soft: oklch(43% .025 245);
+	--ink-faint: oklch(54% .022 245);
+	--line: oklch(86% .018 235);
+	--accent: oklch(54% .17 255);
+	--accent-soft: oklch(90.5% .055 255);
+}
+:root[data-ui-theme='signal'][data-theme='dark'] {
+	--canvas: oklch(16.5% .018 245);
+	--canvas-deep: oklch(13.5% .018 245);
+	--surface: oklch(21% .022 245);
+	--surface-muted: oklch(27% .025 245);
+	--ink: oklch(96% .008 235);
+	--ink-soft: oklch(79% .018 235);
+	--ink-faint: oklch(69% .018 235);
+	--line: oklch(37% .025 245);
+	--accent: oklch(72% .13 255);
+	--accent-soft: oklch(31% .07 255);
+}
+@media (min-width: 901px) {
+	:root[data-layout='compact'] .console-shell { grid-template-columns: 12.25rem minmax(0, 1fr); }
+	:root[data-layout='compact'] .side-rail { border-right: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+	:root[data-layout='compact'] .rail-brand { border-bottom-color: var(--line); }
+	:root[data-layout='compact'] .rail-brand-copy { display: block; }
+	:root[data-layout='compact'] .rail-brand-name { overflow: hidden; color: var(--ink); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+	:root[data-layout='compact'] .rail-brand-caption { display: none; }
+	:root[data-layout='compact'] .rail-nav-group { border: 0; background: transparent; }
+	:root[data-layout='compact'] .rail-section { color: var(--ink-faint); }
+	:root[data-layout='compact'] .rail-link { color: var(--ink-soft); }
+	:root[data-layout='compact'] .rail-link-icon { background: var(--surface-muted); }
+	:root[data-layout='compact'] .rail-link:hover { background: var(--surface-muted); color: var(--ink); }
+	:root[data-layout='compact'] .rail-link.is-active { background: var(--ink); color: var(--surface); box-shadow: none; }
+	:root[data-layout='compact'] .rail-link.is-active .rail-link-icon { background: color-mix(in srgb, var(--surface) 14%, transparent); color: var(--surface); }
+	:root[data-layout='compact'] .rail-account { border-top-color: var(--line); }
+	:root[data-layout='compact'] .rail-account-avatar { background: var(--ink); color: var(--surface); }
+	:root[data-layout='compact'] .rail-theme-toggle,
+	:root[data-layout='compact'] .rail-logout { border-color: var(--line); background: var(--surface-muted); color: var(--ink-soft); }
+}
+:root[data-ui-theme='signal'] .app-shell:not(.is-monitoring-route) .workspace-main { background: transparent; }
+:root[data-ui-theme='signal'] .app-shell:not(.is-monitoring-route) .card { border-radius: .65rem; }
+:root[data-ui-theme='signal'] .app-shell.is-product-route .dashboard-ledger { background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); }
+:root[data-ui-theme='signal'] .app-shell.is-product-route .dashboard-ledger-balance { background: var(--accent); }
+
+/* Breeze: friendly horizontal browsing with broad, light sections. */
+:root[data-ui-theme='breeze'] .app-shell:not(.is-monitoring-route) .breeze-shellbar { min-height: 4.7rem; border-bottom-color: transparent; background: color-mix(in srgb, var(--surface) 94%, transparent); }
+:root[data-ui-theme='breeze'] .app-shell:not(.is-monitoring-route) .breeze-route-strip { min-height: 3.45rem; border: 0; background: color-mix(in srgb, var(--accent-soft) 58%, var(--canvas)); }
+:root[data-ui-theme='breeze'] .app-shell:not(.is-monitoring-route) .workspace-main { padding-top: 2rem; }
+:root[data-ui-theme='breeze'] .app-shell:not(.is-monitoring-route) .card,
+:root[data-ui-theme='breeze'] .app-shell:not(.is-monitoring-route) .dashboard-panel { border: 0; border-radius: .85rem; background: color-mix(in srgb, var(--surface) 92%, var(--canvas)); }
+:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger { grid-template-columns: minmax(16rem, 1.25fr) minmax(0, 2.75fr); gap: 0; background: color-mix(in srgb, var(--accent-soft) 62%, var(--surface)); }
+:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger-balance { border: 0; border-radius: .95rem 0 0 .95rem; background: oklch(38% .07 165); }
+:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger-stats { display: grid; }
+:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger-stats > div { min-height: auto; border: 0; border-left: 1px solid color-mix(in srgb, var(--line) 58%, transparent); border-radius: 0; background: transparent; }
+
+/* Immersive: content-first canvas; navigation recedes into a compact dock. */
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .immersive-shellbar { min-height: 4.25rem; border-bottom: 0; background: transparent; }
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .immersive-command-dock { border: 0; background: color-mix(in srgb, var(--ink) 92%, transparent); box-shadow: 0 4px 8px var(--shadow); }
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .immersive-command-dock__group > button { color: color-mix(in srgb, var(--surface) 72%, transparent); }
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .immersive-command-dock__group > button:is(:hover, .is-active, [aria-expanded='true']) { background: color-mix(in srgb, var(--surface) 14%, transparent); color: var(--surface); }
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .workspace-main { padding-top: 2rem; }
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .card,
+:root[data-ui-theme='immersive'] .app-shell:not(.is-monitoring-route) .dashboard-panel { border: 0; background: color-mix(in srgb, var(--surface) 92%, var(--canvas)); }
+:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger { grid-template-columns: minmax(15rem, 1.15fr) minmax(0, 2.85fr); border: 0; background: var(--surface); }
+:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger-balance { border-radius: .7rem 0 0 .7rem; background: var(--ink); }
+:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger-stats { display: grid; }
+:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger-stats > div { min-height: auto; }
+
+/* Glass: actual material depth, reserved for shell and primary surfaces. */
+:root[data-ui-theme='glass'] .app-shell:not(.is-monitoring-route) .workspace-main {
+	border: 0;
+	background: color-mix(in srgb, var(--surface) 48%, transparent);
+	box-shadow: none;
+	backdrop-filter: blur(26px) saturate(132%);
+	-webkit-backdrop-filter: blur(26px) saturate(132%);
+}
+:root[data-ui-theme='glass'] .app-shell:not(.is-monitoring-route) .glass-dock,
+:root[data-ui-theme='glass'] .app-shell:not(.is-monitoring-route) .glass-nav-panel { border-color: color-mix(in srgb, white 35%, var(--line)); background: color-mix(in srgb, var(--surface) 52%, transparent); }
+:root[data-ui-theme='glass'] .app-shell:not(.is-monitoring-route) :is(.card, .dashboard-panel) { border: 0; background: color-mix(in srgb, var(--surface) 58%, transparent); backdrop-filter: blur(18px) saturate(120%); -webkit-backdrop-filter: blur(18px) saturate(120%); }
+:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger { grid-template-columns: minmax(15rem, 1.15fr) minmax(0, 2.85fr); border: 0; background: color-mix(in srgb, var(--surface) 46%, transparent); }
+:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger-balance { border-radius: 1rem 0 0 1rem; background: color-mix(in srgb, var(--ink) 88%, transparent); }
+:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger-stats { display: grid; }
+:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger-stats > div { min-height: auto; }
+
+/* Login and public surfaces inherit the same calmer material language. */
+:root[data-ui-theme='dengdeng'] .login-frame,
+:root[data-ui-theme='breeze'] .login-frame { border: 0; box-shadow: 0 5px 8px var(--shadow); }
+:root[data-ui-theme='signal'] .login-shell { background: linear-gradient(90deg, var(--ink) 0 38%, var(--canvas) 38% 100%); }
+:root[data-ui-theme='signal'] .login-frame { border: 0; border-radius: .65rem; box-shadow: none; }
+:root[data-ui-theme='immersive'] .login-frame { border: 0; background: var(--surface); }
+:root[data-ui-theme='glass'] .login-frame { border: 0; background: color-mix(in srgb, var(--surface) 52%, transparent); }
+
+@media (max-width: 900px) {
+	.app-shell.is-product-route .dashboard-main-grid,
+	.app-shell.is-product-route .dashboard-lower-grid { grid-template-columns: minmax(0, 1fr); }
+	.app-shell.is-product-route .dashboard-ledger,
+	:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger,
+	:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger,
+	:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger { grid-template-columns: minmax(0, 1fr); }
+	:root[data-ui-theme='breeze'] .app-shell.is-product-route .dashboard-ledger-balance,
+	:root[data-ui-theme='immersive'] .app-shell.is-product-route .dashboard-ledger-balance,
+	:root[data-ui-theme='glass'] .app-shell.is-product-route .dashboard-ledger-balance { border-radius: .9rem .9rem 0 0; }
+}
+
+@media (max-width: 640px) {
+	.app-shell:not(.is-monitoring-route) :is(.console-page-head, .dashboard-head) h1 { font-size: 1.42rem; }
+	.app-shell.is-product-route .dashboard-ledger-balance { min-height: 8rem; }
+	:root[data-ui-theme='signal'] .login-shell { background: var(--canvas); }
+}

@@ -52,8 +52,11 @@ const adminNavGroups = [
   { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10], adminNav[11]] },
   { label: '系统维护', items: [adminNav[3], adminNav[13], adminNav[15]] },
 ]
+const adminEntry = { to: '/admin/overview', label: '管理后台', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' }
 
 const isAdmin = computed(() => auth.user?.role === 'admin')
+const isAdminRoute = computed(() => route.path.startsWith('/admin'))
+const isMonitoringRoute = computed(() => route.path.startsWith('/admin/monitoring'))
 const balance = computed(() => formatMoney(auth.user?.balance_micro ?? 0))
 const visibleUserNav = computed(() => userNav.filter((item) => {
 	if (item.to === '/models') return auth.features.model_plaza_enabled
@@ -67,7 +70,10 @@ const customMenuItems = computed(() => (auth.siteCustomization.custom_menu_items
 }))
 const navigationGroups = computed(() => {
 	const groups = [{ label: '工作区', items: visibleUserNav.value }]
-	if (isAdmin.value) groups.push(...adminNavGroups)
+	if (isAdmin.value) {
+		if (isAdminRoute.value) groups.push(...adminNavGroups)
+		else groups.push({ label: '管理', items: [adminEntry] })
+	}
 	return groups
 })
 const allNavigationItems = computed(() => navigationGroups.value.flatMap((group) => group.items))
@@ -137,7 +143,7 @@ function toggleGlassNavigation(label: string) {
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute }">
     <div class="ambient-field" aria-hidden="true">
       <span class="ambient-orb ambient-orb--one"></span>
       <span class="ambient-orb ambient-orb--two"></span>
@@ -179,7 +185,7 @@ function toggleGlassNavigation(label: string) {
 			</a>
           </section>
 
-          <template v-if="isAdmin">
+          <template v-if="isAdmin && isAdminRoute">
             <section v-for="group in adminNavGroups" :key="group.label" class="rail-nav-group">
               <p class="rail-section">{{ group.label }}</p>
               <RouterLink v-for="item in group.items" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }" :title="item.label">
@@ -189,6 +195,13 @@ function toggleGlassNavigation(label: string) {
               </RouterLink>
             </section>
           </template>
+		  <section v-else-if="isAdmin" class="rail-nav-group rail-nav-group--admin-entry">
+			<p class="rail-section">管理</p>
+			<RouterLink :to="adminEntry.to" class="rail-link" :title="adminEntry.label">
+				<span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="adminEntry.icon" /></svg></span>
+				<span>{{ adminEntry.label }}</span><i class="rail-link-mark"></i>
+			</RouterLink>
+		  </section>
         </nav>
 
         <div class="rail-account">
