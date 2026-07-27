@@ -187,9 +187,6 @@ func anthropicMessagesToOpenAIResponses(body []byte) (map[string]any, string, bo
 	if max, ok := request["max_tokens"]; ok {
 		converted["max_output_tokens"] = max
 	}
-	if temperature, ok := request["temperature"]; ok {
-		converted["temperature"] = temperature
-	}
 	if topP, ok := request["top_p"]; ok {
 		converted["top_p"] = topP
 	}
@@ -353,9 +350,6 @@ func openAIResponsesToAnthropic(body []byte) (map[string]any, string, bool, erro
 	if system != "" {
 		converted["system"] = system
 	}
-	if temperature, ok := request["temperature"]; ok {
-		converted["temperature"] = temperature
-	}
 	if topP, ok := request["top_p"]; ok {
 		converted["top_p"] = topP
 	}
@@ -388,9 +382,6 @@ func openAIChatToAnthropic(body []byte) (map[string]any, string, bool, error) {
 		"max_output_tokens": firstPositive(request["max_completion_tokens"], request["max_tokens"], 4096),
 		"tools":             chatToolsToResponses(request["tools"]),
 		"tool_choice":       chatToolChoiceToResponses(request["tool_choice"]),
-	}
-	if value, ok := request["temperature"]; ok {
-		responsesLike["temperature"] = value
 	}
 	if value, ok := request["top_p"]; ok {
 		responsesLike["top_p"] = value
