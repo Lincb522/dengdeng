@@ -201,6 +201,60 @@ func TestSchedulerSkipsFreshExhaustedCodexAccount(t *testing.T) {
 	}
 }
 
+func TestSchedulerSkipsUnifiedFiveHourLimitBeforePriorityAndSessionAffinity(t *testing.T) {
+	db := newSchedulerTestDB(t)
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	accounts := []model.UpstreamAccount{
+		{GroupID: 1, Name: "limited-high-priority", Platform: model.PlatformOpenAI, AuthType: model.AuthOAuth, Priority: 100, Status: model.StatusActive},
+		{GroupID: 1, Name: "available", Platform: model.PlatformOpenAI, AuthType: model.AuthOAuth, Priority: 10, Status: model.StatusActive},
+	}
+	if err := db.Create(&accounts).Error; err != nil {
+		t.Fatal(err)
+	}
+	used, available := 100.0, 8.0
+	reset := now.Add(5 * time.Hour)
+	fetched := now
+	quotas := []model.AccountQuotaSnapshot{
+		{UpstreamAccountID: accounts[0].ID, Platform: model.PlatformOpenAI, Source: "codex_subscription", State: "ready", Windows: []model.AccountQuotaWindow{{Key: "primary", Label: "5 小时", UsedPercent: &used, ResetAt: &reset}}, FetchedAt: &fetched, LastAttemptAt: now},
+		{UpstreamAccountID: accounts[1].ID, Platform: model.PlatformOpenAI, Source: "codex_subscription", State: "ready", Windows: []model.AccountQuotaWindow{{Key: "primary", Label: "5 小时", UsedPercent: &available, ResetAt: &reset}}, FetchedAt: &fetched, LastAttemptAt: now},
+	}
+	if err := db.Create(&quotas).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	scheduler := NewScheduler(db)
+	scheduler.now = func() time.Time { return now }
+	sessionKey := schedulerSessionKey(1, "gpt-test", "conversation-with-old-binding")
+	scheduler.sessions[sessionKey] = schedulerSessionBinding{accountID: accounts[0].ID, expiresAt: now.Add(time.Hour)}
+	selected, err := scheduler.PickForSession(1, "gpt-test", "conversation-with-old-binding", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected.ID != accounts[1].ID {
+		t.Fatalf("selected %q, want usable account despite lower priority and stale session binding", selected.Name)
+	}
+	if binding := scheduler.sessions[sessionKey]; binding.accountID != accounts[1].ID {
+		t.Fatalf("session remained bound to exhausted account: %#v", binding)
+	}
+}
+
+func TestQuotaWindowExhaustionHonorsResetBoundary(t *testing.T) {
+	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+	used := 100.0
+	future := now.Add(5 * time.Hour)
+	if !quotaWindowDefinitelyExhausted(model.AccountQuotaWindow{UsedPercent: &used, ResetAt: &future}, now) {
+		t.Fatal("fresh exhausted window was considered routable")
+	}
+	past := now.Add(-time.Second)
+	if quotaWindowDefinitelyExhausted(model.AccountQuotaWindow{UsedPercent: &used, ResetAt: &past}, now) {
+		t.Fatal("expired reset boundary still excluded the account")
+	}
+	zero := 0.0
+	if !quotaWindowDefinitelyExhausted(model.AccountQuotaWindow{Remaining: &zero, ResetAt: &future}, now) {
+		t.Fatal("explicit zero remaining without a limit was ignored")
+	}
+}
+
 func TestSchedulerDoesNotTrustLimitFlagPastResetBoundary(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)

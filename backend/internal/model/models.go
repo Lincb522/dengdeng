@@ -222,6 +222,10 @@ type APIKey struct {
 	// means the key follows the owner's shared balance without a key-level cap.
 	QuotaMicro     int64 `gorm:"not null;default:0" json:"quota_micro"`
 	QuotaUsedMicro int64 `gorm:"not null;default:0" json:"quota_used_micro"`
+	// UsageTodayMicro and Usage30dMicro are read-only list projections derived
+	// from the immutable usage ledger. They are never persisted on the key row.
+	UsageTodayMicro int64 `gorm:"-" json:"usage_today_micro"`
+	Usage30dMicro   int64 `gorm:"-" json:"usage_30d_micro"`
 	// DailyQuotaMicro is an optional rolling calendar-day budget for one key.
 	// Its actual consumption is derived from the immutable usage ledger.
 	DailyQuotaMicro int64 `gorm:"not null;default:0" json:"daily_quota_micro"`

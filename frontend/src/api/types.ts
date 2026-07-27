@@ -488,6 +488,8 @@ export interface ApiKey {
 	reasoning_effort: string
 	quota_micro: number
 	quota_used_micro: number
+	usage_today_micro: number
+	usage_30d_micro: number
 	daily_quota_micro: number
 	rpm: number
 	concurrency: number

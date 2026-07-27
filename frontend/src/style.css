@@ -2067,22 +2067,84 @@ body.has-app-modal { overflow: hidden; }
   .model-card-action { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: .85rem; color: #8c5c13; font-size: .72rem; font-weight: 800; }
   .model-card-action span { font-size: 1rem; transition: transform .16s ease; }
   .model-card-action:hover span { transform: translateX(3px); }
-  .key-table { width: 100%; min-width: 74rem; table-layout: auto; }
+  .key-list-card { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+  .key-table { width: 100%; min-width: 86rem; table-layout: fixed; }
   .key-table .key-col-name { width: 7%; }
-  .key-table .key-col-secret { width: 14%; }
-  .key-table .key-col-groups { width: 22%; }
-  .key-table .key-col-quota { width: 18%; }
-  .key-table .key-col-status { width: 7%; }
-  .key-table .key-col-used { width: 13%; }
-  .key-table .key-col-actions { width: 19%; }
-  .key-table td { white-space: nowrap; }
-	.key-secret-cell { display: flex; min-width: 12rem; align-items: center; gap: .38rem; white-space: nowrap; }
-	.key-secret-cell code { max-width: 13rem; overflow-x: auto; overflow-y: hidden; color: var(--ink-soft); font-size: .68rem; scrollbar-width: thin; white-space: nowrap; }
+  .key-table .key-col-route { width: 17%; }
+  .key-table .key-col-secret { width: 15%; }
+  .key-table .key-col-status { width: 6%; }
+  .key-table .key-col-expires { width: 10%; }
+  .key-table .key-col-used { width: 11%; }
+  .key-table .key-col-usage { width: 10%; }
+  .key-table .key-col-actions { width: 24%; }
+  .key-table th, .key-table td { vertical-align: middle; white-space: nowrap; }
+  .key-table th:last-child,
+  .key-table td:last-child { position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 0 var(--line); }
+  .key-table th:last-child { z-index: 2; }
+  .key-table td:last-child { z-index: 1; }
+  .key-name-cell { display: grid; gap: .2rem; }
+  .key-name-cell strong { color: var(--ink); font-size: .74rem; font-weight: 800; }
+  .key-name-cell small { color: var(--ink-faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .57rem; }
+	.key-secret-cell { display: flex; min-width: 0; align-items: center; gap: .38rem; white-space: nowrap; }
+	.key-secret-cell code { min-width: 0; max-width: 13rem; overflow-x: auto; overflow-y: hidden; color: var(--ink-soft); font-size: .68rem; scrollbar-width: thin; white-space: nowrap; }
 	.key-secret-cell code.is-revealed { color: var(--ink); }
-	.key-secret-saved { flex: 0 0 auto; border-radius: 999px; padding: .18rem .38rem; background: color-mix(in srgb, rgb(var(--dd-signal-green)) 10%, var(--surface)); color: rgb(var(--dd-signal-green)); font-size: .58rem; font-weight: 780; }
-	.key-secret-cell .btn { min-height: 1.75rem; padding: 0 .42rem; font-size: .62rem; }
-  .key-group-tags { display: flex; min-width: 11rem; flex-wrap: nowrap; gap: .3rem; }
-  .key-group-tags > * { flex: 0 0 auto; white-space: nowrap; }
+  .key-secret-state { width: .38rem; height: .38rem; flex: 0 0 auto; border-radius: 50%; background: var(--ink-faint); }
+  .key-secret-state.is-saved { background: rgb(var(--dd-signal-green)); }
+  .key-secret-state.is-missing { background: rgb(var(--dd-signal-red)); }
+  .key-icon-button { display: grid; width: 1.75rem; height: 1.75rem; flex: 0 0 auto; place-items: center; border: 1px solid transparent; border-radius: .42rem; color: var(--ink-soft); }
+  .key-icon-button:hover { border-color: var(--line); background: var(--surface-muted); color: var(--ink); }
+  .key-icon-button svg { width: .9rem; height: .9rem; fill: none; stroke: currentColor; stroke-width: 1.4; }
+  .key-icon-button span { color: rgb(var(--dd-signal-green)); font-size: .72rem; font-weight: 900; }
+  .key-status-tag { display: inline-flex; min-height: 1.55rem; align-items: center; border-radius: .36rem; padding: 0 .48rem; font-size: .62rem; font-weight: 820; }
+  .key-status-tag.is-active { background: color-mix(in srgb, rgb(var(--dd-signal-cyan)) 14%, var(--surface)); color: rgb(var(--dd-signal-cyan)); }
+  .key-status-tag.is-disabled { background: color-mix(in srgb, rgb(var(--dd-signal-red)) 10%, var(--surface)); color: rgb(var(--dd-signal-red)); }
+  .key-time-value { color: var(--ink-soft); font-size: .65rem; font-variant-numeric: tabular-nums; }
+  .key-usage-cell { display: grid; gap: .26rem; }
+  .key-usage-cell span { display: grid; grid-template-columns: 2.7rem auto; align-items: center; gap: .35rem; }
+  .key-usage-cell small { color: var(--ink-soft); font-size: .6rem; }
+  .key-usage-cell strong { color: var(--ink); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .64rem; font-weight: 760; }
+  .key-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: .35rem; }
+  .key-row-actions :is(.btn-ghost, .btn-danger) { min-height: 1.95rem; padding: 0 .55rem; font-size: .61rem; }
+  .key-row-actions .is-primary { border-color: color-mix(in srgb, rgb(var(--dd-signal-cyan)) 32%, var(--line)); color: rgb(var(--dd-signal-cyan)); }
+  .key-row-actions .is-warning { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); color: var(--accent); }
+  .key-route-trigger { display: grid; width: 100%; min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .52rem; padding: .46rem .55rem; border: 1px solid var(--line); border-radius: .55rem; background: var(--surface); color: var(--ink); text-align: left; transition: border-color .16s ease, background .16s ease; }
+  .key-route-trigger:hover,
+  .key-route-trigger[aria-expanded='true'] { border-color: color-mix(in srgb, var(--accent) 58%, var(--line)); background: var(--surface-muted); }
+  .key-route-trigger:disabled { cursor: not-allowed; opacity: .55; }
+  .key-route-trigger > svg { width: .9rem; height: .9rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform .16s ease; }
+  .key-route-trigger[aria-expanded='true'] > svg { transform: rotate(180deg); }
+  .key-route-mark { display: grid; width: 1.65rem; height: 1.65rem; place-items: center; border-radius: .42rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .65rem; font-weight: 900; }
+  .key-route-mark.is-openai { background: color-mix(in srgb, rgb(var(--dd-signal-green)) 12%, var(--surface)); color: rgb(var(--dd-signal-green)); }
+  .key-route-mark.is-anthropic { background: color-mix(in srgb, var(--accent) 15%, var(--surface)); color: var(--accent); }
+  .key-route-mark.is-gemini { background: color-mix(in srgb, rgb(var(--dd-signal-cyan)) 12%, var(--surface)); color: rgb(var(--dd-signal-cyan)); }
+  .key-route-mark.is-grok { background: var(--surface-muted); color: var(--ink); }
+  .key-route-summary { display: grid; min-width: 0; gap: .13rem; }
+  .key-route-summary strong,
+  .key-route-summary small { overflow: hidden; text-overflow: clip; white-space: nowrap; }
+  .key-route-summary strong { color: var(--ink); font-size: .68rem; font-weight: 780; }
+  .key-route-summary small { color: var(--ink-soft); font-size: .57rem; }
+  .key-route-popover { position: fixed; z-index: 120; width: min(28rem, calc(100vw - 1.25rem)); overflow: hidden; border: 1px solid var(--line); border-radius: .78rem; background: var(--surface); color: var(--ink); box-shadow: 0 7px 12px var(--shadow); }
+  .key-route-popover > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: .78rem .85rem; border-bottom: 1px solid var(--line); }
+  .key-route-popover > header div { display: grid; gap: .16rem; }
+  .key-route-popover > header strong { font-size: .76rem; font-weight: 820; }
+  .key-route-popover > header small { color: var(--ink-soft); font-size: .62rem; }
+  .key-route-popover > header > span { border-radius: 999px; padding: .18rem .42rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .56rem; font-weight: 780; }
+  .key-route-options { display: grid; max-height: min(28rem, calc(100dvh - 11rem)); gap: .65rem; overflow-y: auto; padding: .75rem; }
+  .key-route-options section { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: .32rem; }
+  .key-route-options h4 { grid-column: 1 / -1; padding: 0 .22rem .14rem; color: var(--ink-soft); font-size: .59rem; font-weight: 820; }
+  .key-route-options section > button { display: grid; min-width: 0; min-height: 2.65rem; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .52rem; padding: .48rem .55rem; border: 1px solid transparent; border-radius: .55rem; background: var(--surface-muted); color: var(--ink); text-align: left; }
+  .key-route-options section > button:hover { border-color: var(--line); }
+  .key-route-options section > button.is-selected { border-color: color-mix(in srgb, var(--accent) 62%, var(--line)); background: var(--accent-soft); }
+  .key-route-check { display: grid; width: 1rem; height: 1rem; place-items: center; border: 1px solid var(--line); border-radius: .28rem; color: #251c11; font-size: .6rem; font-weight: 900; }
+  .key-route-options button.is-selected .key-route-check { border-color: var(--accent); background: var(--accent); }
+  .key-route-options button > span:nth-child(2) { display: grid; min-width: 0; gap: .12rem; }
+  .key-route-options button strong { overflow: hidden; font-size: .67rem; font-weight: 780; text-overflow: clip; white-space: nowrap; }
+  .key-route-options button small { color: var(--ink-soft); font-size: .57rem; }
+  .key-route-options button em { border-radius: 999px; padding: .12rem .32rem; background: var(--surface); color: var(--ink-soft); font-size: .53rem; font-style: normal; font-weight: 780; }
+  .key-route-popover > footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .65rem .75rem; border-top: 1px solid var(--line); }
+  .key-route-popover > footer > span { color: var(--ink-soft); font-size: .62rem; }
+  .key-route-popover > footer > div { display: flex; gap: .4rem; }
+  .key-route-popover > footer :is(.btn-ghost, .btn-primary) { min-height: 2rem; padding: 0 .65rem; font-size: .62rem; }
   .key-group-picker { display: grid; max-height: 14rem; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .42rem; overflow-y: auto; padding: .18rem; }
   .key-group-picker--create { max-height: 8.75rem; }
   .key-group-picker--settings { max-height: 10rem; }
@@ -3250,6 +3312,9 @@ body.has-app-modal { overflow: hidden; }
    line and, when necessary, scroll inside their own field instead of widening
    the page or turning one record into a very tall stack of wrapped text. */
 @media (max-width: 767px) {
+	.key-route-options section { grid-template-columns: 1fr; }
+	.key-route-popover > footer { align-items: stretch; flex-direction: column; }
+	.key-route-popover > footer > div { display: grid; grid-template-columns: 1fr 1fr; }
 	.payment-order-row {
 		grid-template-columns: minmax(0, 1fr) auto;
 		gap: .75rem;
@@ -3333,12 +3398,21 @@ body.has-app-modal { overflow: hidden; }
 	.workspace-main .table-base tbody td[data-label='用户 / 密钥'],
 	.workspace-main .table-base tbody td[data-label='账号 / 分组'],
 	.workspace-main .table-base tbody td[data-label='分组'],
+	.workspace-main .table-base tbody td[data-label='路由目标'],
 	.workspace-main .table-base tbody td[data-label='错误'],
 	.workspace-main .table-base tbody td[data-label='说明'],
 	.workspace-main .table-base tbody td[data-label='备注'],
 	.workspace-main .table-base tbody td[data-label='操作'] {
 		grid-column: 1 / -1;
 	}
+	.workspace-main .key-table th:last-child,
+	.workspace-main .key-table td:last-child { position: static; box-shadow: none; }
+	.workspace-main .key-table tbody td[data-label='路由目标'] { overflow: visible; }
+	.workspace-main .key-table tbody td[data-label='状态'] { grid-column: 1 / -1; }
+	.workspace-main .key-route-trigger { width: 100%; }
+	.workspace-main .key-secret-cell code { max-width: calc(100vw - 9rem); }
+	.workspace-main .key-row-actions { width: 100%; flex-wrap: wrap; justify-content: flex-start; }
+	.workspace-main .key-row-actions :is(.btn-ghost, .btn-danger) { min-height: 2.75rem; flex: 1 1 6.4rem; }
 	.workspace-main .table-base tbody td[data-label='分组'] {
 		overflow-x: auto;
 		overflow-y: hidden;

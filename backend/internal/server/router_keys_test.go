@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"dengdeng/internal/config"
 	"dengdeng/internal/crypto"
@@ -42,7 +43,6 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	if err := db.Create(&groups).Error; err != nil {
 		t.Fatalf("create groups: %v", err)
 	}
-
 	router := NewRouter(cfg, db)
 	settings, err := service.NewSystemSettingsService(db, cfg).Get()
 	if err != nil {
@@ -174,6 +174,118 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	}, loginBody.Data.Token)
 	if acceptedSingle.Code != http.StatusOK {
 		t.Fatalf("single-group create status=%d body=%s", acceptedSingle.Code, acceptedSingle.Body.String())
+	}
+}
+
+func TestAPIKeyRouteVisibilityAndUsageProjection(t *testing.T) {
+	cfg := config.Default()
+	cfg.JWT.Secret = "router-key-route-visibility-secret"
+	cfg.Database.Path = filepath.Join(t.TempDir(), "test.db")
+	if err := crypto.Init("", cfg.JWT.Secret); err != nil {
+		t.Fatalf("crypto.Init: %v", err)
+	}
+	db, err := store.Open(cfg)
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	passwordHash, err := util.HashPassword("password12345")
+	if err != nil {
+		t.Fatalf("HashPassword: %v", err)
+	}
+	users := []model.User{
+		{Email: "user@example.test", PasswordHash: passwordHash, Role: model.RoleUser, Status: model.StatusActive, RateMultiplier: 1},
+		{Email: "admin@example.test", PasswordHash: passwordHash, Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1},
+	}
+	if err := db.Create(&users).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	groups := []model.Group{
+		{Name: "public-route", Platform: model.PlatformOpenAI, IsPublic: true, Status: model.StatusActive, RateMultiplier: 1},
+		{Name: "private-route", Platform: model.PlatformOpenAI, IsPublic: false, Status: model.StatusActive, RateMultiplier: 1},
+		{Name: "disabled-route", Platform: model.PlatformOpenAI, IsPublic: true, Status: model.StatusDisabled, RateMultiplier: 1},
+	}
+	if err := db.Create(&groups).Error; err != nil {
+		t.Fatalf("create groups: %v", err)
+	}
+	if err := db.Model(&model.Group{}).Where("id = ?", groups[1].ID).UpdateColumn("is_public", false).Error; err != nil {
+		t.Fatalf("make group private: %v", err)
+	}
+
+	router := NewRouter(cfg, db)
+	settings, err := service.NewSystemSettingsService(db, cfg).Get()
+	if err != nil {
+		t.Fatalf("settings: %v", err)
+	}
+	login := func(email string) string {
+		response := callJSON(t, router, http.MethodPost, "/api/auth/login", map[string]any{
+			"email": email, "password": "password12345", "terms_revision": settings.LoginAgreement.Revision(),
+		}, "")
+		var body struct {
+			Data struct {
+				Token string `json:"token"`
+			} `json:"data"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || body.Data.Token == "" {
+			t.Fatalf("login %s status=%d body=%s", email, response.Code, response.Body.String())
+		}
+		return body.Data.Token
+	}
+	userToken := login(users[0].Email)
+	adminToken := login(users[1].Email)
+
+	visible := callJSON(t, router, http.MethodGet, "/api/user/groups", nil, userToken)
+	var visibleBody struct {
+		Data []model.Group `json:"data"`
+	}
+	if visible.Code != http.StatusOK || json.Unmarshal(visible.Body.Bytes(), &visibleBody) != nil || len(visibleBody.Data) != 1 || visibleBody.Data[0].ID != groups[0].ID {
+		t.Fatalf("ordinary user groups status=%d body=%s", visible.Code, visible.Body.String())
+	}
+
+	created := callJSON(t, router, http.MethodPost, "/api/user/keys", map[string]any{
+		"name": "routed", "group_ids": []int64{groups[0].ID},
+	}, userToken)
+	var createdBody struct {
+		Data struct {
+			Key model.APIKey `json:"key"`
+		} `json:"data"`
+	}
+	if created.Code != http.StatusOK || json.Unmarshal(created.Body.Bytes(), &createdBody) != nil || createdBody.Data.Key.ID == 0 {
+		t.Fatalf("create key status=%d body=%s", created.Code, created.Body.String())
+	}
+	keyPath := "/api/user/keys/" + jsonNumber(createdBody.Data.Key.ID)
+	privateRoute := callJSON(t, router, http.MethodPut, keyPath, map[string]any{"group_ids": []int64{groups[1].ID}}, userToken)
+	if privateRoute.Code != http.StatusForbidden {
+		t.Fatalf("ordinary user private route status=%d body=%s", privateRoute.Code, privateRoute.Body.String())
+	}
+	disabledRoute := callJSON(t, router, http.MethodPut, keyPath, map[string]any{"group_ids": []int64{groups[2].ID}}, userToken)
+	if disabledRoute.Code != http.StatusBadRequest {
+		t.Fatalf("ordinary user disabled route status=%d body=%s", disabledRoute.Code, disabledRoute.Body.String())
+	}
+	adminPrivateKey := callJSON(t, router, http.MethodPost, "/api/user/keys", map[string]any{
+		"name": "private-admin", "group_ids": []int64{groups[1].ID},
+	}, adminToken)
+	if adminPrivateKey.Code != http.StatusOK {
+		t.Fatalf("admin private route status=%d body=%s", adminPrivateKey.Code, adminPrivateKey.Body.String())
+	}
+
+	now := time.Now()
+	logs := []model.UsageLog{
+		{UserID: users[0].ID, APIKeyID: createdBody.Data.Key.ID, GroupID: groups[0].ID, CostMicro: 100, CreatedAt: now},
+		{UserID: users[0].ID, APIKeyID: createdBody.Data.Key.ID, GroupID: groups[0].ID, CostMicro: 200, CreatedAt: now.AddDate(0, 0, -10)},
+		{UserID: users[0].ID, APIKeyID: createdBody.Data.Key.ID, GroupID: groups[0].ID, CostMicro: 400, CreatedAt: now.AddDate(0, 0, -40)},
+	}
+	if err := db.Create(&logs).Error; err != nil {
+		t.Fatalf("create usage logs: %v", err)
+	}
+	listed := callJSON(t, router, http.MethodGet, "/api/user/keys", nil, userToken)
+	var listedBody struct {
+		Data []model.APIKey `json:"data"`
+	}
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &listedBody) != nil || len(listedBody.Data) != 1 {
+		t.Fatalf("list keys status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	if listedBody.Data[0].UsageTodayMicro != 100 || listedBody.Data[0].Usage30dMicro != 300 {
+		t.Fatalf("unexpected projected usage today=%d month=%d", listedBody.Data[0].UsageTodayMicro, listedBody.Data[0].Usage30dMicro)
 	}
 }
 

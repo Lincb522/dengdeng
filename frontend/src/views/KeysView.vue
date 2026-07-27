@@ -3,15 +3,17 @@ import { computed, onMounted, ref } from 'vue'
 import { api, copyText, withToast } from '../api/client'
 import type { ApiKey, Group } from '../api/types'
 import { formatMoney, PLATFORM_LABELS } from '../api/types'
-import { normalizeReasoningEffort, REASONING_OPTIONS, reasoningLabel } from '../api/reasoning'
+import { normalizeReasoningEffort, REASONING_OPTIONS } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 import { useAuth } from '../stores/auth'
 import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
+import KeyRouteSelector from '../components/KeyRouteSelector.vue'
 import AppModal from '../components/AppModal.vue'
 
 const toast = useToast()
 const auth = useAuth()
 const keyMultiGroupEnabled = computed(() => auth.keyMultiGroupEnabled)
+const isAdmin = computed(() => auth.user?.role === 'admin')
 const customEndpoints = computed(() => auth.siteCustomization.custom_endpoints || [])
 const keys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
@@ -80,10 +82,6 @@ function keyGroupIDs(key: ApiKey) {
 
 function hasPlatform(groupIDs: number[], platform: string) {
   return selectedGroups(groupIDs).some((group) => group.platform === platform)
-}
-
-function keyHasPlatform(key: ApiKey, platform: string) {
-  return keyGroups(key).some((group) => group.platform === platform)
 }
 
 function keyPlatforms(key: ApiKey | null | undefined) {
@@ -205,7 +203,6 @@ async function copyKey(key: ApiKey) {
 
 function toMicro(value: number) { return Math.max(0, Math.round((Number(value) || 0) * 1_000_000)) }
 function fromMicro(value: number) { return Number((Math.max(0, value || 0) / 1_000_000).toFixed(6)) }
-function quotaLabel(value: number) { return value > 0 ? formatMoney(value) : '不设上限' }
 function quotaTrafficSummary() {
   const total = settingsForm.value.quota > 0 ? `总额 $${settingsForm.value.quota}` : '总额不限'
   const daily = settingsForm.value.daily_quota > 0 ? `每日 $${settingsForm.value.daily_quota}` : '每日不限'
@@ -230,9 +227,19 @@ async function load() {
   }
 }
 onMounted(async () => {
-	await auth.loadPublicSettings()
+	await Promise.all([auth.loadPublicSettings(), auth.user ? Promise.resolve(true) : auth.fetchMe()])
 	await load()
 })
+
+function replaceKeyRoute(updated: ApiKey) {
+	keys.value = keys.value.map((key) => key.id === updated.id ? {
+		...key,
+		group_id: updated.group_id,
+		group_ids: updated.group_ids,
+		group: updated.group,
+		groups: updated.groups,
+	} : key)
+}
 
 async function createKey() {
   if (!newName.value || !newGroupIDs.value.length || creatingKey.value) return
@@ -447,74 +454,76 @@ function onSetupSecretSaved(value: string) {
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
 
-    <div class="card overflow-x-auto">
+    <div class="card key-list-card">
       <table v-responsive-table class="table-base key-table">
         <colgroup>
           <col class="key-col-name" />
+          <col class="key-col-route" />
           <col class="key-col-secret" />
-          <col class="key-col-groups" />
-          <col class="key-col-quota" />
           <col class="key-col-status" />
+          <col class="key-col-expires" />
           <col class="key-col-used" />
+          <col class="key-col-usage" />
           <col class="key-col-actions" />
         </colgroup>
         <thead>
           <tr>
             <th>名称</th>
+            <th>路由目标</th>
             <th>密钥</th>
-            <th>分组</th>
-				<th>额度</th>
             <th>状态</th>
+            <th>过期时间</th>
             <th>最后使用</th>
+            <th>用量</th>
             <th class="text-right">操作</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="k in keys" :key="k.id">
-            <td class="whitespace-nowrap font-medium text-slate-200">{{ k.name }}</td>
-			<td>
-			  <div class="key-secret-cell">
-				<code class="num" :class="{ 'is-revealed': revealedKeyIDs.has(k.id) && plainForKey(k) }">{{ revealedKeyIDs.has(k.id) && plainForKey(k) ? plainForKey(k) : k.key_preview }}</code>
-				<span class="key-secret-saved">{{ k.secret_available ? '账号已保存' : '待补入' }}</span>
-				<button v-if="k.secret_available" class="btn-ghost" :disabled="secretLoadingIDs.has(k.id)" @click="toggleKeyReveal(k)">{{ secretLoadingIDs.has(k.id) ? '读取中…' : (revealedKeyIDs.has(k.id) ? '隐藏' : '显示') }}</button>
-                <button
-				  class="btn-ghost"
-                  :title="k.secret_available ? '复制完整密钥' : '补入原密钥并保存到账号'"
-                  @click="copyKey(k)"
-                >
-                  {{ k.secret_available ? (copiedKeyID === k.id ? '已复制' : '复制') : '补入' }}
-                </button>
-              </div>
+            <td><div class="key-name-cell"><strong>{{ k.name }}</strong><small>KEY-{{ k.id }}</small></div></td>
+            <td>
+				<KeyRouteSelector
+					:api-key="k"
+					:groups="groups"
+					:multi-group-enabled="keyMultiGroupEnabled"
+					:admin="isAdmin"
+					@updated="replaceKeyRoute"
+				/>
             </td>
             <td>
-				<div class="key-group-tags">
-					<span v-for="group in keyGroups(k)" :key="group.id" class="tag-gray group-tag">{{ group.name }} · {{ PLATFORM_LABELS[group.platform] }}</span>
-					<span v-if="!keyGroups(k).length" class="text-xs text-slate-500">未绑定</span>
+				<div class="key-secret-cell">
+					<code class="num" :class="{ 'is-revealed': revealedKeyIDs.has(k.id) && plainForKey(k) }">{{ revealedKeyIDs.has(k.id) && plainForKey(k) ? plainForKey(k) : k.key_preview }}</code>
+					<span class="key-secret-state" :class="k.secret_available ? 'is-saved' : 'is-missing'" :title="k.secret_available ? '密钥已加密保存到账号' : '需要补入一次原密钥'"></span>
+					<button type="button" class="key-icon-button" :title="k.secret_available ? '复制完整密钥' : '补入原密钥'" @click="copyKey(k)">
+						<svg v-if="copiedKeyID !== k.id" viewBox="0 0 20 20" aria-hidden="true"><rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/><path d="M4.5 13.5h-1v-10h10v1"/></svg><span v-else>✓</span>
+					</button>
 				</div>
             </td>
-				<td class="text-xs">
-					<div class="num text-slate-300">{{ k.quota_micro ? `${formatMoney(k.quota_used_micro)} / ${formatMoney(k.quota_micro)}` : '总额不限' }}</div>
-					<div class="mt-1 text-slate-500">每日 {{ quotaLabel(k.daily_quota_micro) }}</div>
-					<div v-if="keyHasPlatform(k, 'openai')" class="mt-1 text-slate-500">思考强度 Reasoning Effort：{{ reasoningLabel(k.reasoning_effort) }}</div>
-					<div v-if="k.rpm || k.concurrency || k.expires_at || k.allowed_ips || k.blocked_ips" class="mt-1 text-slate-500">{{ k.rpm ? `${k.rpm} RPM · ` : '' }}{{ k.concurrency ? `并发 ${k.concurrency}` : '并发不限' }}{{ k.expires_at ? ` · 到期 ${new Date(k.expires_at).toLocaleDateString()}` : (k.allowed_ips || k.blocked_ips ? ' · 已设 IP 规则' : '') }}</div>
-				</td>
             <td>
-              <span :class="k.status === 'active' ? 'tag-green' : 'tag-red'">
-                {{ k.status === 'active' ? '启用' : '停用' }}
+              <span class="key-status-tag" :class="k.status === 'active' ? 'is-active' : 'is-disabled'">
+                {{ k.status === 'active' ? '活跃' : '停用' }}
               </span>
             </td>
-            <td class="text-xs text-slate-500">{{ k.last_used_at ? new Date(k.last_used_at).toLocaleString() : '从未' }}</td>
+            <td><span class="key-time-value">{{ k.expires_at ? new Date(k.expires_at).toLocaleString('zh-CN', { hour12: false }) : '永久有效' }}</span></td>
+            <td><span class="key-time-value">{{ k.last_used_at ? new Date(k.last_used_at).toLocaleString('zh-CN', { hour12: false }) : '—' }}</span></td>
+            <td>
+				<div class="key-usage-cell" :title="k.quota_micro ? `累计 ${formatMoney(k.quota_used_micro)} / 额度 ${formatMoney(k.quota_micro)}` : '未设置密钥总额度'">
+					<span><small>今日</small><strong>{{ formatMoney(k.usage_today_micro || 0) }}</strong></span>
+					<span><small>近30天</small><strong>{{ formatMoney(k.usage_30d_micro || 0) }}</strong></span>
+				</div>
+			</td>
             <td class="text-right">
-              <button class="btn-ghost !px-2.5 !py-1 text-xs" @click="toggleKey(k)">
-                {{ k.status === 'active' ? '停用' : '启用' }}
-              </button>
-				<button class="btn-ghost ml-2 !px-2.5 !py-1 text-xs" @click="openSettings(k)">设置</button>
-				<button class="btn-ghost ml-2 !px-2.5 !py-1 text-xs" @click="openQuickSetup(k)">快速配置</button>
-              <button class="btn-danger ml-2 !px-2.5 !py-1 text-xs" @click="removeKey(k)">删除</button>
+				<div class="key-row-actions">
+					<button type="button" class="btn-ghost" @click="openSettings(k)">编辑</button>
+					<button type="button" class="btn-ghost is-warning" @click="toggleKey(k)">{{ k.status === 'active' ? '停用' : '启用' }}</button>
+					<button type="button" class="btn-ghost is-primary" @click="openQuickSetup(k)">使用</button>
+					<button type="button" class="btn-ghost is-primary" :disabled="secretLoadingIDs.has(k.id)" @click="toggleKeyReveal(k)">{{ secretLoadingIDs.has(k.id) ? '读取中…' : (revealedKeyIDs.has(k.id) ? '隐藏密钥' : '查看密钥') }}</button>
+					<button type="button" class="btn-danger" @click="removeKey(k)">删除</button>
+				</div>
             </td>
           </tr>
           <tr v-if="!keys.length">
-            <td colspan="7" class="py-10 text-center text-sm text-slate-500">还没有密钥,点击右上角「新建密钥」开始使用</td>
+            <td colspan="8" class="py-10 text-center text-sm text-slate-500">还没有密钥，点击右上角「新建密钥」开始使用</td>
           </tr>
         </tbody>
       </table>

@@ -461,6 +461,20 @@ func accountQuotaHeadroom(account *model.UpstreamAccount, now time.Time) float64
 }
 
 func quotaDefinitelyExhausted(account *model.UpstreamAccount, now time.Time) bool {
+	if account == nil {
+		return false
+	}
+	// The automatic account monitor writes the normalized cross-provider quota
+	// snapshot. Treat a fresh, unreset exhausted window as a hard exclusion so
+	// priority and session affinity can never route traffic into an account that
+	// is already known to fail.
+	if quota := account.Quota; quota != nil && quota.FetchedAt != nil && schedulerSnapshotFresh(*quota.FetchedAt, now) {
+		for _, window := range quota.Windows {
+			if quotaWindowDefinitelyExhausted(window, now) {
+				return true
+			}
+		}
+	}
 	quota := account.CodexQuota
 	if quota == nil || !schedulerSnapshotFresh(quota.FetchedAt, now) {
 		return false
@@ -481,6 +495,24 @@ func quotaDefinitelyExhausted(account *model.UpstreamAccount, now time.Time) boo
 		return false
 	}
 	return true
+}
+
+func quotaWindowDefinitelyExhausted(window model.AccountQuotaWindow, now time.Time) bool {
+	// A window whose reset boundary has passed is no longer authoritative even
+	// if its cached percentage still says 100. The next quota refresh or one
+	// controlled probe request will replace it.
+	if window.ResetAt != nil && !window.ResetAt.After(now) {
+		return false
+	}
+	if window.UsedPercent != nil && *window.UsedPercent >= 100 {
+		return true
+	}
+	if window.Remaining != nil && *window.Remaining <= 0 {
+		// Some providers omit the limit while still returning an explicit zero
+		// remaining value. When a positive limit is present, zero is also final.
+		return window.Limit == nil || *window.Limit > 0
+	}
+	return false
 }
 
 func schedulerSnapshotFresh(fetchedAt, now time.Time) bool {

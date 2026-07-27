@@ -769,6 +769,21 @@ func onlyRateLimitWindows(windows []model.AccountQuotaWindow) []model.AccountQuo
 	return result
 }
 
+func withoutRateLimitWindows(windows []model.AccountQuotaWindow) []model.AccountQuotaWindow {
+	rateWindows := onlyRateLimitWindows(windows)
+	rateKeys := make(map[string]struct{}, len(rateWindows))
+	for _, window := range rateWindows {
+		rateKeys[window.Key] = struct{}{}
+	}
+	result := make([]model.AccountQuotaWindow, 0, len(windows)-len(rateWindows))
+	for _, window := range windows {
+		if _, isRateWindow := rateKeys[window.Key]; !isRateWindow {
+			result = append(result, window)
+		}
+	}
+	return result
+}
+
 type quotaWindowPayload struct {
 	UsedPercent        float64 `json:"used_percent"`
 	LimitWindowSeconds int64   `json:"limit_window_seconds"`
@@ -1231,18 +1246,20 @@ func (s *AccountQuotaService) ObserveRateLimitHeaders(account *model.UpstreamAcc
 	_ = s.db.Where("upstream_account_id = ?", account.ID).First(&snapshot).Error
 	snapshot.UpstreamAccountID = account.ID
 	snapshot.Platform = account.Platform
-	if snapshot.Source != "api_key_usage" {
+	if snapshot.Source == "" || snapshot.Source == "local_observed" || snapshot.Source == "rate_limit_headers" {
 		snapshot.Source = "rate_limit_headers"
 	}
 	snapshot.State = "ready"
 	snapshot.PlanType = accountPlanType(account)
 	if snapshot.Source == "api_key_usage" {
 		snapshot.Message = "上游 API Key 余额与实时限额已同步"
-		snapshot.Windows = mergeQuotaWindows(snapshot.Windows, windows)
-	} else {
+	} else if snapshot.Source == "rate_limit_headers" {
 		snapshot.Message = ""
-		snapshot.Windows = windows
 	}
+	// Keep subscription or balance windows while replacing only matching
+	// request/token windows. This allows OAuth inference responses to publish an
+	// immediate reset boundary without erasing the provider's 5h/7d allowance.
+	snapshot.Windows = mergeQuotaWindows(withoutRateLimitWindows(snapshot.Windows), windows)
 	fetched := observedAt.UTC()
 	snapshot.FetchedAt = &fetched
 	if len(snapshot.ObservedUsage) == 0 {

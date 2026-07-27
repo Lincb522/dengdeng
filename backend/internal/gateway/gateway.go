@@ -93,7 +93,7 @@ func (g *Gateway) SetAccountQuotaService(quota *service.AccountQuotaService) {
 }
 
 func (g *Gateway) observeAccountQuota(account *model.UpstreamAccount, headers http.Header) {
-	if g == nil || g.quota == nil || account == nil || account.ID <= 0 || account.AuthType != model.AuthAPIKey {
+	if g == nil || g.quota == nil || account == nil || account.ID <= 0 {
 		return
 	}
 	accountCopy := *account

@@ -241,10 +241,47 @@ func (h *UserHandler) signBoundToken(c *gin.Context, user *model.User, version i
 func (h *UserHandler) ListKeys(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var keys []model.APIKey
-	h.db.Preload("Group").Preload("Groups").Where("user_id = ?", user.ID).Order("id DESC").Find(&keys)
+	if err := h.db.Preload("Group").Preload("Groups").Where("user_id = ?", user.ID).Order("id DESC").Find(&keys).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load keys failed")
+		return
+	}
+	type usageTotal struct {
+		APIKeyID  int64 `gorm:"column:api_key_id"`
+		CostMicro int64 `gorm:"column:cost_micro"`
+	}
+	todayByKey := make(map[int64]int64, len(keys))
+	monthByKey := make(map[int64]int64, len(keys))
+	if len(keys) > 0 {
+		now := time.Now()
+		localNow := now.In(time.Local)
+		todayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, localNow.Location())
+		loadUsage := func(start time.Time, target map[int64]int64) error {
+			var rows []usageTotal
+			if err := h.db.Model(&model.UsageLog{}).
+				Select("api_key_id, COALESCE(SUM(cost_micro), 0) AS cost_micro").
+				Where("user_id = ? AND created_at >= ?", user.ID, start).
+				Group("api_key_id").Scan(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				target[row.APIKeyID] = row.CostMicro
+			}
+			return nil
+		}
+		if err := loadUsage(todayStart, todayByKey); err != nil {
+			util.Fail(c, http.StatusInternalServerError, "load key usage failed")
+			return
+		}
+		if err := loadUsage(now.AddDate(0, 0, -30), monthByKey); err != nil {
+			util.Fail(c, http.StatusInternalServerError, "load key usage failed")
+			return
+		}
+	}
 	for i := range keys {
 		hydrateAPIKeyGroups(&keys[i])
 		keys[i].SecretAvailable = string(keys[i].KeySecret) != ""
+		keys[i].UsageTodayMicro = todayByKey[keys[i].ID]
+		keys[i].Usage30dMicro = monthByKey[keys[i].ID]
 	}
 	util.OK(c, keys)
 }
