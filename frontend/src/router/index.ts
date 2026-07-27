@@ -19,6 +19,7 @@ const router = createRouter({
         { path: '/dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
         { path: '/keys', name: 'keys', component: () => import('../views/KeysView.vue') },
         { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue') },
+		{ path: '/status', name: 'status', component: () => import('../views/ChannelStatusView.vue') },
         { path: '/wallet', name: 'wallet', component: () => import('../views/WalletView.vue') },
         { path: '/referrals', name: 'referrals', component: () => import('../views/ReferralView.vue') },
         { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue') },

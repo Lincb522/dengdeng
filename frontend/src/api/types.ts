@@ -1060,6 +1060,42 @@ export interface UsageSummary {
   counts?: { users: number; groups: number; accounts: number; keys: number }
 }
 
+export interface ChannelStatusBucket {
+  at: string
+  state: 'healthy' | 'degraded' | 'down' | 'expired' | 'unknown'
+}
+
+export interface ChannelGroupStatus {
+  id: number
+  name: string
+  description: string
+  platform: string
+  is_public: boolean
+  state: 'healthy' | 'degraded' | 'down' | 'expired' | 'disabled' | 'unknown'
+  account_total: number
+  account_available: number
+  last_probe_at?: string | null
+  average_probe_latency_ms: number
+  probe_success_rate: number
+  probe_successes: number
+  probe_total: number
+  average_ttft_ms: number
+  request_success_rate: number
+  request_successes: number
+  request_total: number
+  top_model: string
+  timeline: ChannelStatusBucket[]
+}
+
+export interface ChannelStatusResponse {
+  range: string
+  hours: number
+  generated_at: string
+  last_probe_at?: string | null
+  admin_view: boolean
+  groups: ChannelGroupStatus[]
+}
+
 export interface PaymentCheckoutInfo {
   enabled: boolean
   currency: string

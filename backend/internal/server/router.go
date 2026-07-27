@@ -160,6 +160,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			user.GET("/usage", userH.Usage)
 			user.GET("/usage/export", userH.ExportUsage)
 			user.GET("/usage/summary", userH.UsageSummary)
+			user.GET("/channel-status", userH.ChannelStatus)
 			user.GET("/referrals", userH.ReferralDashboard)
 			user.POST("/referrals/code", userH.CreateMyReferralCode)
 			user.POST("/referrals/bind", userH.BindReferralCode)
