@@ -1,12 +1,12 @@
 /* DengDeng Pastel Workspace
  *
  * A third, structurally independent interface based on the supplied reference:
- * mint environment, warm-white desktop, capsule rail, large task heading,
+ * warm-white desktop, capsule rail, large task heading,
  * pastel content tiles and a persistent account/activity column.
  */
 
 html[data-ui-theme='pastel'] {
-	--canvas: #bcebd8;
+	--canvas: #fffdfa;
 	--surface: #fffdfa;
 	--surface-muted: #f5f0eb;
 	--surface-raised: #ffffff;
@@ -27,15 +27,15 @@ html[data-ui-theme='pastel'] {
 	--pastel-mint: #bcebd8;
 	--pastel-panel: #f2ebe5;
 	--pastel-tile-ink: #171315;
-	--pastel-tile-line: var(--pastel-tile-line);
+	--pastel-tile-line: rgba(23, 19, 21, .12);
 	--pastel-tile-control: rgba(255, 255, 255, .58);
-	--pastel-shadow: 0 24px 48px rgba(50, 104, 83, .18);
+	--pastel-shadow: none;
 	background: var(--canvas);
 	color-scheme: light;
 }
 
 html[data-ui-theme='pastel'][data-theme='dark'] {
-	--canvas: #171c19;
+	--canvas: #201e1d;
 	--surface: #201e1d;
 	--surface-muted: #2a2624;
 	--surface-raised: #302b29;
@@ -88,17 +88,17 @@ html[data-ui-theme='pastel'] .app-shell {
 
 .pastel-app-shell {
 	min-height: calc(100dvh - var(--contact-banner-height));
-	padding: clamp(.75rem, 2vw, 2rem);
+	padding: 0;
 	background: var(--canvas);
 }
 
 .pastel-window {
-	width: min(100%, 104rem);
-	height: calc(100dvh - var(--contact-banner-height) - clamp(1.5rem, 4vw, 4rem));
+	width: 100%;
+	height: calc(100dvh - var(--contact-banner-height));
 	min-height: 38rem;
 	margin: 0 auto;
 	overflow: hidden;
-	border-radius: 1.75rem;
+	border-radius: 0;
 	background: var(--surface);
 	box-shadow: var(--pastel-shadow);
 }
@@ -647,9 +647,9 @@ html[data-ui-theme='pastel'] .app-shell {
 .pastel-menu-panel {
 	position: fixed;
 	z-index: 41;
-	top: calc(var(--contact-banner-height) + clamp(.75rem, 2vw, 2rem) + 3.7rem);
-	bottom: calc(clamp(.75rem, 2vw, 2rem) + 1rem);
-	left: calc(clamp(.75rem, 2vw, 2rem) + 7.7rem);
+	top: calc(var(--contact-banner-height) + 3.7rem);
+	bottom: 1rem;
+	left: 7.7rem;
 	width: min(43rem, calc(100vw - 11rem));
 	overflow: auto;
 	padding: 1rem;

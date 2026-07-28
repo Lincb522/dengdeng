@@ -17,7 +17,7 @@ try {
   const themeColor = interfaceTheme === 'control'
     ? (resolvedMode === 'dark' ? '#060907' : '#f1f5f2')
     : interfaceTheme === 'pastel'
-      ? (resolvedMode === 'dark' ? '#171515' : '#bfeeda')
+      ? (resolvedMode === 'dark' ? '#201e1d' : '#fffdfa')
       : (resolvedMode === 'dark' ? '#181613' : '#fffaf1')
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor)
 } catch {
