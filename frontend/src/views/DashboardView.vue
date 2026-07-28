@@ -273,9 +273,11 @@ onMounted(loadDashboard)
           <header><h2>模型用量</h2><span>最近 {{ usageItems.length }} 次调用</span></header>
           <div v-if="modelRanking.length" class="dashboard-editorial-model-list">
             <div v-for="model in modelRanking" :key="model.name" :class="model.tone">
-              <header><strong :title="model.name">{{ model.name }}</strong><b>{{ model.share }}%</b></header>
-              <div><i :style="{ width: `${Math.max(model.share, 4)}%` }"></i></div>
-              <footer><span>{{ model.requests }} 次</span><span>{{ formatTokens(model.tokens) }}</span><span>{{ formatMoney(model.costMicro) }}</span></footer>
+              <span class="dashboard-editorial-model-orbit" :style="{ '--model-share': `${model.share * 3.6}deg` }" aria-hidden="true"><i></i></span>
+              <span class="dashboard-editorial-model-copy">
+                <header><strong :title="model.name">{{ model.name }}</strong><b>{{ model.share }}%</b></header>
+                <footer><span>{{ model.requests }} 次</span><span>{{ formatTokens(model.tokens) }}</span><span>{{ formatMoney(model.costMicro) }}</span></footer>
+              </span>
             </div>
           </div>
           <div v-else class="dashboard-editorial-empty">暂无模型用量</div>

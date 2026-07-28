@@ -35,25 +35,29 @@ function formatLatency(milliseconds: number) {
 const rows = computed(() => props.items || [])
 const plotWidth = W - PAD.left - PAD.right
 const plotHeight = H - PAD.top - PAD.bottom
-const maxRequests = computed(() => niceAxisMax(Math.max(...rows.value.map((row) => row.requests), TICK_COUNT)))
+const maxRequests = computed(() => niceAxisMax(Math.max(...rows.value.flatMap((row) => [Math.max(row.requests - row.error_requests, 0), row.error_requests]), TICK_COUNT)))
 const columnWidth = computed(() => plotWidth / Math.max(rows.value.length, 1))
 const points = computed(() => rows.value.map((row, index) => {
   const column = columnWidth.value
-  const barWidth = Math.min(30, Math.max(8, column * 0.56))
-  const totalHeight = row.requests > 0 ? Math.max(3, (row.requests / maxRequests.value) * plotHeight) : 0
-  const errorHeight = row.requests > 0 ? totalHeight * (row.error_requests / row.requests) : 0
   const x = PAD.left + index * column + column / 2
+  const successes = Math.max(row.requests - row.error_requests, 0)
   return {
     ...row,
+    successes,
     x,
-    barX: x - barWidth / 2,
-    barWidth,
-    totalY: PAD.top + plotHeight - totalHeight,
-    totalHeight,
-    errorY: PAD.top + plotHeight - totalHeight,
-    errorHeight,
+    successY: PAD.top + plotHeight - (successes / maxRequests.value) * plotHeight,
+    errorY: PAD.top + plotHeight - (row.error_requests / maxRequests.value) * plotHeight,
   }
 }))
+const successLine = computed(() => points.value.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.successY}`).join(' '))
+const successArea = computed(() => {
+  if (!points.value.length) return ''
+  const first = points.value[0]
+  const last = points.value[points.value.length - 1]
+  const baseline = PAD.top + plotHeight
+  return `${successLine.value} L ${last.x} ${baseline} L ${first.x} ${baseline} Z`
+})
+const errorLine = computed(() => points.value.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.errorY}`).join(' '))
 const gridTicks = computed(() => Array.from({ length: TICK_COUNT + 1 }, (_, index) => {
   const ratio = index / TICK_COUNT
   return { y: PAD.top + plotHeight * ratio, value: maxRequests.value * (1 - ratio) }
@@ -96,7 +100,7 @@ const successRate = computed(() => totalRequests.value ? ((totalRequests.value -
 
     <div v-if="!points.length" class="data-chart-empty">这个时间段还没有调用记录</div>
     <div v-else class="data-chart-scroll" @mouseleave="activeIndex = null">
-      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="请求成功和失败数量柱状图">
+      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="请求成功与失败双线趋势图">
         <g v-for="tick in gridTicks" :key="tick.y">
           <line class="data-chart-grid" :x1="PAD.left" :x2="W - PAD.right" :y1="tick.y" :y2="tick.y" />
           <text class="data-chart-axis" :x="PAD.left - 12" :y="tick.y + 4" text-anchor="end">{{ axisValue(tick.value) }}</text>
@@ -104,10 +108,14 @@ const successRate = computed(() => totalRequests.value ? ((totalRequests.value -
 
         <g v-for="(point, index) in points" :key="point.start">
           <rect v-if="selectedIndex === index" class="data-chart-focus-band" :x="point.x - columnWidth / 2 + 1" :y="PAD.top" :width="columnWidth - 2" :height="plotHeight" rx="5" />
-          <rect class="data-chart-success-bar" :x="point.barX" :y="point.totalY" :width="point.barWidth" :height="point.totalHeight" rx="4" />
-          <rect v-if="point.errorHeight" class="data-chart-error-bar" :x="point.barX" :y="point.errorY" :width="point.barWidth" :height="Math.max(2, point.errorHeight)" rx="4" />
           <text v-if="index % labelStep === 0 || index === points.length - 1" class="data-chart-axis" :x="point.x" :y="H - 14" text-anchor="middle">{{ point.label }}</text>
         </g>
+
+        <path v-if="successArea" class="data-chart-success-area" :d="successArea" />
+        <path v-if="successLine" class="data-chart-success-line" :d="successLine" />
+        <path v-if="errorLine" class="data-chart-error-line" :d="errorLine" />
+        <circle v-for="(point, index) in points" :key="`success-${point.start}`" class="data-chart-success-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.successY" :r="selectedIndex === index ? 4 : 2.5" />
+        <circle v-for="(point, index) in points" :key="`error-${point.start}`" class="data-chart-error-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.errorY" :r="selectedIndex === index ? 4 : 2.5" />
 
         <rect
           v-for="(point, index) in points"

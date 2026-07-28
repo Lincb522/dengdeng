@@ -78,7 +78,7 @@ function shortDate(value: string) {
   const date = new Date(`${value}T00:00:00Z`)
   return date.toLocaleDateString(undefined, { month: '2-digit', day: '2-digit' })
 }
-function trendWidth(value: number) { return `${Math.max(value > 0 ? 5 : 0, (value / trendMax.value) * 100)}%` }
+function trendPosition(value: number) { return `${Math.min(100, Math.max(0, (value / trendMax.value) * 100))}%` }
 
 async function loadLedger() {
   ledgerBusy.value = true
@@ -226,9 +226,10 @@ onMounted(load)
         <div v-if="trendRows.length" class="payment-trend-list">
           <div v-for="item in trendRows" :key="item.date" class="payment-trend-row">
             <time>{{ shortDate(item.date) }}</time>
-            <div class="payment-trend-bars">
-              <div><i class="is-income" :style="{ width: trendWidth(item.income_minor) }"></i></div>
-              <div><i class="is-expense" :style="{ width: trendWidth(item.expense_minor) }"></i></div>
+            <div class="payment-trend-points" aria-hidden="true">
+              <span></span>
+              <i class="is-income" :style="{ left: trendPosition(item.income_minor) }"></i>
+              <i class="is-expense" :style="{ left: trendPosition(item.expense_minor) }"></i>
             </div>
             <div class="payment-trend-values">
               <span>+{{ money(item.income_minor, ledger.summary.currency) }} <small>{{ item.income_count }} 笔</small></span>

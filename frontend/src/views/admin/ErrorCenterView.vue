@@ -37,6 +37,13 @@ const scopeSummary = computed<ErrorCenterScopeSummary>(() => summary.value?.[sco
   total: 0, open: 0, resolved: 0, critical: 0, last_hour: 0, retryable: 0, business_limited: 0, categories: [],
 })
 const maxCategoryCount = computed(() => Math.max(...scopeSummary.value.categories.map((item) => item.count), 1))
+function categoryBubbleStyle(value: number) {
+  const ratio = value / maxCategoryCount.value
+  return {
+    opacity: String(0.48 + ratio * 0.52),
+    transform: `scale(${0.58 + ratio * 0.42})`,
+  }
+}
 const unresolvedRate = computed(() => scopeSummary.value.total ? scopeSummary.value.open / scopeSummary.value.total * 100 : 0)
 const selectedSite = computed(() => scope.value === 'site' ? selected.value as SiteErrorLog | null : null)
 const selectedAPI = computed(() => scope.value === 'api' ? selected.value as OpsErrorLog | null : null)
@@ -324,8 +331,8 @@ onMounted(load)
             :class="{ 'is-active': (scope === 'site' ? category : errorType) === item.name }"
             @click="scope === 'site' ? category = item.name : errorType = item.name; applyFilters()"
           >
+            <i :style="categoryBubbleStyle(item.count)"></i>
             <span>{{ categoryLabel(item.name) }}</span><strong>{{ item.count }}</strong>
-            <i><b :style="{ width: `${item.count / maxCategoryCount * 100}%` }"></b></i>
           </button>
           <p v-if="!scopeSummary.categories.length">当前范围没有错误记录</p>
         </div>

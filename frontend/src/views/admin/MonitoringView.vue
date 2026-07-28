@@ -111,7 +111,13 @@ function formatBytes(value: number) {
   return `${(value / 1024 ** index).toFixed(index > 1 ? 1 : 0)} ${units[index]}`
 }
 
-function barWidth(values: number[], value: number) { const max = Math.max(...values, 1); return `${value ? Math.max(2, value / max * 100) : 0}%` }
+function bubbleStyle(values: number[], value: number) {
+  const ratio = value / Math.max(...values, 1)
+  return {
+    opacity: String(value ? 0.5 + ratio * 0.5 : 0.28),
+    transform: `scale(${value ? 0.58 + ratio * 0.42 : 0.46})`,
+  }
+}
 
 function healthLabel(health: OpsAccountHealth['health']) {
   return { ready: '已验证', checking: '等待检测', stale: '检测过期', attention: '异常', cooling: '冷却中', disabled: '已停用' }[health]
@@ -331,9 +337,9 @@ onBeforeUnmount(() => {
       <section class="ops-console-section">
         <header><h2>分布与队列</h2></header>
         <div class="ops-distribution-grid">
-          <article class="ops-observe-panel"><h3>总耗时</h3><div class="ops-histogram"><div v-for="bucket in snapshot?.latency_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i><b :style="{ width: barWidth(snapshot?.latency_histogram.map((item) => item.count) || [], bucket.count) }"></b></i><strong>{{ bucket.count }}</strong></div></div></article>
-          <article class="ops-observe-panel"><h3>首字耗时</h3><div class="ops-histogram"><div v-for="bucket in snapshot?.ttft_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i><b :style="{ width: barWidth(snapshot?.ttft_histogram.map((item) => item.count) || [], bucket.count) }"></b></i><strong>{{ bucket.count }}</strong></div></div></article>
-          <article class="ops-observe-panel"><h3>错误状态</h3><div class="ops-status-list"><div v-for="item in snapshot?.status_distribution" :key="item.status_code"><span :class="item.status_code >= 500 ? 'tag-red' : 'tag-amber'">HTTP {{ item.status_code }}</span><i><b :style="{ width: barWidth(snapshot?.status_distribution.map((row) => row.count) || [], item.count) }"></b></i><strong>{{ item.count }}</strong></div><div v-if="!snapshot?.status_distribution.length" class="ops-empty">无错误</div></div></article>
+          <article class="ops-observe-panel"><h3>总耗时</h3><div class="ops-histogram"><div v-for="bucket in snapshot?.latency_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i class="ops-density-dot" :style="bubbleStyle(snapshot?.latency_histogram.map((item) => item.count) || [], bucket.count)"></i><strong>{{ bucket.count }}</strong></div></div></article>
+          <article class="ops-observe-panel"><h3>首字耗时</h3><div class="ops-histogram"><div v-for="bucket in snapshot?.ttft_histogram" :key="bucket.range"><span>{{ bucket.range }}</span><i class="ops-density-dot" :style="bubbleStyle(snapshot?.ttft_histogram.map((item) => item.count) || [], bucket.count)"></i><strong>{{ bucket.count }}</strong></div></div></article>
+          <article class="ops-observe-panel"><h3>错误状态</h3><div class="ops-status-list"><div v-for="item in snapshot?.status_distribution" :key="item.status_code"><span :class="item.status_code >= 500 ? 'tag-red' : 'tag-amber'">HTTP {{ item.status_code }}</span><i class="ops-density-dot is-error" :style="bubbleStyle(snapshot?.status_distribution.map((row) => row.count) || [], item.count)"></i><strong>{{ item.count }}</strong></div><div v-if="!snapshot?.status_distribution.length" class="ops-empty">无错误</div></div></article>
           <article class="ops-observe-panel"><h3>后台任务</h3><div class="ops-job-list"><div v-for="job in snapshot?.job_heartbeats" :key="job.job_name"><span>{{ job.job_name }}</span><strong :class="job.last_error ? 'text-signal-red' : 'text-signal-green'">{{ job.last_error ? '失败' : '正常' }}</strong><small>{{ job.last_success_at ? new Date(job.last_success_at).toLocaleString() : '尚未成功' }}</small></div><div v-if="!snapshot?.job_heartbeats.length" class="ops-job-empty">暂无任务</div></div></article>
         </div>
       </section>

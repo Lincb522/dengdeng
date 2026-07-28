@@ -35,20 +35,23 @@ const columnWidth = computed(() => plotWidth / Math.max(rows.value.length, 1))
 
 const points = computed(() => rows.value.map((row, index) => {
   const column = columnWidth.value
-  const barWidth = Math.min(34, column * 0.52)
-  const tokenHeight = row.tokens > 0 ? Math.max(3, (row.tokens / tokenMax.value) * plotHeight) : 0
   const x = PAD.left + index * column + column / 2
   return {
     ...row,
     x,
-    barX: x - barWidth / 2,
-    barWidth,
-    tokenY: PAD.top + plotHeight - tokenHeight,
-    tokenHeight,
+    tokenY: PAD.top + plotHeight - (row.tokens / tokenMax.value) * plotHeight,
     requestY: PAD.top + plotHeight - (row.requests / requestMax.value) * plotHeight,
   }
 }))
 
+const tokenLine = computed(() => points.value.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.tokenY}`).join(' '))
+const tokenArea = computed(() => {
+  if (!points.value.length) return ''
+  const first = points.value[0]
+  const last = points.value[points.value.length - 1]
+  const baseline = PAD.top + plotHeight
+  return `${tokenLine.value} L ${last.x} ${baseline} L ${first.x} ${baseline} Z`
+})
 const requestLine = computed(() => points.value.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.requestY}`).join(' '))
 const gridTicks = computed(() => Array.from({ length: TICK_COUNT + 1 }, (_, index) => {
   const ratio = index / TICK_COUNT
@@ -93,7 +96,7 @@ const averageTokens = computed(() => rows.value.length ? Math.round(totalTokens.
 
     <div v-if="!points.length" class="data-chart-empty">这段时间还没有调用记录</div>
     <div v-else class="data-chart-scroll" @mouseleave="activeIndex = null">
-      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="近十四天 Token 柱状图和请求趋势图">
+      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="近十四天 Token 与请求双线趋势图">
         <g v-for="tick in gridTicks" :key="tick.y">
           <line class="data-chart-grid" :x1="PAD.left" :x2="W - PAD.right" :y1="tick.y" :y2="tick.y" />
           <text class="data-chart-axis" :x="PAD.left - 12" :y="tick.y + 4" text-anchor="end">{{ axisValue(tick.tokens) }}</text>
@@ -102,11 +105,13 @@ const averageTokens = computed(() => rows.value.length ? Math.round(totalTokens.
 
         <g v-for="(point, index) in points" :key="point.day">
           <rect v-if="selectedIndex === index" class="data-chart-focus-band" :x="point.x - columnWidth / 2 + 2" :y="PAD.top" :width="columnWidth - 4" :height="plotHeight" rx="5" />
-          <rect class="data-chart-token-bar" :x="point.barX" :y="point.tokenY" :width="point.barWidth" :height="point.tokenHeight" rx="4" />
           <text class="data-chart-axis" :x="point.x" :y="H - 14" text-anchor="middle">{{ point.day.slice(5) }}</text>
         </g>
 
+        <path v-if="tokenArea" class="data-chart-token-area" :d="tokenArea" />
+        <path v-if="tokenLine" class="data-chart-token-line" :d="tokenLine" />
         <path v-if="requestLine" class="data-chart-request-line" :d="requestLine" />
+        <circle v-for="(point, index) in points" :key="`token-${point.day}`" class="data-chart-token-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.tokenY" :r="selectedIndex === index ? 4 : 2.5" />
         <circle v-for="(point, index) in points" :key="`request-${point.day}`" class="data-chart-request-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.requestY" :r="selectedIndex === index ? 4 : 2.5" />
 
         <rect

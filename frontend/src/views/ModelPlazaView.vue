@@ -80,9 +80,10 @@ onMounted(load)
     <header class="public-models-topbar">
       <RouterLink to="/" class="public-models-brand" aria-label="返回 DengDeng AI 主页">
         <BrandMark :size="34" />
-        <strong>DengDeng AI</strong>
+        <span><strong>DengDeng AI</strong><small>模型广场</small></span>
       </RouterLink>
       <div class="public-models-actions">
+        <RouterLink to="/" class="public-models-home">首页</RouterLink>
         <RouterLink :to="accountTarget" class="public-models-login">{{ accountLabel }}</RouterLink>
         <ThemeToggle />
       </div>
@@ -90,7 +91,16 @@ onMounted(load)
 
     <div class="public-models-main">
       <header class="public-models-heading">
-        <h1>模型广场</h1>
+        <div>
+          <h1>模型广场</h1>
+          <p>上下文、输出限制、计费和可选分组</p>
+        </div>
+        <dl class="public-models-summary">
+          <div><dt>全部</dt><dd>{{ counts.all }}</dd></div>
+          <div><dt>OpenAI</dt><dd>{{ counts.openai }}</dd></div>
+          <div><dt>Claude</dt><dd>{{ counts.anthropic }}</dd></div>
+          <div><dt>Gemini</dt><dd>{{ counts.gemini }}</dd></div>
+        </dl>
       </header>
 
       <section class="model-plaza-toolbar" aria-label="模型筛选">
@@ -100,11 +110,15 @@ onMounted(load)
           <button type="button" :class="{ 'is-active': platform === 'anthropic' }" @click="platform = 'anthropic'">Claude <b>{{ counts.anthropic }}</b></button>
           <button type="button" :class="{ 'is-active': platform === 'gemini' }" @click="platform = 'gemini'">Gemini <b>{{ counts.gemini }}</b></button>
         </div>
-        <select v-model="kind" class="input model-kind-select"><option value="all">全部类型</option><option value="chat">对话模型</option><option value="image">图像模型</option></select>
-        <input v-model="query" class="input model-search" placeholder="搜索模型" aria-label="搜索模型" />
+        <div class="model-plaza-fields">
+          <select v-model="kind" class="input model-kind-select"><option value="all">全部类型</option><option value="chat">对话模型</option><option value="image">图像模型</option></select>
+          <input v-model="query" class="input model-search" placeholder="搜索模型" aria-label="搜索模型" />
+        </div>
       </section>
 
-      <div v-if="loading" class="model-plaza-loading">正在加载模型目录…</div>
+      <div v-if="loading" class="model-plaza-loading" aria-label="正在加载模型目录">
+        <span v-for="index in 6" :key="index"></span>
+      </div>
       <div v-else-if="error" class="ops-error-state"><span>{{ error }}</span><button class="btn-ghost !px-3 !py-1 text-xs" @click="load">重试</button></div>
       <div v-else-if="!filtered.length" class="model-plaza-empty"><strong>没有符合条件的模型</strong><span>请调整筛选条件</span></div>
 
@@ -112,7 +126,10 @@ onMounted(load)
         <article v-for="item in filtered" :key="item.id" class="model-card" :class="{ 'is-unavailable': !item.available }">
           <div class="model-card-scroll">
             <div class="model-card-top">
-              <div class="model-card-title"><span class="model-platform-label">{{ PLATFORM_LABELS[item.platform] || item.platform }}</span><h2>{{ item.name }}</h2></div>
+              <div class="model-card-title">
+                <span class="model-platform-label">{{ PLATFORM_LABELS[item.platform] || item.platform }}</span>
+                <h2 :title="item.name">{{ item.name }}</h2>
+              </div>
               <span :class="item.available ? 'tag-green' : 'tag-amber'">{{ item.available ? '可调用' : '暂无可用上游' }}</span>
             </div>
             <p class="model-description">{{ item.description || '暂无说明' }}</p>

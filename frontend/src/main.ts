@@ -9,6 +9,7 @@ import './style.css'
 import './styles/control-theme.css'
 import './styles/dashboard-editorial.css'
 import './styles/youth-workspace.css'
+import './styles/public-youth.css'
 
 const app = createApp(App)
 const pinia = createPinia()
