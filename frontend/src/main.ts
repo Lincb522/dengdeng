@@ -8,6 +8,7 @@ import { useToast } from './stores/toast'
 import './style.css'
 import './styles/control-theme.css'
 import './styles/dashboard-editorial.css'
+import './styles/youth-workspace.css'
 
 const app = createApp(App)
 const pinia = createPinia()

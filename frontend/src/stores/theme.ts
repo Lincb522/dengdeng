@@ -55,7 +55,7 @@ export const useTheme = defineStore('theme', () => {
     document.documentElement.style.colorScheme = nextMode
     const themeColor = interfaceTheme.value === 'control'
       ? nextMode === 'dark' ? '#060907' : '#f1f5f2'
-      : nextMode === 'dark' ? '#181613' : '#fffaf1'
+      : nextMode === 'dark' ? '#10172a' : '#edf6ff'
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
       ?.setAttribute('content', themeColor)
   }

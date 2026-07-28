@@ -1,0 +1,1011 @@
+/*
+ * DengDeng Youth Workspace
+ *
+ * A complete visual system for the classic application shell. It covers the
+ * navigation, workspace, data surfaces, forms, tables, dialogs and dense
+ * operations pages instead of decorating one route at a time.
+ */
+
+:root[data-ui-theme='classic'] {
+	color-scheme: light;
+	--dd-ink-950: 23 32 68;
+	--dd-ink-900: 255 255 255;
+	--dd-ink-850: 243 247 255;
+	--dd-ink-800: 227 235 250;
+	--dd-ink-700: 198 212 237;
+	--dd-ink-600: 160 178 210;
+	--dd-ink-500: 99 117 151;
+	--dd-amber: 241 174 22;
+	--dd-amber-bright: 255 216 75;
+	--dd-amber-dim: 159 99 0;
+	--dd-signal-green: 17 156 105;
+	--dd-signal-red: 225 77 91;
+	--dd-signal-cyan: 36 88 239;
+	--dd-slate-100: 23 32 68;
+	--dd-slate-200: 35 48 88;
+	--dd-slate-300: 57 73 112;
+	--dd-slate-400: 75 92 128;
+	--dd-slate-500: 99 117 151;
+	--dd-slate-600: 137 155 188;
+	--dd-slate-700: 184 200 226;
+	--dd-slate-800: 222 232 247;
+	--dd-slate-900: 245 248 255;
+	--canvas: #edf6ff;
+	--canvas-deep: #dcecff;
+	--surface: #ffffff;
+	--surface-muted: #e7f1ff;
+	--ink: #172044;
+	--ink-soft: #4d5c7d;
+	--ink-faint: #667596;
+	--line: #c8d7ed;
+	--accent: #2458ef;
+	--accent-soft: #dfe7ff;
+	--shadow: rgb(37 66 125 / .09);
+	--contact-banner-bg: #172044;
+	--contact-banner-text: #f7f9ff;
+	--youth-navy: #172044;
+	--youth-blue: #2458ef;
+	--youth-yellow: #ffd84b;
+	--youth-coral: #ff7668;
+	--youth-mint: #bcebd8;
+	--youth-lilac: #d9d2ff;
+	--youth-ice: #edf6ff;
+	--youth-radius: .8rem;
+}
+
+:root[data-ui-theme='classic'][data-theme='dark'] {
+	color-scheme: dark;
+	--dd-ink-950: 12 18 37;
+	--dd-ink-900: 23 33 58;
+	--dd-ink-850: 27 39 68;
+	--dd-ink-800: 38 53 88;
+	--dd-ink-700: 55 73 111;
+	--dd-ink-600: 82 102 143;
+	--dd-ink-500: 174 190 222;
+	--dd-amber: 255 208 67;
+	--dd-amber-bright: 255 224 119;
+	--dd-amber-dim: 255 210 82;
+	--dd-signal-green: 83 210 157;
+	--dd-signal-red: 255 123 135;
+	--dd-signal-cyan: 126 158 255;
+	--dd-slate-100: 247 249 255;
+	--dd-slate-200: 226 232 247;
+	--dd-slate-300: 202 212 235;
+	--dd-slate-400: 180 194 223;
+	--dd-slate-500: 157 174 207;
+	--dd-slate-600: 125 143 179;
+	--dd-slate-700: 69 88 126;
+	--dd-slate-800: 44 59 94;
+	--dd-slate-900: 28 39 67;
+	--canvas: #10172a;
+	--canvas-deep: #0c1222;
+	--surface: #17213a;
+	--surface-muted: #202d4c;
+	--ink: #f4f7ff;
+	--ink-soft: #c0cbe4;
+	--ink-faint: #9aabd0;
+	--line: #344463;
+	--accent: #83a0ff;
+	--accent-soft: #263a6e;
+	--shadow: rgb(0 0 0 / .28);
+	--contact-banner-bg: #0c1222;
+	--contact-banner-text: #f4f7ff;
+	--youth-navy: #0c1222;
+	--youth-blue: #6486ff;
+	--youth-yellow: #e9c84b;
+	--youth-coral: #e97671;
+	--youth-mint: #4c9a82;
+	--youth-lilac: #756fb5;
+	--youth-ice: #10172a;
+}
+
+html[data-ui-theme='classic'] body {
+	background: var(--canvas);
+	color: var(--ink);
+	font-family: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+html[data-ui-theme='classic'] ::selection {
+	background: var(--youth-yellow);
+	color: #172044;
+}
+
+html[data-ui-theme='classic'] ::-webkit-scrollbar-thumb {
+	background: color-mix(in srgb, var(--ink-faint) 58%, transparent);
+	border-color: transparent;
+}
+
+/* Global chrome --------------------------------------------------------- */
+
+html[data-ui-theme='classic'] .contact-banner {
+	background: var(--youth-navy);
+}
+
+html[data-ui-theme='classic'] .contact-banner__inner {
+	width: 100%;
+	padding-inline: 1.1rem;
+}
+
+html[data-ui-theme='classic'] .contact-banner__icon {
+	background: var(--youth-yellow);
+	color: #172044;
+}
+
+html[data-ui-theme='classic'] .contact-banner__open {
+	border-color: rgb(255 255 255 / .26);
+	background: rgb(255 255 255 / .08);
+	color: #fff;
+}
+
+html[data-ui-theme='classic'] .contact-banner__open:hover {
+	border-color: var(--youth-yellow);
+	background: var(--youth-yellow);
+	color: #172044;
+}
+
+.app-shell:not(.control-app-shell) {
+	min-height: calc(100dvh - var(--contact-banner-height));
+	background: var(--canvas);
+}
+
+.app-shell:not(.control-app-shell) .ambient-field {
+	display: none;
+}
+
+.app-shell:not(.control-app-shell) .console-shell {
+	grid-template-columns: 16.5rem minmax(0, 1fr);
+	min-height: calc(100dvh - var(--contact-banner-height));
+	gap: .75rem;
+	padding: .7rem;
+}
+
+.app-shell:not(.control-app-shell) .side-rail {
+	top: .7rem;
+	height: calc(100dvh - var(--contact-banner-height) - 1.4rem);
+	border: 0;
+	border-radius: var(--youth-radius);
+	background: var(--youth-navy);
+	box-shadow: none;
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .rail-brand {
+	margin: 0;
+	padding: 1rem .85rem;
+	border-bottom-color: rgb(255 255 255 / .1);
+}
+
+.app-shell:not(.control-app-shell) .rail-brand-name {
+	color: #fff;
+	font-size: .94rem;
+	font-weight: 850;
+}
+
+.app-shell:not(.control-app-shell) .rail-brand-caption,
+.app-shell:not(.control-app-shell) .rail-brand-state {
+	color: #aebce0;
+}
+
+.app-shell:not(.control-app-shell) .rail-brand-state i {
+	background: #62e3a7;
+	box-shadow: 0 0 0 3px rgb(98 227 167 / .16);
+}
+
+.app-shell:not(.control-app-shell) .rail-nav {
+	padding: .7rem .55rem .85rem;
+	scrollbar-color: rgb(255 255 255 / .25) transparent;
+}
+
+.app-shell:not(.control-app-shell) .rail-nav-group + .rail-nav-group {
+	margin-top: .55rem;
+	padding-top: .55rem;
+	border-top-color: rgb(255 255 255 / .09);
+}
+
+.app-shell:not(.control-app-shell) .rail-section {
+	padding: .3rem .65rem .42rem;
+	color: #8294bf;
+	font-size: .6rem;
+	font-weight: 800;
+}
+
+.app-shell:not(.control-app-shell) .rail-link {
+	min-height: 2.62rem;
+	margin-bottom: .16rem;
+	border-radius: .64rem;
+	color: #c8d3ec;
+	font-size: .78rem;
+	font-weight: 720;
+}
+
+.app-shell:not(.control-app-shell) .rail-link-icon {
+	border: 0;
+	background: rgb(255 255 255 / .08);
+	color: #cbd6ee;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:nth-of-type(4n + 1) .rail-link-icon {
+	background: rgb(188 235 216 / .16);
+	color: #9ae1c4;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:nth-of-type(4n + 2) .rail-link-icon {
+	background: rgb(255 118 104 / .16);
+	color: #ff9e95;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:nth-of-type(4n + 3) .rail-link-icon {
+	background: rgb(217 210 255 / .17);
+	color: #c7bfff;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:nth-of-type(4n + 4) .rail-link-icon {
+	background: rgb(255 216 75 / .16);
+	color: #ffe584;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:hover {
+	background: rgb(255 255 255 / .08);
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .rail-link:hover .rail-link-icon {
+	background: rgb(255 255 255 / .13);
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .rail-link.is-active {
+	background: var(--youth-yellow);
+	color: #172044;
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) .rail-link.is-active .rail-link-icon {
+	background: rgb(23 32 68 / .1);
+	color: #172044;
+}
+
+.app-shell:not(.control-app-shell) .rail-link.is-active .rail-link-mark {
+	background: #172044;
+}
+
+.app-shell:not(.control-app-shell) .rail-account {
+	margin: 0 .55rem .55rem;
+	padding: .72rem;
+	border-color: rgb(255 255 255 / .1);
+	background: rgb(255 255 255 / .07);
+}
+
+.app-shell:not(.control-app-shell) .rail-account-avatar {
+	background: var(--youth-lilac);
+	color: #172044;
+}
+
+.app-shell:not(.control-app-shell) .rail-account-profile strong,
+.app-shell:not(.control-app-shell) .rail-account-balance strong {
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .rail-account-profile small,
+.app-shell:not(.control-app-shell) .rail-account-balance span {
+	color: #9fafd1;
+}
+
+.app-shell:not(.control-app-shell) .rail-account-balance {
+	border-top-color: rgb(255 255 255 / .1);
+}
+
+.app-shell:not(.control-app-shell) .rail-account-actions :is(.interface-theme-switcher, .rail-theme-toggle, .rail-logout) {
+	border-color: rgb(255 255 255 / .13);
+	background: rgb(255 255 255 / .07);
+	color: #cbd6ee;
+}
+
+.app-shell:not(.control-app-shell) .rail-account-actions :is(.interface-theme-switcher, .rail-theme-toggle, .rail-logout):hover {
+	border-color: rgb(255 255 255 / .3);
+	background: rgb(255 255 255 / .12);
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .workspace {
+	min-height: calc(100dvh - var(--contact-banner-height) - 1.4rem);
+}
+
+.app-shell:not(.control-app-shell) .workspace-bar {
+	min-height: 3.7rem;
+	padding: 0 .55rem 0 .75rem;
+}
+
+.app-shell:not(.control-app-shell) .workspace-context {
+	color: var(--ink-soft);
+	font-size: .72rem;
+}
+
+.app-shell:not(.control-app-shell) .workspace-context strong {
+	display: inline-flex;
+	min-height: 1.85rem;
+	align-items: center;
+	border-radius: 999px;
+	padding: 0 .72rem;
+	background: var(--youth-lilac);
+	color: #172044;
+	font-size: .68rem;
+	font-weight: 820;
+}
+
+.app-shell:not(.control-app-shell) .workspace-dot {
+	background: #20bd7a;
+	box-shadow: 0 0 0 4px rgb(32 189 122 / .13);
+}
+
+.app-shell:not(.control-app-shell) .workspace-user {
+	border: 0;
+	border-radius: .65rem;
+	background: var(--surface);
+	box-shadow: 0 2px 6px var(--shadow);
+	color: var(--ink-soft);
+}
+
+.app-shell:not(.control-app-shell) .workspace-avatar {
+	border-radius: .5rem;
+	background: var(--youth-coral);
+	color: #172044;
+}
+
+.app-shell:not(.control-app-shell) .workspace-main {
+	padding: 1.15rem 1.3rem 2rem;
+	border: 0;
+	border-radius: var(--youth-radius);
+	background: color-mix(in srgb, var(--surface) 48%, transparent);
+	box-shadow: none;
+}
+
+/* Page rhythm ----------------------------------------------------------- */
+
+.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head, .channel-page-head, .ops-console-head) {
+	margin-bottom: 1rem;
+	padding-bottom: .9rem;
+	border-bottom: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+}
+
+.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head, .channel-page-head, .ops-console-head) h1 {
+	color: var(--ink);
+	font-size: 1.62rem;
+	font-weight: 860;
+	letter-spacing: -.035em;
+	text-wrap: balance;
+}
+
+.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head, .channel-page-head, .ops-console-head) p {
+	max-width: 68ch;
+	color: var(--ink-soft);
+	font-size: .75rem;
+	line-height: 1.5;
+}
+
+.app-shell:not(.control-app-shell) :is(.card, .dashboard-panel, .data-chart, .settings-section, .ops-console-section) {
+	border-color: color-mix(in srgb, var(--line) 78%, transparent);
+	border-radius: var(--youth-radius);
+	background: var(--surface);
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) .card:hover {
+	border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+}
+
+.app-shell:not(.control-app-shell) :is(.metric-card, .stat-card) {
+	min-height: 8rem;
+	background: var(--surface);
+}
+
+.app-shell:not(.control-app-shell) :is(h1, h2, h3) {
+	text-wrap: balance;
+}
+
+.app-shell:not(.control-app-shell) :is(p, li) {
+	text-wrap: pretty;
+}
+
+/* Buttons and fields ---------------------------------------------------- */
+
+html[data-ui-theme='classic'] :is(.btn, .btn-primary, .btn-ghost, .btn-danger) {
+	min-height: 2.45rem;
+	border-radius: .62rem;
+	padding-inline: .9rem;
+	font-size: .74rem;
+	font-weight: 780;
+	transform: none;
+	transition: background-color .16s ease-out, border-color .16s ease-out, color .16s ease-out, transform .16s ease-out;
+}
+
+html[data-ui-theme='classic'] .btn-primary {
+	border: 1px solid var(--youth-blue);
+	background: var(--youth-blue);
+	color: #fff;
+}
+
+html[data-ui-theme='classic'] .btn-primary:hover:not(:disabled) {
+	border-color: #1947d5;
+	background: #1947d5;
+	color: #fff;
+	transform: translateY(-1px);
+}
+
+html[data-ui-theme='classic'] .btn-ghost {
+	border-color: var(--line);
+	background: var(--surface);
+	color: var(--ink);
+}
+
+html[data-ui-theme='classic'] .btn-ghost:hover:not(:disabled) {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+	color: var(--accent);
+	transform: translateY(-1px);
+}
+
+html[data-ui-theme='classic'] .btn-danger {
+	border-color: rgb(var(--dd-signal-red) / .3);
+	background: rgb(var(--dd-signal-red) / .07);
+	color: rgb(var(--dd-signal-red));
+}
+
+html[data-ui-theme='classic'] .btn-danger:hover:not(:disabled) {
+	background: rgb(var(--dd-signal-red) / .14);
+}
+
+html[data-ui-theme='classic'] :is(.btn, .btn-primary, .btn-ghost, .btn-danger, .input, button, a, summary):focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+html[data-ui-theme='classic'] .input {
+	min-height: 2.55rem;
+	border-color: var(--line);
+	border-radius: .58rem;
+	background: var(--surface);
+	color: var(--ink);
+	font-size: .76rem;
+}
+
+html[data-ui-theme='classic'] .input::placeholder {
+	color: var(--ink-faint);
+	opacity: 1;
+}
+
+html[data-ui-theme='classic'] .input:hover {
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+html[data-ui-theme='classic'] .input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+html[data-ui-theme='classic'] :is(.label, .form-label, .settings-field, .modal-field > span:first-child) {
+	color: var(--ink-soft);
+	font-size: .68rem;
+	font-weight: 760;
+	letter-spacing: 0;
+}
+
+html[data-ui-theme='classic'] input[type='checkbox'],
+html[data-ui-theme='classic'] input[type='radio'] {
+	accent-color: var(--accent);
+}
+
+/* Tables, lists and compact data --------------------------------------- */
+
+.app-shell:not(.control-app-shell) .card:has(> .table-base),
+.app-shell:not(.control-app-shell) .card:has(> .overflow-x-auto > .table-base),
+.app-shell:not(.control-app-shell) .card.overflow-x-auto,
+.app-shell:not(.control-app-shell) .card.overflow-hidden {
+	overflow: hidden;
+	background: var(--surface);
+}
+
+.app-shell:not(.control-app-shell) .table-base {
+	color: var(--ink);
+	font-size: .74rem;
+}
+
+.app-shell:not(.control-app-shell) .table-base thead th {
+	border-bottom-color: var(--line);
+	background: color-mix(in srgb, var(--youth-lilac) 42%, var(--surface));
+	color: #3d4969;
+	font-size: .62rem;
+	font-weight: 800;
+	letter-spacing: 0;
+}
+
+:root[data-ui-theme='classic'][data-theme='dark'] .app-shell:not(.control-app-shell) .table-base thead th {
+	color: var(--ink-soft);
+}
+
+.app-shell:not(.control-app-shell) .table-base tbody td {
+	border-bottom-color: color-mix(in srgb, var(--line) 68%, transparent);
+	color: var(--ink-soft);
+}
+
+.app-shell:not(.control-app-shell) .table-base tbody tr:nth-child(even) {
+	background: color-mix(in srgb, var(--surface-muted) 34%, transparent);
+}
+
+.app-shell:not(.control-app-shell) .table-base tbody tr:hover {
+	background: color-mix(in srgb, var(--youth-yellow) 18%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) .table-base tbody :is(strong, .text-slate-100, .text-slate-200, .text-slate-300) {
+	color: var(--ink);
+}
+
+.app-shell:not(.control-app-shell) :is(.tag, .tag-green, .tag-red, .tag-amber, .tag-gray, .tag-cyan, .group-tag, .usage-billing-mode) {
+	min-height: 1.55rem;
+	align-items: center;
+	border-radius: 999px;
+	padding: .24rem .56rem;
+	font-size: .61rem;
+	font-weight: 790;
+}
+
+.app-shell:not(.control-app-shell) .tag-green {
+	border-color: rgb(var(--dd-signal-green) / .25);
+	background: rgb(var(--dd-signal-green) / .12);
+}
+
+.app-shell:not(.control-app-shell) .tag-amber {
+	border-color: rgb(var(--dd-amber) / .3);
+	background: rgb(var(--dd-amber) / .15);
+}
+
+.app-shell:not(.control-app-shell) .tag-cyan {
+	border-color: rgb(var(--dd-signal-cyan) / .24);
+	background: rgb(var(--dd-signal-cyan) / .1);
+}
+
+.app-shell:not(.control-app-shell) .tag-gray {
+	border-color: var(--line);
+	background: var(--surface-muted);
+	color: var(--ink-soft);
+}
+
+.app-shell:not(.control-app-shell) .usage-table-floating-scroll {
+	background: color-mix(in srgb, var(--surface) 88%, transparent);
+	box-shadow: 0 0 0 1px var(--line);
+	backdrop-filter: none;
+}
+
+/* Tabs, filters and secondary navigation ------------------------------- */
+
+.app-shell:not(.control-app-shell) :is(
+	.payment-tabs,
+	.model-platform-tabs,
+	.channel-range-tabs,
+	.ops-range-tabs,
+	.accounts-view-toggle,
+	.settings-choice-group,
+	.key-setup-tabs,
+	.key-setup-file-tabs,
+	.modal-segmented
+) {
+	border-color: var(--line);
+	border-radius: .65rem;
+	background: var(--surface-muted);
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) :is(
+	.payment-tabs,
+	.model-platform-tabs,
+	.channel-range-tabs,
+	.ops-range-tabs,
+	.accounts-view-toggle,
+	.settings-choice-group,
+	.key-setup-tabs,
+	.key-setup-file-tabs,
+	.modal-segmented
+) button {
+	border-radius: .48rem;
+	color: var(--ink-soft);
+}
+
+.app-shell:not(.control-app-shell) :is(
+	.payment-tabs,
+	.model-platform-tabs,
+	.channel-range-tabs,
+	.ops-range-tabs,
+	.accounts-view-toggle,
+	.settings-choice-group,
+	.key-setup-tabs,
+	.key-setup-file-tabs,
+	.modal-segmented
+) button.is-active,
+.app-shell:not(.control-app-shell) :is(.ops-range-tabs, .channel-range-tabs) button[aria-selected='true'] {
+	border-color: transparent;
+	background: var(--youth-blue);
+	box-shadow: none;
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) :is(.usage-filters, .model-plaza-toolbar, .channel-status-toolbar, .ops-console-filter, .error-center-toolbar) {
+	border-color: var(--line);
+	background: color-mix(in srgb, var(--surface) 88%, var(--youth-ice));
+}
+
+/* Settings and configuration surfaces --------------------------------- */
+
+.app-shell:not(.control-app-shell) .settings-layout {
+	grid-template-columns: 12rem minmax(0, 1fr);
+	gap: .85rem;
+}
+
+.app-shell:not(.control-app-shell) .settings-nav {
+	position: sticky;
+	top: .5rem;
+	border: 0;
+	border-radius: var(--youth-radius);
+	background: var(--youth-navy);
+}
+
+.app-shell:not(.control-app-shell) .settings-nav button {
+	color: #aebce0;
+}
+
+.app-shell:not(.control-app-shell) .settings-nav button:hover {
+	background: rgb(255 255 255 / .08);
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .settings-nav button.is-active {
+	background: var(--youth-yellow);
+	color: #172044;
+}
+
+.app-shell:not(.control-app-shell) .settings-section {
+	padding: 1.15rem;
+}
+
+.app-shell:not(.control-app-shell) :is(.settings-inline-card, .settings-quota-card, .settings-service-card, .settings-oauth-card, .settings-document-editor) {
+	border-color: var(--line);
+	border-radius: .68rem;
+	background: color-mix(in srgb, var(--surface) 86%, var(--surface-muted));
+}
+
+.app-shell:not(.control-app-shell) .settings-toggle-row {
+	border-color: color-mix(in srgb, var(--line) 72%, transparent);
+}
+
+.app-shell:not(.control-app-shell) .settings-status-list {
+	border-top-color: var(--line);
+}
+
+.app-shell:not(.control-app-shell) .settings-status-list div {
+	border-bottom-color: var(--line);
+}
+
+/* Account, model and channel collections ------------------------------- */
+
+.app-shell:not(.control-app-shell) :is(.account-card, .model-plaza-card, .channel-status-card, .referral-promotion-card) {
+	border-color: var(--line);
+	border-radius: var(--youth-radius);
+	background: var(--surface);
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) :is(.account-card, .model-plaza-card, .channel-status-card, .referral-promotion-card):hover {
+	border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+	box-shadow: 0 4px 8px var(--shadow);
+	transform: translateY(-1px);
+}
+
+.app-shell:not(.control-app-shell) .account-card:nth-child(4n + 1) {
+	background: color-mix(in srgb, var(--youth-mint) 26%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) .account-card:nth-child(4n + 2) {
+	background: color-mix(in srgb, var(--youth-lilac) 22%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) .account-card:nth-child(4n + 3) {
+	background: color-mix(in srgb, var(--youth-yellow) 15%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) .account-card:nth-child(4n + 4) {
+	background: color-mix(in srgb, var(--youth-coral) 12%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) :is(.account-card-meta, .account-card-quota) {
+	border-top-color: color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+.app-shell:not(.control-app-shell) .account-quota-progress,
+.app-shell:not(.control-app-shell) .account-card-quota-window > div {
+	background: color-mix(in srgb, var(--line) 74%, transparent);
+}
+
+/* Wallet and payment ---------------------------------------------------- */
+
+.app-shell:not(.control-app-shell) :is(.wallet-balance-card, .wallet-order-card, .payment-summary-card) {
+	border-radius: var(--youth-radius);
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) .payment-tabs {
+	width: 100%;
+}
+
+.app-shell:not(.control-app-shell) :is(.payment-trend, .payment-recent, .payment-ledger) {
+	border-color: var(--line);
+	background: var(--surface);
+}
+
+.app-shell:not(.control-app-shell) .payment-ledger-filters {
+	border-color: var(--line);
+	background: var(--surface-muted);
+}
+
+/* Monitoring and error center ------------------------------------------ */
+
+.app-shell:not(.control-app-shell).is-monitoring-route .workspace-main,
+.app-shell:not(.control-app-shell) .workspace-main:has(.ops-console) {
+	background: #e5f0ff;
+}
+
+:root[data-ui-theme='classic'][data-theme='dark'] .app-shell:not(.control-app-shell).is-monitoring-route .workspace-main,
+:root[data-ui-theme='classic'][data-theme='dark'] .app-shell:not(.control-app-shell) .workspace-main:has(.ops-console) {
+	background: #111a2e;
+}
+
+.app-shell:not(.control-app-shell) .ops-console {
+	gap: .72rem;
+}
+
+.app-shell:not(.control-app-shell) :is(.ops-console-filter, .ops-status-strip, .ops-console-section, .ops-observe-grid, .ops-live-console) {
+	border-color: var(--line);
+	background: var(--surface);
+	box-shadow: none;
+}
+
+.app-shell:not(.control-app-shell) .ops-status-primary {
+	background: var(--youth-navy);
+	color: #fff;
+}
+
+.app-shell:not(.control-app-shell) .ops-status-metrics > div:nth-child(4n + 1) strong {
+	color: var(--youth-blue);
+}
+
+.app-shell:not(.control-app-shell) .ops-status-metrics > div:nth-child(4n + 2) strong {
+	color: rgb(var(--dd-signal-green));
+}
+
+.app-shell:not(.control-app-shell) .ops-status-metrics > div:nth-child(4n + 3) strong {
+	color: rgb(var(--dd-amber-dim));
+}
+
+.app-shell:not(.control-app-shell) .ops-status-metrics > div:nth-child(4n + 4) strong {
+	color: rgb(var(--dd-signal-red));
+}
+
+.app-shell:not(.control-app-shell) .ops-console-section > header {
+	border-bottom-color: var(--line);
+	background: color-mix(in srgb, var(--youth-lilac) 22%, var(--surface));
+}
+
+.app-shell:not(.control-app-shell) .ops-live-console {
+	background: var(--youth-navy);
+	color: #dfe7ff;
+}
+
+.app-shell:not(.control-app-shell) .error-category-list button.is-active {
+	background: var(--youth-yellow);
+	color: #172044;
+}
+
+/* Dialogs, toasts and overlays ----------------------------------------- */
+
+html[data-ui-theme='classic'] :is(.app-modal-backdrop, .legacy-modal-backdrop) {
+	background: rgb(15 23 48 / .62);
+	backdrop-filter: none;
+}
+
+html[data-ui-theme='classic'] :is(.app-modal, .legacy-modal-backdrop > .card, .legacy-modal-backdrop > section.card) {
+	border-color: var(--line);
+	border-radius: var(--youth-radius);
+	background: var(--surface);
+	box-shadow: 0 8px 16px rgb(15 23 48 / .18);
+}
+
+html[data-ui-theme='classic'] .app-modal__header {
+	border-bottom-color: var(--line);
+	background: color-mix(in srgb, var(--youth-lilac) 24%, var(--surface));
+}
+
+html[data-ui-theme='classic'] .app-modal__footer {
+	border-top-color: var(--line);
+	background: var(--surface-muted);
+}
+
+html[data-ui-theme='classic'] .app-toast {
+	border: 0;
+	border-radius: .68rem;
+	background: var(--surface);
+	box-shadow: 0 6px 12px rgb(15 23 48 / .16);
+}
+
+html[data-ui-theme='classic'] .app-toast.is-success .app-toast__state {
+	background: var(--youth-mint);
+	color: #174d3c;
+}
+
+html[data-ui-theme='classic'] .app-toast.is-error .app-toast__state {
+	background: color-mix(in srgb, var(--youth-coral) 28%, var(--surface));
+	color: rgb(var(--dd-signal-red));
+}
+
+html[data-ui-theme='classic'] .app-toast.is-info .app-toast__state {
+	background: var(--youth-lilac);
+	color: #37427a;
+}
+
+/* Pagination ------------------------------------------------------------ */
+
+.app-shell:not(.control-app-shell) .workspace-main > div > .mt-4.flex.items-center.justify-between,
+.app-shell:not(.control-app-shell) .card + .mt-4.flex.items-center.justify-between {
+	min-height: 3.1rem;
+	margin-top: .65rem;
+	border-radius: .68rem;
+	padding: .38rem .45rem .38rem .75rem;
+	background: color-mix(in srgb, var(--surface) 80%, transparent);
+	color: var(--ink-soft);
+}
+
+/* Responsive structure ------------------------------------------------- */
+
+@media (max-width: 1100px) {
+	.app-shell:not(.control-app-shell) .console-shell {
+		grid-template-columns: 14.5rem minmax(0, 1fr);
+	}
+
+	.app-shell:not(.control-app-shell) .rail-brand-state {
+		display: none;
+	}
+
+	.app-shell:not(.control-app-shell) .settings-layout {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.app-shell:not(.control-app-shell) .settings-nav {
+		position: static;
+		display: flex;
+		overflow-x: auto;
+		padding: .38rem;
+	}
+
+	.app-shell:not(.control-app-shell) .settings-nav button {
+		min-width: max-content;
+	}
+}
+
+@media (max-width: 1023px) {
+	.app-shell:not(.control-app-shell) .console-shell {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0;
+		padding: 0;
+	}
+
+	.app-shell:not(.control-app-shell) .side-rail {
+		top: calc(var(--contact-banner-height) + .5rem);
+		bottom: .5rem;
+		left: .5rem;
+		width: min(18rem, calc(100vw - 1rem));
+		height: auto;
+		border-radius: .8rem;
+		box-shadow: 0 8px 16px rgb(15 23 48 / .22);
+	}
+
+	.app-shell:not(.control-app-shell) .rail-close {
+		display: grid;
+		border-color: rgb(255 255 255 / .15);
+		background: rgb(255 255 255 / .08);
+		color: #fff;
+	}
+
+	.app-shell:not(.control-app-shell) .workspace {
+		min-height: calc(100dvh - var(--contact-banner-height));
+	}
+
+	.app-shell:not(.control-app-shell) .workspace-bar {
+		padding-inline: .75rem;
+	}
+
+	.app-shell:not(.control-app-shell) .mobile-rail-trigger {
+		display: grid;
+		width: 2.35rem;
+		height: 2.35rem;
+		place-items: center;
+		border-radius: .58rem;
+		background: var(--youth-navy);
+		color: #fff;
+	}
+
+	.app-shell:not(.control-app-shell) .workspace-main {
+		border-radius: .8rem .8rem 0 0;
+	}
+}
+
+@media (max-width: 720px) {
+	.app-shell:not(.control-app-shell) .workspace-bar {
+		min-height: 3.5rem;
+		background: var(--surface);
+	}
+
+	.app-shell:not(.control-app-shell) .workspace-context__status,
+	.app-shell:not(.control-app-shell) .workspace-user > span {
+		display: none;
+	}
+
+	.app-shell:not(.control-app-shell) .workspace-main {
+		padding: .75rem;
+		background: var(--canvas);
+	}
+
+	.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head, .channel-page-head, .ops-console-head) {
+		align-items: stretch;
+		flex-direction: column;
+		gap: .7rem;
+		margin-bottom: .75rem;
+		padding-bottom: .75rem;
+	}
+
+	.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head, .channel-page-head, .ops-console-head) h1 {
+		font-size: 1.38rem;
+	}
+
+	.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head) > :last-child:not(:first-child) {
+		display: flex;
+		width: 100%;
+		flex-wrap: wrap;
+	}
+
+	.app-shell:not(.control-app-shell) :is(.console-page-head, .dashboard-head) > :last-child:not(:first-child) > * {
+		min-width: 0;
+		flex: 1 1 8rem;
+	}
+
+	.app-shell:not(.control-app-shell) .card {
+		border-radius: .7rem;
+	}
+
+	.app-shell:not(.control-app-shell) .table-base tbody {
+		background: transparent;
+	}
+
+	.app-shell:not(.control-app-shell) .table-base tbody tr {
+		border: 1px solid var(--line);
+		border-radius: .7rem;
+		background: var(--surface);
+	}
+
+	.app-shell:not(.control-app-shell) .table-base tbody tr:nth-child(even) {
+		background: color-mix(in srgb, var(--youth-lilac) 14%, var(--surface));
+	}
+
+	.app-shell:not(.control-app-shell) .settings-section {
+		padding: .9rem;
+	}
+
+	html[data-ui-theme='classic'] :is(.app-modal, .legacy-modal-backdrop > .card, .legacy-modal-backdrop > section.card) {
+		border-radius: .8rem .8rem 0 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.app-shell:not(.control-app-shell) *,
+	html[data-ui-theme='classic'] .app-modal,
+	html[data-ui-theme='classic'] .app-toast {
+		animation-duration: .01ms !important;
+		transition-duration: .01ms !important;
+	}
+}

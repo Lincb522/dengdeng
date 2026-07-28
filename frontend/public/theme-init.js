@@ -17,7 +17,7 @@ try {
   document.documentElement.style.colorScheme = resolvedMode
   const themeColor = interfaceTheme === 'control'
     ? (resolvedMode === 'dark' ? '#060907' : '#f1f5f2')
-    : (resolvedMode === 'dark' ? '#181613' : '#fffaf1')
+    : (resolvedMode === 'dark' ? '#10172a' : '#edf6ff')
   document.querySelector('meta[name="theme-color"]')?.setAttribute('content', themeColor)
 } catch {
   // The application display-mode store applies the fallback after startup when
