@@ -10,10 +10,12 @@ import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
 import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
 import { useAuth } from '../../stores/auth'
+import { useTheme } from '../../stores/theme'
 import AppModal from '../../components/AppModal.vue'
 
 const toast = useToast()
 const auth = useAuth()
+const theme = useTheme()
 
 const accounts = ref<UpstreamAccount[]>([])
 const groups = ref<Group[]>([])
@@ -999,7 +1001,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <option value="last_used">最近使用</option>
         </select>
 		<button class="accounts-sort-direction" type="button" :disabled="sortBy === 'custom'" :title="`当前${accountSortDirectionLabel}，点击切换`" @click="toggleSortDirection">{{ sortDirection === 'asc' ? '↑' : '↓' }} {{ accountSortDirectionLabel }}</button>
-        <div class="accounts-view-toggle" role="group" aria-label="账号展示方式">
+        <div v-if="theme.interfaceTheme === 'classic'" class="accounts-view-toggle" role="group" aria-label="账号展示方式">
           <button type="button" :class="{ 'is-active': accountView === 'table' }" @click="updateAccountView('table')">列表</button>
           <button type="button" :class="{ 'is-active': accountView === 'cards' }" @click="updateAccountView('cards')">卡片</button>
         </div>
@@ -1011,7 +1013,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 
     <div v-if="manualOrderEnabled" class="account-order-hint">拖拽可调整当前页账号的展示顺序；保存时会在全量账号中原子更新。该顺序仅用于控制台，不会影响接口请求的调度优先级。</div>
 
-    <div v-if="accountView === 'cards'" class="account-card-grid">
+    <div v-if="theme.interfaceTheme === 'control' || accountView === 'cards'" class="account-card-grid signal-account-stream">
       <article
         v-for="a in sortedAccounts"
         :key="a.id"

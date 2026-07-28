@@ -4,7 +4,9 @@ import { api, withToast } from '../../api/client'
 import type { Group } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import AppModal from '../../components/AppModal.vue'
+import { useTheme } from '../../stores/theme'
 
+const theme = useTheme()
 const groups = ref<Group[]>([])
 const showForm = ref(false)
 const editing = ref<Group | null>(null)
@@ -209,7 +211,49 @@ async function togglePublic(g: Group) {
       <button class="btn-primary" @click="openCreate">新建分组</button>
     </div>
 
-    <div class="card overflow-x-auto">
+    <section v-if="theme.interfaceTheme === 'control'" class="signal-group-board">
+      <article v-for="g in groups" :key="g.id" class="signal-group-row">
+        <header>
+          <span :class="g.status === 'active' ? 'is-online' : 'is-offline'"></span>
+          <div>
+            <strong>{{ g.name }}</strong>
+            <small>{{ g.description || '未填写说明' }}</small>
+          </div>
+          <b>{{ PLATFORM_LABELS[g.platform] }}</b>
+        </header>
+        <dl>
+          <div>
+            <dt>可用账号</dt>
+            <dd><strong :class="(g.account_alive ?? 0) > 0 ? 'text-signal-green' : 'text-signal-red'">{{ g.account_alive ?? 0 }}</strong><span>/ {{ g.account_total ?? 0 }}</span></dd>
+          </div>
+          <div>
+            <dt>基础倍率</dt>
+            <dd class="num">×{{ g.rate_multiplier }}</dd>
+          </div>
+          <div>
+            <dt>缓存倍率</dt>
+            <dd class="num">命中 {{ g.cache_read_multiplier || 1 }} · 写入 {{ g.cache_write_5m_multiplier || 1 }}/{{ g.cache_write_1h_multiplier || 1 }}</dd>
+          </div>
+          <div v-if="g.platform === 'openai' || g.platform === 'grok'">
+            <dt>思考强度</dt>
+            <dd>{{ g.max_reasoning_effort && g.max_reasoning_effort !== 'auto' ? g.max_reasoning_effort : '不限制' }}</dd>
+          </div>
+        </dl>
+        <footer>
+          <button type="button" class="signal-group-state" :class="{ 'is-active': g.is_public }" @click="togglePublic(g)">
+            {{ g.is_public ? '公开路由' : '私有路由' }}
+          </button>
+          <span :class="g.status === 'active' ? 'tag-green' : 'tag-red'">{{ g.status === 'active' ? '运行中' : '已停用' }}</span>
+          <div>
+            <button class="btn-ghost" @click="openEdit(g)">配置</button>
+            <button class="btn-danger" :disabled="deletingID !== null" @click="remove(g)">{{ deletingID === g.id ? '处理中…' : '删除' }}</button>
+          </div>
+        </footer>
+      </article>
+      <div v-if="!groups.length" class="signal-group-empty">暂无分组</div>
+    </section>
+
+    <div v-else class="card overflow-x-auto">
       <table v-responsive-table class="table-base">
         <thead>
           <tr>

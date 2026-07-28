@@ -9,8 +9,10 @@ import BrandMark from '../components/BrandMark.vue'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import InterfaceThemeSwitcher from '../components/InterfaceThemeSwitcher.vue'
+import { useTheme } from '../stores/theme'
 
 const auth = useAuth()
+const theme = useTheme()
 const toast = useToast()
 const router = useRouter()
 
@@ -204,6 +206,7 @@ async function submit() {
 
 <template>
   <div class="login-shell">
+    <aside v-if="theme.interfaceTheme === 'control'" class="signal-login-field" aria-hidden="true"></aside>
     <main class="login-frame login-frame--simple">
       <section class="login-panel" aria-labelledby="login-title">
         <div class="login-brand-lockup" :aria-label="auth.siteName">

@@ -7,12 +7,14 @@ import { formatMoney, PLATFORM_LABELS } from '../api/types'
 import { normalizeReasoningEffort, REASONING_OPTIONS } from '../api/reasoning'
 import { useToast } from '../stores/toast'
 import { useAuth } from '../stores/auth'
+import { useTheme } from '../stores/theme'
 import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
 import KeyRouteSelector from '../components/KeyRouteSelector.vue'
 import AppModal from '../components/AppModal.vue'
 
 const toast = useToast()
 const auth = useAuth()
+const theme = useTheme()
 const keyMultiGroupEnabled = computed(() => auth.keyMultiGroupEnabled)
 const isAdmin = computed(() => auth.user?.role === 'admin')
 const customEndpoints = computed(() => auth.siteCustomization.custom_endpoints || [])
@@ -478,7 +480,56 @@ function onSetupSecretSaved(value: string) {
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
 
-    <div class="card key-list-card">
+    <section v-if="theme.interfaceTheme === 'control'" class="signal-key-board">
+      <article v-for="k in keys" :key="k.id" class="signal-key-unit">
+        <header>
+          <div>
+            <small>KEY-{{ k.id }}</small>
+            <strong :title="k.name">{{ k.name }}</strong>
+          </div>
+          <span class="key-status-tag" :class="k.status === 'active' ? 'is-active' : 'is-disabled'">
+            {{ k.status === 'active' ? '活跃' : '停用' }}
+          </span>
+        </header>
+        <div class="signal-key-route">
+          <span>路由目标</span>
+          <KeyRouteSelector
+            :api-key="k"
+            :groups="groups"
+            :multi-group-enabled="keyMultiGroupEnabled"
+            :admin="isAdmin"
+            @updated="replaceKeyRoute"
+          />
+        </div>
+        <div class="signal-key-secret">
+          <span>访问密钥</span>
+          <div class="key-secret-cell">
+            <code class="num" :class="{ 'is-revealed': revealedKeyIDs.has(k.id) && plainForKey(k) }">{{ revealedKeyIDs.has(k.id) && plainForKey(k) ? plainForKey(k) : k.key_preview }}</code>
+            <i class="key-secret-state" :class="k.secret_available ? 'is-saved' : 'is-missing'" :title="k.secret_available ? '密钥已加密保存到账号' : '需要补入一次原密钥'"></i>
+            <button type="button" class="key-icon-button" :title="k.secret_available ? '复制完整密钥' : '补入原密钥'" @click="copyKey(k)">
+              <svg v-if="copiedKeyID !== k.id" viewBox="0 0 20 20" aria-hidden="true"><rect x="6.5" y="6.5" width="9" height="9" rx="1.5"/><path d="M4.5 13.5h-1v-10h10v1"/></svg><span v-else>✓</span>
+            </button>
+          </div>
+        </div>
+        <dl>
+          <div><dt>有效期</dt><dd>{{ k.expires_at ? new Date(k.expires_at).toLocaleString('zh-CN', { hour12: false }) : '永久有效' }}</dd></div>
+          <div><dt>最后使用</dt><dd>{{ k.last_used_at ? new Date(k.last_used_at).toLocaleString('zh-CN', { hour12: false }) : '尚未使用' }}</dd></div>
+          <div><dt>今日</dt><dd class="num">{{ formatMoney(k.usage_today_micro || 0) }}</dd></div>
+          <div><dt>近 30 天</dt><dd class="num">{{ formatMoney(k.usage_30d_micro || 0) }}</dd></div>
+        </dl>
+        <footer>
+          <button type="button" class="btn-ghost" @click="openSettings(k)">配置</button>
+          <button type="button" class="btn-ghost is-warning" @click="toggleKey(k)">{{ k.status === 'active' ? '停用' : '启用' }}</button>
+          <button type="button" class="btn-ghost is-primary" @click="openQuickSetup(k)">快速使用</button>
+          <button v-if="allowCCSwitch" type="button" class="btn-ghost is-ccs" :disabled="secretLoadingIDs.has(k.id)" @click="importCCSwitch(k)">导入 CCS</button>
+          <button type="button" class="btn-ghost is-primary" :disabled="secretLoadingIDs.has(k.id)" @click="toggleKeyReveal(k)">{{ secretLoadingIDs.has(k.id) ? '读取中…' : (revealedKeyIDs.has(k.id) ? '隐藏' : '查看') }}</button>
+          <button type="button" class="btn-danger" @click="removeKey(k)">删除</button>
+        </footer>
+      </article>
+      <div v-if="!keys.length" class="signal-key-empty">还没有密钥</div>
+    </section>
+
+    <div v-else class="card key-list-card">
       <table v-responsive-table class="table-base key-table">
         <colgroup>
           <col class="key-col-name" />
