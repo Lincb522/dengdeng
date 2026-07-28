@@ -308,7 +308,7 @@ func mountFrontend(r *gin.Engine) {
 		// Unknown API paths must never fall through to index.html with HTTP
 		// 200. SDKs otherwise report a misleading "empty or malformed
 		// response" instead of the actionable endpoint error.
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/") ||
+		if isPublicAPIPath(c.Request.URL.Path) ||
 			strings.HasPrefix(c.Request.URL.Path, "/v1beta/") ||
 			strings.HasPrefix(c.Request.URL.Path, "/api/") {
 			c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"message": "API endpoint not found"}})
@@ -325,4 +325,22 @@ func mountFrontend(r *gin.Engine) {
 		c.Request.URL.Path = "/"
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
+}
+
+func isPublicAPIPath(path string) bool {
+	if strings.HasPrefix(path, "/v1/") {
+		return true
+	}
+	for _, prefix := range []string{
+		"/chat/",
+		"/messages",
+		"/responses",
+		"/images/",
+	} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return path == "/models" || strings.HasPrefix(path, "/models/") ||
+		path == "/usage" || strings.HasPrefix(path, "/usage/")
 }

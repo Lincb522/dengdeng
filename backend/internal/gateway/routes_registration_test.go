@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestRegisterIncludesLegacyAnthropicDoubleV1Routes(t *testing.T) {
+func TestRegisterIncludesCompatiblePublicRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	(&Gateway{}).Register(router)
@@ -14,6 +14,18 @@ func TestRegisterIncludesLegacyAnthropicDoubleV1Routes(t *testing.T) {
 	want := map[string]bool{
 		"POST /v1/v1/messages":              false,
 		"POST /v1/v1/messages/count_tokens": false,
+		"POST /messages":                    false,
+		"POST /messages/count_tokens":       false,
+		"POST /chat/completions":            false,
+		"POST /responses":                   false,
+		"POST /responses/compact":           false,
+		"POST /responses/input_tokens":      false,
+		"POST /images/generations":          false,
+		"POST /images/generations/async":    false,
+		"GET /images/tasks/:task_id":        false,
+		"POST /images/edits":                false,
+		"GET /models":                       false,
+		"GET /usage":                        false,
 		"POST /v1/responses/compact":        false,
 		"POST /v1/responses/input_tokens":   false,
 		"GET /backend-api/codex/models":     false,

@@ -25,6 +25,10 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// Anthropic Messages API
 	r.POST("/v1/messages", g.handleAnthropicMessages)
 	r.POST("/v1/messages/count_tokens", g.handleAnthropicCountTokens)
+	// Some clients treat the configured URL as the complete API prefix and
+	// append only /messages. Accept a bare-domain base URL as well.
+	r.POST("/messages", g.handleAnthropicMessages)
+	r.POST("/messages/count_tokens", g.handleAnthropicCountTokens)
 	// Older quick-setup snippets and some desktop clients accept a provider
 	// URL ending in /v1, then append /v1/messages themselves. Keep these
 	// aliases so that configuration mistake returns a real API response
@@ -37,11 +41,19 @@ func (g *Gateway) Register(r *gin.Engine) {
 	r.POST("/v1/responses", g.handleOpenAIResponses)
 	r.POST("/v1/responses/compact", g.handleOpenAIResponsesCompact)
 	r.POST("/v1/responses/input_tokens", g.handleOpenAIInputTokens)
+	r.POST("/chat/completions", g.handleOpenAIChat)
+	r.POST("/responses", g.handleOpenAIResponses)
+	r.POST("/responses/compact", g.handleOpenAIResponsesCompact)
+	r.POST("/responses/input_tokens", g.handleOpenAIInputTokens)
 	r.GET("/backend-api/codex/models", g.handleCodexModelsManifest)
 	r.POST("/v1/images/generations", g.handleOpenAIImageGeneration)
 	r.POST("/v1/images/generations/async", g.handleOpenAIImageGenerationAsync)
 	r.GET("/v1/images/tasks/:task_id", g.handleOpenAIImageTask)
 	r.POST("/v1/images/edits", g.handleOpenAIImageEdit)
+	r.POST("/images/generations", g.handleOpenAIImageGeneration)
+	r.POST("/images/generations/async", g.handleOpenAIImageGenerationAsync)
+	r.GET("/images/tasks/:task_id", g.handleOpenAIImageTask)
+	r.POST("/images/edits", g.handleOpenAIImageEdit)
 
 	// Gemini (native v1beta path style)
 	r.POST("/v1beta/models/*action", g.handleGemini)
@@ -50,9 +62,11 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// generation request, discovering models must not depend on an account being
 	// online (otherwise a fresh group can never be configured through an SDK).
 	r.GET("/v1/models", g.handleListModels)
+	r.GET("/models", g.handleListModels)
 	// CCSwitch and similar desktop clients use this authenticated endpoint to
 	// display the key's remaining balance and configured caps.
 	r.GET("/v1/usage", g.handleUsage)
+	r.GET("/usage", g.handleUsage)
 }
 
 func (g *Gateway) handleOpenAIImageGenerationAsync(c *gin.Context) {

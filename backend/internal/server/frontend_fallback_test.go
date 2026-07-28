@@ -27,3 +27,21 @@ func TestFrontendFallbackRejectsUnknownAPIPathAsJSON(t *testing.T) {
 		t.Fatalf("body = %q", recorder.Body.String())
 	}
 }
+
+func TestFrontendFallbackRejectsUnknownUnversionedAPIPathAsJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	mountFrontend(router)
+
+	for _, path := range []string{"/chat/not-a-real-endpoint", "/responses/unknown", "/messages/unknown"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
+
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusNotFound)
+		}
+		if contentType := recorder.Header().Get("Content-Type"); !strings.Contains(contentType, "application/json") {
+			t.Fatalf("%s content type = %q", path, contentType)
+		}
+	}
+}
