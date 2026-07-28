@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, setToken } from '../api/client'
 import { isAppError } from '../api/errors'
@@ -9,10 +9,8 @@ import BrandMark from '../components/BrandMark.vue'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import InterfaceThemeSwitcher from '../components/InterfaceThemeSwitcher.vue'
-import { useTheme } from '../stores/theme'
 
 const auth = useAuth()
-const theme = useTheme()
 const toast = useToast()
 const router = useRouter()
 
@@ -29,6 +27,8 @@ const resendAfter = ref(0)
 const passwordVisible = ref(false)
 const acceptedAgreement = ref(false)
 const agreementVisible = ref(false)
+const agreementDocumentID = ref('')
+const agreementCloseButton = ref<HTMLButtonElement | null>(null)
 const turnstileToken = ref('')
 const turnstileNonce = ref(0)
 const pendingOAuthCode = ref(new URLSearchParams(window.location.search).get('oauth_code') || '')
@@ -38,14 +38,42 @@ const agreement = computed(() => auth.loginAgreement)
 const agreementRequired = computed(() => agreement.value.enabled && agreement.value.documents.length > 0)
 const canContinue = computed(() => !agreementRequired.value || acceptedAgreement.value)
 const turnstileReady = computed(() => !auth.security.turnstile_enabled || !!turnstileToken.value)
+const activeAgreementDocument = computed(() => agreement.value.documents.find((item) => item.id === agreementDocumentID.value) || agreement.value.documents[0])
+type AgreementBlock = { kind: 'heading' | 'paragraph'; text: string }
+const activeAgreementBlocks = computed<AgreementBlock[]>(() => {
+  const content = activeAgreementDocument.value?.content_md || ''
+  const blocks = content
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map((raw) => {
+      const lines = raw.split('\n').map((line) => line.replace(/^\s*#{1,6}\s*/, '').trimEnd())
+      const text = lines.join('\n').trim()
+      const markdownHeading = /^\s*#{1,6}\s+/.test(raw)
+      const plainHeading = !text.includes('\n') && /^(特别提示|重要提示|附则|[一二三四五六七八九十百]+、)/.test(text)
+      return text ? { kind: markdownHeading || plainHeading ? 'heading' as const : 'paragraph' as const, text } : null
+    })
+    .filter((block): block is AgreementBlock => block !== null)
+
+  if (blocks[0]?.kind === 'heading' && activeAgreementDocument.value && blocks[0].text.includes(activeAgreementDocument.value.title)) {
+    blocks.shift()
+  }
+  return blocks
+})
 
 watch(
   () => agreement.value.revision,
   () => {
     acceptedAgreement.value = false
+    agreementDocumentID.value = agreement.value.documents[0]?.id || ''
     if (agreementRequired.value && agreement.value.mode === 'modal') agreementVisible.value = true
   },
 )
+watch(agreementVisible, async (visible) => {
+  if (!visible) return
+  if (!agreementDocumentID.value) agreementDocumentID.value = agreement.value.documents[0]?.id || ''
+  await nextTick()
+  agreementCloseButton.value?.focus()
+})
 
 function beginCooldown(seconds: number) {
   resendAfter.value = seconds
@@ -74,6 +102,10 @@ function acceptAgreement() {
 function rejectAgreement() {
   acceptedAgreement.value = false
   agreementVisible.value = false
+}
+
+function handleAgreementKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && agreementVisible.value) rejectAgreement()
 }
 
 async function sendVerificationCode() {
@@ -116,6 +148,7 @@ async function sendResetCode() {
 }
 
 onMounted(async () => {
+  window.addEventListener('keydown', handleAgreementKeydown)
   await auth.loadPublicSettings()
 	const oauthError = new URLSearchParams(window.location.search).get('oauth_error')
 	if (oauthError) toast.show(oauthError, 'error')
@@ -155,6 +188,7 @@ async function completeOAuth() {
 
 onBeforeUnmount(() => {
   if (cooldownTimer) window.clearInterval(cooldownTimer)
+  window.removeEventListener('keydown', handleAgreementKeydown)
 })
 
 async function submit() {
@@ -206,10 +240,26 @@ async function submit() {
 
 <template>
   <div class="login-shell">
-    <aside v-if="theme.interfaceTheme === 'control'" class="signal-login-field" aria-hidden="true"></aside>
     <main class="login-frame login-frame--simple">
+      <aside class="login-visual">
+        <div class="login-visual-brand">
+          <BrandMark :size="54" />
+          <div><strong>{{ auth.siteName }}</strong><span>蹬蹬ai</span></div>
+        </div>
+        <div class="login-visual-stage" aria-hidden="true">
+          <span class="login-visual-node is-openai">OpenAI</span>
+          <span class="login-visual-node is-claude">Claude</span>
+          <span class="login-visual-node is-gemini">Gemini</span>
+          <span class="login-visual-node is-image">Image</span>
+          <span class="login-visual-route is-route-a"></span>
+          <span class="login-visual-route is-route-b"></span>
+          <span class="login-visual-center"><BrandMark :size="40" /></span>
+        </div>
+        <p class="login-visual-foot">API · CLI · IMAGE</p>
+      </aside>
+
       <section class="login-panel" aria-labelledby="login-title">
-        <div class="login-brand-lockup" :aria-label="auth.siteName">
+        <div class="login-brand-lockup login-brand-lockup--mobile" :aria-label="auth.siteName">
           <BrandMark :size="42" />
           <div>
             <strong>{{ auth.siteName }}</strong>
@@ -229,6 +279,7 @@ async function submit() {
 		<div v-if="auth.oauthProviders.length && mode === 'login'" class="login-oauth-grid">
 			<button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">{{ provider.name }}</button>
 		</div>
+        <div v-if="auth.oauthProviders.length && mode === 'login'" class="login-divider"><span>或使用邮箱</span></div>
 
         <form class="login-form" @submit.prevent="submit">
           <div class="login-field">
@@ -257,8 +308,8 @@ async function submit() {
           </div>
 
 					<div v-if="mode === 'login'" class="login-field">
-						<label for="totp-code">验证器验证码（已开启时填写）</label>
-						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
+						<label for="totp-code">验证器验证码</label>
+						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="未开启时留空" />
 					</div>
 			<button v-if="pendingOAuthCode" type="button" class="login-submit" :disabled="busy" @click="completeOAuth">完成第三方登录</button>
 
@@ -297,25 +348,50 @@ async function submit() {
 	<InterfaceThemeSwitcher class="interface-theme-switcher-float" />
 
     <Teleport to="body">
-      <div v-if="agreementVisible && agreementRequired" class="agreement-backdrop" role="presentation">
+      <div v-if="agreementVisible && agreementRequired" class="agreement-backdrop" role="presentation" @click.self="rejectAgreement">
         <section class="agreement-dialog" role="dialog" aria-modal="true" aria-labelledby="agreement-title">
           <header class="agreement-dialog__head">
-            <div class="agreement-dialog__seal" aria-hidden="true">✓</div>
-            <div>
-              <h2 id="agreement-title">使用前请确认</h2>
-              <p v-if="agreement.updated_at">条款更新于 {{ agreement.updated_at }}</p>
-              <p v-else>请阅读以下协议后继续</p>
+            <div class="agreement-dialog__brand">
+              <BrandMark :size="32" />
+              <div>
+                <h2 id="agreement-title">服务协议</h2>
+                <p>{{ agreement.updated_at ? `更新日期 ${agreement.updated_at}` : '请阅读后继续' }}</p>
+              </div>
             </div>
+            <button ref="agreementCloseButton" type="button" class="agreement-dialog__close" aria-label="关闭协议" @click="rejectAgreement">×</button>
           </header>
-          <div class="agreement-dialog__body">
-            <p class="agreement-dialog__intro">继续登录或注册，即表示你已了解服务边界与使用责任。</p>
-            <RouterLink v-for="doc in agreement.documents" :key="doc.id" :to="`/legal/${doc.id}`" target="_blank" rel="noopener" class="agreement-document-link">
-              <span>{{ doc.title }}</span><span aria-hidden="true">↗</span>
-            </RouterLink>
+          <div class="agreement-dialog__workspace">
+            <nav class="agreement-dialog__nav" aria-label="协议目录">
+              <button
+                v-for="doc in agreement.documents"
+                :key="doc.id"
+                type="button"
+                :class="{ 'is-active': activeAgreementDocument?.id === doc.id }"
+                :aria-current="activeAgreementDocument?.id === doc.id ? 'page' : undefined"
+                @click="agreementDocumentID = doc.id"
+              >
+                <span>{{ doc.title }}</span><i aria-hidden="true">›</i>
+              </button>
+            </nav>
+            <article v-if="activeAgreementDocument" class="agreement-dialog__document">
+              <header>
+                <h3>{{ activeAgreementDocument.title }}</h3>
+                <RouterLink :to="`/legal/${activeAgreementDocument.id}`" target="_blank" rel="noopener">独立打开 ↗</RouterLink>
+              </header>
+              <div class="agreement-dialog__content">
+                <template v-for="(block, index) in activeAgreementBlocks" :key="`${block.kind}-${index}`">
+                  <h4 v-if="block.kind === 'heading'">{{ block.text }}</h4>
+                  <p v-else>{{ block.text }}</p>
+                </template>
+              </div>
+            </article>
           </div>
           <footer class="agreement-dialog__actions">
-            <button type="button" class="agreement-reject" @click="rejectAgreement">暂不继续</button>
-            <button type="button" class="agreement-accept" @click="acceptAgreement">已阅读，同意继续</button>
+            <p>同意后可继续登录或注册。</p>
+            <div>
+              <button type="button" class="agreement-reject" @click="rejectAgreement">退出</button>
+              <button type="button" class="agreement-accept" @click="acceptAgreement">同意并继续</button>
+            </div>
           </footer>
         </section>
       </div>
