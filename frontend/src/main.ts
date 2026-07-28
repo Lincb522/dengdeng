@@ -7,7 +7,7 @@ import { reportClientError } from './api/errorReporting'
 import { useToast } from './stores/toast'
 import './style.css'
 import './styles/control-theme.css'
-import './styles/pastel-theme.css'
+import './styles/dashboard-editorial.css'
 
 const app = createApp(App)
 const pinia = createPinia()

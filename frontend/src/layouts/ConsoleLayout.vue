@@ -79,11 +79,6 @@ const terminalCommandGroups = computed(() => [
   { label: '账户工具', items: terminalUtilityNavigation.value },
   ...(isAdmin.value ? adminNavGroups : []),
 ])
-const pastelHeadline = computed(() => {
-  if (route.path === '/dashboard') return ['管理你的', 'API']
-  if (route.path === '/admin/overview') return ['掌握站点', '运行']
-  return [currentNavigation.value?.label || '工作区']
-})
 
 watch(
   () => route.fullPath,
@@ -225,7 +220,7 @@ function isActive(to: string) {
   </div>
 
   <div
-    v-else-if="theme.interfaceTheme === 'control'"
+    v-else
     class="app-shell control-app-shell"
     :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute, 'is-command-open': commandOpen }"
   >
@@ -351,158 +346,4 @@ function isActive(to: string) {
     </section>
   </div>
 
-  <div
-    v-else
-    class="app-shell pastel-app-shell"
-    :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute, 'is-menu-open': commandOpen }"
-  >
-    <section class="pastel-window">
-      <header class="pastel-window-bar">
-        <div class="pastel-window-lights" aria-hidden="true"><i></i><i></i><i></i></div>
-        <div class="pastel-window-route">
-          <BrandMark :size="16" />
-          <span>{{ currentNavigation?.label || auth.siteName }}</span>
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v9h14v-9a2 2 0 0 0-2-2Zm-7-2a2 2 0 0 1 4 0v2h-4V7Z" /></svg>
-        </div>
-        <div class="pastel-window-actions">
-          <ThemeToggle />
-          <InterfaceThemeSwitcher />
-          <button type="button" aria-label="退出登录" title="退出登录" @click="auth.logout()">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg>
-          </button>
-        </div>
-      </header>
-
-      <div class="pastel-layout">
-        <aside class="pastel-rail" aria-label="快捷导航">
-          <RouterLink to="/dashboard" class="pastel-rail-brand" aria-label="返回总览">
-            <BrandMark :size="30" />
-          </RouterLink>
-          <nav>
-            <RouterLink
-              v-for="item in terminalPrimaryNavigation"
-              :key="item.to"
-              :to="item.to"
-              :class="{ 'is-active': isActive(item.to) }"
-              :aria-label="item.label"
-              :title="item.label"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>
-              <span>{{ item.label }}</span>
-            </RouterLink>
-          </nav>
-          <div class="pastel-rail-bottom">
-            <button
-              type="button"
-              class="pastel-rail-menu"
-              :class="{ 'is-active': commandOpen }"
-              :aria-expanded="commandOpen"
-              aria-controls="pastel-menu"
-              :aria-label="commandOpen ? '关闭全部功能' : '打开全部功能'"
-              @click="commandOpen = !commandOpen"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z" /></svg>
-              <span>全部</span>
-            </button>
-            <RouterLink to="/profile" class="pastel-rail-avatar" aria-label="账户设置">
-              <BrandMark :size="24" />
-            </RouterLink>
-          </div>
-        </aside>
-
-        <main class="pastel-main">
-          <header class="pastel-hero">
-            <h1>
-              <span v-for="line in pastelHeadline" :key="line">{{ line }}</span>
-            </h1>
-            <nav class="pastel-categories" aria-label="常用功能">
-              <RouterLink
-                v-for="item in terminalPrimaryNavigation"
-                :key="item.to"
-                :to="item.to"
-                :class="{ 'is-active': isActive(item.to) }"
-              >
-                <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg></span>
-                {{ item.label }}
-              </RouterLink>
-            </nav>
-          </header>
-
-          <section class="pastel-workspace workspace-main">
-            <RouterView v-slot="{ Component }">
-              <Transition name="pastel-page" mode="out-in">
-                <component :is="Component" />
-              </Transition>
-            </RouterView>
-          </section>
-        </main>
-
-        <aside class="pastel-profile">
-          <header class="pastel-profile-tools">
-            <span title="服务正常"><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22a2.6 2.6 0 0 0 2.45-1.75h-4.9A2.6 2.6 0 0 0 12 22ZM20 17l-2-3v-4a6 6 0 0 0-5-5.92V2h-2v2.08A6 6 0 0 0 6 10v4l-2 3v1h16v-1Z" /></svg></span>
-            <RouterLink to="/profile" aria-label="账户设置">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65-2-3.46-2.49 1a7.3 7.3 0 0 0-1.69-.98L15 3.28h-4l-.37 2.65c-.61.24-1.17.57-1.69.98l-2.49-1-2 3.46 2.11 1.65c-.04.32-.07.65-.07.98s.02.66.07.98l-2.11 1.65 2 3.46 2.49-1c.52.41 1.08.74 1.69.98L11 20.72h4l.37-2.65c.61-.24 1.17-.57 1.69-.98l2.49 1 2-3.46-2.11-1.65zM13 16.5a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z" /></svg>
-            </RouterLink>
-          </header>
-          <div class="pastel-profile-person">
-            <span><BrandMark :size="34" /></span>
-            <strong :title="auth.user?.email">{{ auth.user?.email }}</strong>
-            <small>{{ isAdmin ? '管理员账户' : '个人账户' }}</small>
-          </div>
-          <RouterLink to="/wallet" class="pastel-balance-pill">
-            <span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 7H5a1 1 0 0 1 0-2h14V3H5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1zm-4 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z" /></svg></span>
-            <small>可用余额</small>
-            <strong class="num">{{ balance }}</strong>
-            <b>›</b>
-          </RouterLink>
-          <section class="pastel-activity">
-            <header><span>运行状态</span><strong><i></i>在线</strong></header>
-            <div class="pastel-activity-bars" aria-hidden="true">
-              <i v-for="height in [54, 68, 46, 74, 38, 48, 82]" :key="height" :style="{ '--bar-height': `${height}%` }"></i>
-            </div>
-            <footer><span>服务</span><span>现在</span></footer>
-          </section>
-          <section class="pastel-profile-links">
-            <p>常用功能</p>
-            <RouterLink to="/keys" class="is-rose">
-              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="userNav[3].icon" /></svg></span>
-              <strong>API 密钥</strong><small>创建与配置</small><b>›</b>
-            </RouterLink>
-            <RouterLink to="/models" class="is-apricot">
-              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="userNav[2].icon" /></svg></span>
-              <strong>模型广场</strong><small>能力与价格</small><b>›</b>
-            </RouterLink>
-            <RouterLink v-if="isAdmin" to="/admin/monitoring" class="is-mint">
-              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="adminNav[1].icon" /></svg></span>
-              <strong>运行监控</strong><small>请求与服务</small><b>›</b>
-            </RouterLink>
-          </section>
-        </aside>
-      </div>
-    </section>
-
-    <Transition name="pastel-menu">
-      <aside v-if="commandOpen" id="pastel-menu" class="pastel-menu-panel">
-        <header>
-          <div><BrandMark :size="30" /><strong>全部功能</strong></div>
-          <button type="button" aria-label="关闭全部功能" @click="commandOpen = false">×</button>
-        </header>
-        <nav>
-          <section v-for="group in terminalCommandGroups" :key="group.label">
-            <p>{{ group.label }}</p>
-            <RouterLink
-              v-for="item in group.items"
-              :key="item.to"
-              :to="item.to"
-              :class="{ 'is-active': isActive(item.to) }"
-            >
-              <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg></span>
-              <strong>{{ item.label }}</strong>
-            </RouterLink>
-          </section>
-        </nav>
-      </aside>
-    </Transition>
-    <div v-if="commandOpen" class="pastel-menu-backdrop" aria-hidden="true" @click="commandOpen = false"></div>
-  </div>
 </template>
