@@ -1163,7 +1163,11 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 		}
 	}
 
-	upReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, base+req.Path, bytes.NewReader(outboundBody))
+	target, err := util.JoinUpstreamURL(base, req.Path)
+	if err != nil {
+		return nil, err
+	}
+	upReq, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, target, bytes.NewReader(outboundBody))
 	if err != nil {
 		return nil, err
 	}

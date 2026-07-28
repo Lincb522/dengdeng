@@ -1384,6 +1384,17 @@ func trimOptionalString(value *string) string {
 	return strings.TrimSpace(*value)
 }
 
+func normalizeUpstreamAccountBaseURL(raw, authType string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if authType != model.AuthAPIKey {
+		return strings.TrimRight(raw, "/"), nil
+	}
+	return util.NormalizeUpstreamBaseURL(raw)
+}
+
 func (h *AdminHandler) resolveAccountGroups(ids []int64, platform string) ([]model.Group, error) {
 	if len(ids) == 0 || len(ids) > maxUpstreamAccountGroups {
 		return nil, fmt.Errorf("select between 1 and %d groups", maxUpstreamAccountGroups)
@@ -1510,11 +1521,16 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	baseURL, err := normalizeUpstreamAccountBaseURL(trimOptionalString(req.BaseURL), authType)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	acc := model.UpstreamAccount{
 		GroupID: groups[0].ID, ProxyID: proxyID, Name: req.Name, Platform: groups[0].Platform,
-		BaseURL: trimOptionalString(req.BaseURL), QuotaURL: trimOptionalString(req.QuotaURL), AuthType: authType,
+		BaseURL: baseURL, QuotaURL: trimOptionalString(req.QuotaURL), AuthType: authType,
 		APIKey:       crypto.EncryptedString(req.APIKey),
 		AccessToken:  crypto.EncryptedString(req.AccessToken),
 		RefreshToken: crypto.EncryptedString(req.RefreshToken),
@@ -1580,7 +1596,16 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 	}
 	updates := map[string]any{}
 	if req.BaseURL != nil {
-		updates["base_url"] = trimOptionalString(req.BaseURL)
+		authType := acc.AuthType
+		if req.AuthType != "" {
+			authType = req.AuthType
+		}
+		baseURL, err := normalizeUpstreamAccountBaseURL(trimOptionalString(req.BaseURL), authType)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["base_url"] = baseURL
 	}
 	if req.QuotaURL != nil {
 		updates["quota_url"] = trimOptionalString(req.QuotaURL)
@@ -1728,6 +1753,11 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 			skipped = append(skipped, gin.H{"name": p.Name, "reason": "missing access/refresh token"})
 			continue
 		}
+		baseURL, normalizeErr := normalizeUpstreamAccountBaseURL(firstNonEmpty(p.BaseURL, req.BaseURL), p.AuthType)
+		if normalizeErr != nil {
+			skipped = append(skipped, gin.H{"name": p.Name, "reason": normalizeErr.Error()})
+			continue
+		}
 		if p.AuthType == model.AuthAgentIdentity {
 			record := service.AgentIdentityRecord{
 				AgentRuntimeID:          stringMapValue(p.Extra, "agent_runtime_id"),
@@ -1779,7 +1809,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 					"cooldown_until": nil,
 					"last_error":     "",
 				}
-				if baseURL := firstNonEmpty(p.BaseURL, req.BaseURL); baseURL != "" {
+				if baseURL != "" {
 					updates["base_url"] = baseURL
 				}
 				if req.ProxyID > 0 || existing.ProxyID != 0 {
@@ -1838,7 +1868,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 				if p.ExpiresAt != nil {
 					updates["expires_at"] = p.ExpiresAt
 				}
-				if baseURL := firstNonEmpty(p.BaseURL, req.BaseURL); baseURL != "" {
+				if baseURL != "" {
 					updates["base_url"] = baseURL
 				}
 				if req.ProxyID > 0 || existing.ProxyID != 0 {
@@ -1871,7 +1901,7 @@ func (h *AdminHandler) ImportAccounts(c *gin.Context) {
 		acc := model.UpstreamAccount{
 			GroupID: group.ID, ProxyID: req.ProxyID, Name: p.Name, Platform: group.Platform,
 			AuthType:     p.AuthType,
-			BaseURL:      firstNonEmpty(p.BaseURL, req.BaseURL),
+			BaseURL:      baseURL,
 			APIKey:       crypto.EncryptedString(p.APIKey),
 			AccessToken:  crypto.EncryptedString(p.AccessToken),
 			RefreshToken: crypto.EncryptedString(p.RefreshToken),

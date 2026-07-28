@@ -13,6 +13,7 @@ import (
 	"dengdeng/internal/config"
 	"dengdeng/internal/model"
 	"dengdeng/internal/oauth"
+	"dengdeng/internal/util"
 
 	"gorm.io/gorm"
 )
@@ -286,17 +287,6 @@ func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 		}
 		return parsed.Scheme + "://" + parsed.Host + "/", nil
 	}
-	if account.Platform == model.PlatformGrok {
-		// The relay path carries /v1, so drop a trailing /v1 an operator may
-		// have entered as part of the xAI base URL.
-		base = strings.TrimSuffix(base, "/v1")
-	} else if account.Platform == model.PlatformGemini {
-		base = strings.TrimSuffix(base, "/v1beta")
-	} else {
-		// Accept both host-style and SDK-style Base URLs. The probe appends its
-		// own versioned path and must not accidentally request /v1/v1/models.
-		base = strings.TrimSuffix(base, "/v1")
-	}
 	if base == "" {
 		switch account.Platform {
 		case model.PlatformAnthropic:
@@ -312,9 +302,9 @@ func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 		}
 	}
 	if account.Platform == model.PlatformGemini {
-		return base + "/v1beta/models", nil
+		return util.JoinUpstreamURL(base, "/v1beta/models")
 	}
-	return base + "/v1/models", nil
+	return util.JoinUpstreamURL(base, "/v1/models")
 }
 
 func applyProbeCredential(req *http.Request, account *model.UpstreamAccount) {

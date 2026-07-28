@@ -18,6 +18,7 @@ import (
 	"dengdeng/internal/config"
 	"dengdeng/internal/model"
 	"dengdeng/internal/oauth"
+	"dengdeng/internal/util"
 
 	"gorm.io/gorm"
 )
@@ -396,7 +397,7 @@ func apiKeyQuotaBase(account *model.UpstreamAccount) (string, bool, error) {
 	if account == nil {
 		return "", false, fmt.Errorf("invalid account")
 	}
-	base := strings.TrimRight(strings.TrimSpace(account.BaseURL), "/")
+	base := strings.TrimSpace(account.BaseURL)
 	if base == "" {
 		switch account.Platform {
 		case model.PlatformOpenAI:
@@ -410,6 +411,11 @@ func apiKeyQuotaBase(account *model.UpstreamAccount) (string, bool, error) {
 		default:
 			return "", false, fmt.Errorf("unsupported platform")
 		}
+	}
+	var err error
+	base, err = util.NormalizeUpstreamBaseURL(base)
+	if err != nil {
+		return "", false, err
 	}
 	base = strings.TrimSuffix(base, "/v1beta")
 	base = strings.TrimSuffix(base, "/v1")

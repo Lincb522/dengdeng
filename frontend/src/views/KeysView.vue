@@ -504,7 +504,7 @@ function onSetupSecretSaved(value: string) {
         </thead>
         <tbody>
           <tr v-for="k in keys" :key="k.id">
-            <td><div class="key-name-cell"><strong>{{ k.name }}</strong><small>KEY-{{ k.id }}</small></div></td>
+            <td><div class="key-name-cell"><strong :title="k.name">{{ k.name }}</strong><small>KEY-{{ k.id }}</small></div></td>
             <td>
 				<KeyRouteSelector
 					:api-key="k"

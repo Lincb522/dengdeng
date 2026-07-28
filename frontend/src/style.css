@@ -2178,20 +2178,24 @@ body.has-app-modal { overflow: hidden; }
   .model-card-action:hover span { transform: translateX(3px); }
   .key-list-card { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
   .key-table { width: 100%; min-width: 86rem; table-layout: fixed; }
-  .key-table .key-col-name { width: 7%; }
+  .key-table .key-col-name { width: 13%; }
   .key-table .key-col-route { width: 17%; }
-  .key-table .key-col-secret { width: 15%; }
+  .key-table .key-col-secret { width: 13%; }
   .key-table .key-col-status { width: 6%; }
-  .key-table .key-col-expires { width: 10%; }
-  .key-table .key-col-used { width: 11%; }
-  .key-table .key-col-usage { width: 10%; }
+  .key-table .key-col-expires { width: 9%; }
+  .key-table .key-col-used { width: 9%; }
+  .key-table .key-col-usage { width: 9%; }
   .key-table .key-col-actions { width: 24%; }
   .key-table th, .key-table td { vertical-align: middle; white-space: nowrap; }
   .key-table th:last-child,
   .key-table td:last-child { position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 0 var(--line); }
   .key-table th:last-child { z-index: 2; }
   .key-table td:last-child { z-index: 1; }
-  .key-name-cell { display: grid; gap: .2rem; }
+  .key-table td:first-child,
+  .key-table td:nth-child(2) { min-width: 0; overflow: hidden; }
+  .key-name-cell { display: grid; width: 100%; min-width: 0; gap: .2rem; }
+  .key-name-cell strong,
+  .key-name-cell small { display: block; min-width: 0; overflow: hidden; text-overflow: clip; white-space: nowrap; }
   .key-name-cell strong { color: var(--ink); font-size: .74rem; font-weight: 800; }
   .key-name-cell small { color: var(--ink-faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .57rem; }
 	.key-secret-cell { display: flex; min-width: 0; align-items: center; gap: .38rem; white-space: nowrap; }
