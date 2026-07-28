@@ -480,7 +480,7 @@ function onSetupSecretSaved(value: string) {
       <button class="btn-primary" @click="showCreate = true">新建密钥</button>
     </div>
 
-    <section v-if="theme.interfaceTheme === 'control'" class="signal-key-board">
+    <section v-if="theme.interfaceTheme !== 'classic'" class="signal-key-board">
       <article v-for="k in keys" :key="k.id" class="signal-key-unit">
         <header>
           <div>

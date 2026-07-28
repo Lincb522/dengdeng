@@ -211,7 +211,7 @@ async function togglePublic(g: Group) {
       <button class="btn-primary" @click="openCreate">新建分组</button>
     </div>
 
-    <section v-if="theme.interfaceTheme === 'control'" class="signal-group-board">
+    <section v-if="theme.interfaceTheme !== 'classic'" class="signal-group-board">
       <article v-for="g in groups" :key="g.id" class="signal-group-row">
         <header>
           <span :class="g.status === 'active' ? 'is-online' : 'is-offline'"></span>

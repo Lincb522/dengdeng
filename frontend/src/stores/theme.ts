@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 
 export type ColorMode = 'light' | 'dark' | 'system'
 export type ResolvedColorMode = Exclude<ColorMode, 'system'>
-export type InterfaceTheme = 'classic' | 'control'
+export type InterfaceTheme = 'classic' | 'control' | 'pastel'
 
 const legacyModeStorageKey = 'dengdeng.theme'
 const modeStorageKey = 'dengdeng.color-mode'
@@ -14,7 +14,7 @@ function isColorMode(value: string | null): value is ColorMode {
 }
 
 function isInterfaceTheme(value: string | null): value is InterfaceTheme {
-  return value === 'classic' || value === 'control'
+  return value === 'classic' || value === 'control' || value === 'pastel'
 }
 
 function readStorage(key: string) {
@@ -55,7 +55,9 @@ export const useTheme = defineStore('theme', () => {
     document.documentElement.style.colorScheme = nextMode
     const themeColor = interfaceTheme.value === 'control'
       ? nextMode === 'dark' ? '#060907' : '#f1f5f2'
-      : nextMode === 'dark' ? '#181613' : '#fffaf1'
+      : interfaceTheme.value === 'pastel'
+        ? nextMode === 'dark' ? '#171515' : '#bfeeda'
+        : nextMode === 'dark' ? '#181613' : '#fffaf1'
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
       ?.setAttribute('content', themeColor)
   }
@@ -74,7 +76,9 @@ export const useTheme = defineStore('theme', () => {
   }
 
   function toggleInterfaceTheme() {
-    setInterfaceTheme(interfaceTheme.value === 'classic' ? 'control' : 'classic')
+    const themes: InterfaceTheme[] = ['classic', 'control', 'pastel']
+    const current = themes.indexOf(interfaceTheme.value)
+    setInterfaceTheme(themes[(current + 1) % themes.length])
   }
 
   function handleSystemModeChange() {

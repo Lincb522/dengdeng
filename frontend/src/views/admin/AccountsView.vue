@@ -1013,7 +1013,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 
     <div v-if="manualOrderEnabled" class="account-order-hint">拖拽可调整当前页账号的展示顺序；保存时会在全量账号中原子更新。该顺序仅用于控制台，不会影响接口请求的调度优先级。</div>
 
-    <div v-if="theme.interfaceTheme === 'control' || accountView === 'cards'" class="account-card-grid signal-account-stream">
+    <div v-if="theme.interfaceTheme !== 'classic' || accountView === 'cards'" class="account-card-grid signal-account-stream">
       <article
         v-for="a in sortedAccounts"
         :key="a.id"
