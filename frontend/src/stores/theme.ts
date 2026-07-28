@@ -3,13 +3,18 @@ import { defineStore } from 'pinia'
 
 export type ColorMode = 'light' | 'dark' | 'system'
 export type ResolvedColorMode = Exclude<ColorMode, 'system'>
+export type InterfaceTheme = 'classic' | 'control'
 
 const legacyModeStorageKey = 'dengdeng.theme'
 const modeStorageKey = 'dengdeng.color-mode'
-const retiredPresetStorageKey = 'dengdeng.ui-theme'
+const interfaceThemeStorageKey = 'dengdeng.ui-theme'
 
 function isColorMode(value: string | null): value is ColorMode {
   return value === 'light' || value === 'dark' || value === 'system'
+}
+
+function isInterfaceTheme(value: string | null): value is InterfaceTheme {
+  return value === 'classic' || value === 'control'
 }
 
 function readStorage(key: string) {
@@ -28,16 +33,9 @@ function writeStorage(key: string, value: string) {
   }
 }
 
-function removeStorage(key: string) {
-  try {
-    localStorage.removeItem(key)
-  } catch {
-    // Storage can be unavailable in privacy-restricted browser contexts.
-  }
-}
-
 export const useTheme = defineStore('theme', () => {
   const colorMode = ref<ColorMode>('system')
+  const interfaceTheme = ref<InterfaceTheme>('classic')
   const resolvedMode = ref<ResolvedColorMode>('light')
   const isDark = computed(() => resolvedMode.value === 'dark')
   let mediaQuery: MediaQueryList | null = null
@@ -51,12 +49,15 @@ export const useTheme = defineStore('theme', () => {
     const nextMode = resolveMode(colorMode.value)
     resolvedMode.value = nextMode
     document.documentElement.dataset.theme = nextMode
-    delete document.documentElement.dataset.uiTheme
+    document.documentElement.dataset.uiTheme = interfaceTheme.value
     delete document.documentElement.dataset.layout
     delete document.documentElement.dataset.density
     document.documentElement.style.colorScheme = nextMode
+    const themeColor = interfaceTheme.value === 'control'
+      ? nextMode === 'dark' ? '#060907' : '#f1f5f2'
+      : nextMode === 'dark' ? '#181613' : '#fffaf1'
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-      ?.setAttribute('content', nextMode === 'dark' ? '#181613' : '#fffaf1')
+      ?.setAttribute('content', themeColor)
   }
 
   function setColorMode(next: ColorMode) {
@@ -64,6 +65,16 @@ export const useTheme = defineStore('theme', () => {
     writeStorage(modeStorageKey, next)
     writeStorage(legacyModeStorageKey, next === 'system' ? resolveMode(next) : next)
     apply()
+  }
+
+  function setInterfaceTheme(next: InterfaceTheme) {
+    interfaceTheme.value = next
+    writeStorage(interfaceThemeStorageKey, next)
+    apply()
+  }
+
+  function toggleInterfaceTheme() {
+    setInterfaceTheme(interfaceTheme.value === 'classic' ? 'control' : 'classic')
   }
 
   function handleSystemModeChange() {
@@ -77,7 +88,8 @@ export const useTheme = defineStore('theme', () => {
       ? savedMode
       : isColorMode(legacyMode) && legacyMode !== 'system' ? legacyMode : 'system'
 
-    removeStorage(retiredPresetStorageKey)
+    const savedInterfaceTheme = readStorage(interfaceThemeStorageKey)
+    interfaceTheme.value = isInterfaceTheme(savedInterfaceTheme) ? savedInterfaceTheme : 'classic'
     mediaQuery?.removeEventListener('change', handleSystemModeChange)
     mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)') ?? null
     mediaQuery?.addEventListener('change', handleSystemModeChange)
@@ -90,11 +102,14 @@ export const useTheme = defineStore('theme', () => {
 
   return {
     colorMode,
+    interfaceTheme,
     resolvedMode,
     mode: resolvedMode,
     isDark,
     init,
     toggle,
+    toggleInterfaceTheme,
     setColorMode,
+    setInterfaceTheme,
   }
 })

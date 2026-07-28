@@ -1,0 +1,1273 @@
+/*
+ * Control interface
+ * A separate application skin inspired by the user's TokenAdmin console.
+ * It intentionally owns its shell, spacing, typography and component geometry
+ * instead of recolouring the classic sidebar layout.
+ */
+
+:root[data-ui-theme='control'] {
+	color-scheme: light;
+	--canvas: #f1f5f2;
+	--canvas-deep: #e8efea;
+	--surface: #fbfdfb;
+	--surface-muted: #edf3ef;
+	--ink: #142119;
+	--ink-soft: #4c5f53;
+	--ink-faint: #718177;
+	--line: rgba(18, 93, 49, .18);
+	--accent: #15783a;
+	--accent-soft: rgba(21, 120, 58, .1);
+	--shadow: rgba(18, 52, 31, .08);
+	--control-line-strong: rgba(18, 93, 49, .34);
+	--control-cyan: #156b83;
+	--control-danger: #b42318;
+	--control-warning: #8a5a00;
+	--control-grid: rgba(21, 120, 58, .045);
+	--control-font: "SFMono-Regular", "SF Mono", "Cascadia Code", "JetBrains Mono", Menlo, Consolas, "PingFang SC", monospace;
+}
+
+:root[data-ui-theme='control'][data-theme='dark'] {
+	color-scheme: dark;
+	--canvas: #060907;
+	--canvas-deep: #080d0a;
+	--surface: #0b100d;
+	--surface-muted: #101712;
+	--ink: #d5e2d9;
+	--ink-soft: #8fa196;
+	--ink-faint: #64736a;
+	--line: rgba(87, 255, 143, .16);
+	--accent: #57ff8f;
+	--accent-soft: rgba(87, 255, 143, .1);
+	--shadow: rgba(0, 0, 0, .28);
+	--control-line-strong: rgba(87, 255, 143, .34);
+	--control-cyan: #70d8ff;
+	--control-danger: #ff7169;
+	--control-warning: #ffc857;
+	--control-grid: rgba(87, 255, 143, .032);
+}
+
+html[data-ui-theme='control'] body {
+	background:
+		linear-gradient(var(--control-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--control-grid) 1px, transparent 1px),
+		var(--canvas);
+	background-size: 44px 44px;
+	color: var(--ink);
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'][data-theme='dark'] body::after {
+	position: fixed;
+	z-index: 90;
+	inset: 0;
+	pointer-events: none;
+	content: "";
+	opacity: .11;
+	background: linear-gradient(to bottom, transparent 0 50%, rgba(0, 0, 0, .46) 50% 100%);
+	background-size: 100% 4px;
+}
+
+html[data-ui-theme='control'] ::selection {
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.interface-theme-switcher {
+	display: inline-flex;
+	min-height: 2.35rem;
+	align-items: center;
+	justify-content: center;
+	gap: .4rem;
+	border: 1px solid var(--line);
+	border-radius: .62rem;
+	padding: 0 .66rem;
+	background: var(--surface);
+	color: var(--ink-soft);
+	font-size: .68rem;
+	font-weight: 760;
+	white-space: nowrap;
+	transition: border-color .16s ease, color .16s ease, background-color .16s ease;
+}
+
+.interface-theme-switcher:hover {
+	border-color: var(--accent);
+	color: var(--ink);
+}
+
+.interface-theme-switcher:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.interface-theme-switcher svg {
+	width: .95rem;
+	height: .95rem;
+	fill: currentColor;
+}
+
+.interface-theme-switcher-float {
+	position: fixed;
+	z-index: 41;
+	right: max(1rem, env(safe-area-inset-right));
+	bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 3rem);
+}
+
+.rail-account-actions {
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 2.35rem;
+}
+
+.rail-account-actions .interface-theme-switcher {
+	width: 100%;
+	padding-inline: .35rem;
+}
+
+/* Independent shell ----------------------------------------------------- */
+
+.control-app-shell {
+	position: relative;
+	z-index: 1;
+	min-height: 100dvh;
+	background: transparent;
+	font-family: var(--control-font);
+}
+
+.control-masthead {
+	position: sticky;
+	z-index: 60;
+	top: var(--contact-banner-height);
+	display: grid;
+	min-height: 3.65rem;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: stretch;
+	padding: 0 max(1rem, env(safe-area-inset-right)) 0 max(1rem, env(safe-area-inset-left));
+	border-bottom: 1px solid var(--line);
+	background: color-mix(in srgb, var(--canvas) 92%, transparent);
+	backdrop-filter: blur(12px);
+	-webkit-backdrop-filter: blur(12px);
+}
+
+.control-brand {
+	display: flex;
+	min-width: 13.5rem;
+	align-items: center;
+	gap: .5rem;
+	padding-right: 1.2rem;
+	border-right: 1px solid var(--line);
+	color: var(--ink);
+	font-size: .68rem;
+	white-space: nowrap;
+}
+
+.control-brand-prompt {
+	color: var(--accent);
+}
+
+.control-brand strong {
+	overflow: hidden;
+	max-width: 10rem;
+	font-size: .7rem;
+	font-weight: 560;
+	text-overflow: ellipsis;
+}
+
+.control-primary-nav {
+	display: flex;
+	min-width: 0;
+	align-items: stretch;
+	overflow: hidden;
+}
+
+.control-primary-nav a {
+	display: inline-flex;
+	min-height: 3.65rem;
+	align-items: center;
+	gap: .14rem;
+	padding: 0 .85rem;
+	color: var(--ink-soft);
+	font-size: .66rem;
+	font-weight: 600;
+	white-space: nowrap;
+	transition: color .14s ease, background-color .14s ease;
+}
+
+.control-primary-nav a span {
+	color: var(--accent);
+}
+
+.control-primary-nav a:hover {
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+
+.control-primary-nav a.is-active {
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.control-primary-nav a.is-active span {
+	color: var(--canvas);
+}
+
+.control-masthead-actions {
+	display: flex;
+	align-items: center;
+	border-left: 1px solid var(--line);
+}
+
+.control-masthead-actions > button {
+	min-height: 2.25rem;
+	border: 0;
+	border-left: 1px solid var(--line);
+	border-radius: 0;
+	background: transparent;
+	color: var(--ink-soft);
+	font-family: var(--control-font);
+}
+
+.control-masthead-actions > button:first-child {
+	border-left: 0;
+}
+
+.control-masthead-actions > button:hover {
+	background: var(--accent-soft);
+	color: var(--accent);
+	transform: none;
+}
+
+.control-masthead-actions .interface-theme-switcher,
+.control-masthead-actions .theme-toggle {
+	min-width: 4.4rem;
+	padding: 0 .7rem;
+}
+
+.control-command-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: .38rem;
+	padding: 0 .85rem;
+	font-size: .66rem;
+	font-weight: 650;
+	white-space: nowrap;
+}
+
+.control-command-trigger.is-active {
+	color: var(--accent);
+}
+
+.control-logout {
+	display: grid;
+	width: 2.75rem;
+	place-items: center;
+}
+
+.control-logout svg {
+	width: 1rem;
+	height: 1rem;
+	fill: currentColor;
+}
+
+.control-mobile-trigger {
+	display: none;
+}
+
+.control-command-backdrop {
+	position: fixed;
+	z-index: 48;
+	inset: calc(var(--contact-banner-height) + 3.65rem) 0 0;
+	background: rgba(0, 0, 0, .36);
+}
+
+.control-command-deck {
+	position: fixed;
+	z-index: 50;
+	top: calc(var(--contact-banner-height) + 3.65rem);
+	right: 1rem;
+	left: 1rem;
+	max-height: calc(100dvh - 4.65rem);
+	overflow-y: auto;
+	border: 1px solid var(--control-line-strong);
+	background: color-mix(in srgb, var(--surface) 97%, transparent);
+	box-shadow: 0 20px 55px rgba(0, 0, 0, .26);
+}
+
+.control-command-head {
+	display: flex;
+	min-height: 3.25rem;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0 1rem;
+	border-bottom: 1px solid var(--line);
+}
+
+.control-command-head > div {
+	display: flex;
+	align-items: center;
+	gap: .5rem;
+	font-size: .68rem;
+}
+
+.control-command-head span {
+	color: var(--accent);
+}
+
+.control-command-head strong {
+	font-weight: 520;
+}
+
+.control-command-head button {
+	width: 2rem;
+	height: 2rem;
+	color: var(--ink-soft);
+	font-size: 1.25rem;
+}
+
+.control-command-head button:hover {
+	color: var(--accent);
+}
+
+.control-command-grid {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.control-command-group {
+	min-width: 0;
+	padding: 1rem;
+	border-right: 1px solid var(--line);
+	border-bottom: 1px solid var(--line);
+}
+
+.control-command-group:nth-child(4n) {
+	border-right: 0;
+}
+
+.control-command-group > p {
+	display: flex;
+	align-items: center;
+	gap: .55rem;
+	margin-bottom: .55rem;
+	color: var(--ink-soft);
+	font-size: .62rem;
+	font-weight: 680;
+}
+
+.control-command-group > p span {
+	color: var(--accent);
+}
+
+.control-command-group > a {
+	display: grid;
+	min-height: 2.5rem;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: .4rem;
+	border-top: 1px solid var(--line);
+	color: var(--ink-soft);
+	font-size: .68rem;
+	transition: color .14s ease, background-color .14s ease;
+}
+
+.control-command-group > a > span,
+.control-command-group > a > b {
+	color: var(--accent);
+	font-weight: 500;
+}
+
+.control-command-group > a > strong {
+	overflow: hidden;
+	font-weight: 550;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.control-command-group > a:hover,
+.control-command-group > a.is-active {
+	margin-inline: -.45rem;
+	padding-inline: .45rem;
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.control-command-group > a:hover > span,
+.control-command-group > a:hover > b,
+.control-command-group > a.is-active > span,
+.control-command-group > a.is-active > b {
+	color: var(--canvas);
+}
+
+.control-workspace {
+	width: min(100%, 100rem);
+	min-height: calc(100dvh - 3.65rem);
+	margin: 0 auto;
+	padding: 1.75rem max(1.5rem, env(safe-area-inset-right)) 1rem max(1.5rem, env(safe-area-inset-left));
+}
+
+.control-context-bar {
+	display: flex;
+	min-height: 3.4rem;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 1rem;
+	border-top: 1px solid var(--control-line-strong);
+	border-bottom: 1px solid var(--line);
+}
+
+.control-context-path {
+	display: flex;
+	min-width: 0;
+	align-items: center;
+	gap: .55rem;
+	font-size: .66rem;
+	white-space: nowrap;
+}
+
+.control-context-path span {
+	color: var(--accent);
+}
+
+.control-context-path strong {
+	overflow: hidden;
+	font-weight: 550;
+	text-overflow: ellipsis;
+}
+
+.control-context-meta {
+	display: flex;
+	min-width: 0;
+	align-items: stretch;
+	align-self: stretch;
+}
+
+.control-context-meta > span,
+.control-context-meta > a {
+	display: inline-flex;
+	min-width: 0;
+	align-items: center;
+	gap: .4rem;
+	padding: 0 .8rem;
+	border-left: 1px solid var(--line);
+	color: var(--ink-soft);
+	font-size: .6rem;
+	white-space: nowrap;
+}
+
+.control-context-meta i {
+	width: .4rem;
+	height: .4rem;
+	background: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.control-context-email {
+	overflow: hidden;
+	max-width: 15rem;
+	text-overflow: ellipsis;
+}
+
+.control-context-meta > a {
+	display: grid;
+	align-content: center;
+	gap: 0;
+}
+
+.control-context-meta small {
+	color: var(--ink-faint);
+	font-size: .5rem;
+	letter-spacing: .08em;
+}
+
+.control-context-meta strong {
+	color: var(--accent);
+	font-size: .66rem;
+	font-weight: 650;
+}
+
+.control-workspace-main {
+	min-height: calc(100dvh - 10rem);
+}
+
+.control-workspace-main.workspace-main {
+	flex: initial;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.control-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-top: 1.25rem;
+	padding-top: .7rem;
+	border-top: 1px solid var(--line);
+	color: var(--ink-faint);
+	font-size: .53rem;
+	letter-spacing: .06em;
+}
+
+/* Control component grammar -------------------------------------------- */
+
+.control-app-shell :is(.console-page-head, .dashboard-head) {
+	align-items: flex-end;
+	margin-bottom: 1rem;
+	padding: 0 0 .85rem;
+	border-bottom: 1px solid var(--control-line-strong);
+}
+
+.control-app-shell :is(.console-page-head, .dashboard-head)::before {
+	align-self: flex-start;
+	content: "[dd@console]$ ls ./";
+	color: var(--accent);
+	font-size: .58rem;
+	white-space: nowrap;
+}
+
+.control-app-shell :is(.console-page-head, .dashboard-head) > div:first-child {
+	flex: 1;
+}
+
+.control-app-shell :is(.console-page-head, .dashboard-head) h1 {
+	margin: 0;
+	color: var(--ink);
+	font-family: var(--control-font);
+	font-size: 1.6rem;
+	font-weight: 650;
+	letter-spacing: -.035em;
+}
+
+.control-app-shell :is(.console-page-head, .dashboard-head) p,
+.control-app-shell .dashboard-date {
+	color: var(--ink-soft);
+	font-family: var(--control-font);
+	font-size: .66rem;
+}
+
+.control-app-shell :is(.card, .dashboard-panel, .data-chart, .metric-card, .ops-pulse, .ops-filterbar, .account-card) {
+	border: 1px solid var(--control-line-strong);
+	border-radius: 0;
+	background: color-mix(in srgb, var(--surface) 94%, transparent);
+	box-shadow: none;
+}
+
+.control-app-shell :is(.card, .dashboard-panel, .data-chart, .metric-card, .account-card) {
+	position: relative;
+}
+
+.control-app-shell :is(.card, .dashboard-panel, .data-chart, .metric-card, .account-card)::after {
+	position: absolute;
+	top: -1px;
+	left: -1px;
+	width: 4.5rem;
+	height: 1px;
+	background: var(--accent);
+	content: "";
+	pointer-events: none;
+}
+
+.control-app-shell :is(.btn, .btn-primary, .btn-ghost, .btn-danger, .accounts-sort-direction) {
+	min-height: 2.25rem;
+	border-radius: 0;
+	font-family: var(--control-font);
+	font-size: .66rem;
+	font-weight: 650;
+	box-shadow: none;
+}
+
+.control-app-shell .btn-primary {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.control-app-shell :is(.btn, .btn-ghost):hover:not(:disabled) {
+	border-color: var(--accent);
+	background: var(--accent);
+	color: var(--canvas);
+	transform: none;
+}
+
+.control-app-shell :is(.input, input, select, textarea) {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+.control-app-shell :is(.input, input, select, textarea):focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.control-app-shell .table-base {
+	border: 1px solid var(--control-line-strong);
+	border-radius: 0;
+	background: var(--surface);
+	box-shadow: none;
+}
+
+.control-app-shell .table-base thead th {
+	border-bottom: 1px solid var(--control-line-strong);
+	background: var(--surface-muted);
+	color: var(--ink-soft);
+	font-family: var(--control-font);
+	font-size: .59rem;
+	letter-spacing: .04em;
+}
+
+.control-app-shell .table-base tbody tr {
+	border-top: 1px solid var(--line);
+}
+
+.control-app-shell .table-base tbody tr:hover {
+	background: var(--accent-soft);
+}
+
+.control-app-shell .table-base tbody td {
+	color: var(--ink);
+	font-family: var(--control-font);
+	font-size: .66rem;
+}
+
+.control-app-shell :is(.chip, .status-pill, .badge, .pill) {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+/* Dashboard is a control room, not the classic balance card. */
+.control-app-shell .dashboard-ledger {
+	grid-template-columns: minmax(16rem, .78fr) minmax(0, 2.22fr);
+	border: 1px solid var(--control-line-strong);
+	border-radius: 0;
+	background:
+		linear-gradient(var(--control-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--control-grid) 1px, transparent 1px),
+		var(--surface);
+	background-size: 32px 32px;
+	color: var(--ink);
+}
+
+.control-app-shell .dashboard-ledger-balance {
+	position: relative;
+	min-height: 10.5rem;
+	border-right: 1px solid var(--control-line-strong);
+	background: transparent;
+	color: var(--ink);
+}
+
+.control-app-shell .dashboard-ledger-balance::before {
+	content: "ACCOUNT_BALANCE";
+	color: var(--accent);
+	font-size: .54rem;
+	letter-spacing: .08em;
+}
+
+.control-app-shell .dashboard-ledger-label {
+	margin-top: .6rem;
+	color: var(--ink-soft);
+}
+
+.control-app-shell .dashboard-ledger-value {
+	color: var(--ink);
+	font-family: var(--control-font);
+	font-size: 2.15rem;
+	font-weight: 650;
+}
+
+.control-app-shell .dashboard-ledger-balance a {
+	color: var(--accent);
+}
+
+.control-app-shell .dashboard-ledger-stats > div {
+	border-left: 1px solid var(--line);
+}
+
+.control-app-shell .dashboard-ledger-stats > div:first-child {
+	border-left: 0;
+}
+
+.control-app-shell .dashboard-ledger-stats :is(dt, small) {
+	color: var(--ink-soft);
+}
+
+.control-app-shell .dashboard-ledger-stats dd {
+	color: var(--ink);
+	font-family: var(--control-font);
+	font-weight: 620;
+}
+
+.control-app-shell .dashboard-main-grid,
+.control-app-shell .dashboard-lower-grid {
+	gap: 1rem;
+	margin-top: 1rem;
+}
+
+.control-app-shell .dashboard-endpoint,
+.control-app-shell .accounts-view-toggle,
+.control-app-shell .ops-range-tabs,
+.control-app-shell .model-platform-tabs {
+	border-radius: 0;
+	background: var(--surface-muted);
+}
+
+.control-app-shell .dashboard-endpoint code,
+.control-app-shell .dashboard-panel-head > strong,
+.control-app-shell .dashboard-token-legend small {
+	font-family: var(--control-font);
+}
+
+.control-app-shell .dashboard-token-bar {
+	height: .5rem;
+	border-radius: 0;
+	background: var(--surface-muted);
+}
+
+.control-app-shell .dashboard-shortcuts > a:hover {
+	margin-inline: -.55rem;
+	padding-inline: .55rem;
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.control-app-shell .dashboard-shortcuts > a:hover :is(span, small, b) {
+	color: var(--canvas);
+}
+
+/* Route-specific surfaces keep their data but use the Control geometry. */
+.control-app-shell :is(
+	.key-route-trigger,
+	.key-route-popover,
+	.key-route-options section > button,
+	.key-group-picker > label,
+	.key-group-disclosure,
+	.key-policy-panel,
+	.key-setup-secret,
+	.key-setup-tabs,
+	.key-setup-tabs button,
+	.key-setup-subtabs button,
+	.key-setup-code,
+	.key-setup-ccswitch,
+	.key-setup-empty,
+	.key-created-secret,
+	.key-setup-progress button,
+	.key-setup-file-tabs button,
+	.settings-inline-card,
+	.settings-oauth-card,
+	.settings-quota-card,
+	.settings-service-card,
+	.channel-status-toolbar,
+	.channel-card,
+	.model-plaza-toolbar,
+	.model-card,
+	.wallet-button,
+	.wallet-overview,
+	.wallet-package,
+	.wallet-custom-amount,
+	.wallet-custom-input,
+	.wallet-checkout,
+	.wallet-checkout-heading,
+	.wallet-methods > button,
+	.wallet-order-summary,
+	.wallet-qr-payment,
+	.wallet-checkout-message,
+	.wallet-redeem,
+	.wallet-orders
+) {
+	border-radius: 0;
+	box-shadow: none;
+	font-family: var(--control-font);
+}
+
+.control-app-shell :is(.channel-card, .model-card, .wallet-package, .wallet-checkout, .wallet-redeem, .wallet-orders) {
+	border-color: var(--control-line-strong);
+	background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.control-app-shell :is(.channel-card, .model-card, .wallet-package) {
+	position: relative;
+}
+
+.control-app-shell :is(.channel-card, .model-card, .wallet-package)::before {
+	position: absolute;
+	top: -1px;
+	left: -1px;
+	width: 3.5rem;
+	height: 1px;
+	background: var(--accent);
+	content: "";
+}
+
+.control-app-shell .wallet-store-head {
+	margin-top: -1.2rem;
+	border-bottom-color: var(--control-line-strong);
+	background: transparent;
+}
+
+.control-app-shell .wallet-store-title-mark,
+.control-app-shell .wallet-checkout-icon,
+.control-app-shell .wallet-method-mark {
+	border-radius: 0;
+}
+
+.control-app-shell .wallet-package {
+	background:
+		linear-gradient(var(--control-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--control-grid) 1px, transparent 1px),
+		var(--surface);
+	background-size: 24px 24px;
+}
+
+.control-app-shell .wallet-package:hover {
+	border-color: var(--accent);
+	transform: none;
+}
+
+.control-app-shell .wallet-package.is-selected {
+	background: var(--accent-soft);
+	box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.control-app-shell .wallet-button--primary {
+	background: var(--accent);
+	color: var(--canvas);
+}
+
+.control-app-shell .wallet-button--primary:hover:not(:disabled) {
+	background: transparent;
+	color: var(--accent);
+}
+
+.control-app-shell .model-card-action {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+.control-app-shell .model-groups > div {
+	overflow: visible;
+}
+
+.control-app-shell :is(.model-groups span, .channel-card-head p span, .channel-state-tag, .key-status-tag) {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+.control-app-shell .accounts-view-toggle button,
+.control-app-shell .ops-range-tabs button,
+.control-app-shell .model-platform-tabs button {
+	border-radius: 0;
+}
+
+/* Teleported surfaces belong to the selected interface as well. */
+html[data-ui-theme='control'] :is(.app-modal, .agreement-dialog, .app-toast) {
+	border-color: var(--control-line-strong);
+	border-radius: 0;
+	background: var(--surface);
+	box-shadow: 0 20px 55px rgba(0, 0, 0, .28);
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] .app-modal__header {
+	border-bottom-color: var(--control-line-strong);
+}
+
+html[data-ui-theme='control'] .app-modal__heading h2::before {
+	content: "## ";
+	color: var(--accent);
+}
+
+html[data-ui-theme='control'] .app-modal__close,
+html[data-ui-theme='control'] .modal-segmented,
+html[data-ui-theme='control'] .modal-segmented button {
+	border-radius: 0;
+}
+
+html[data-ui-theme='control'] .app-modal :is(input, select, textarea, button) {
+	border-radius: 0 !important;
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] :is(
+	.app-modal .key-group-picker > label,
+	.app-modal .key-group-disclosure,
+	.app-modal .key-policy-panel,
+	.app-modal .key-setup-secret,
+	.app-modal .key-setup-tabs,
+	.app-modal .key-setup-code,
+	.contact-dialog,
+	.contact-dialog__mark,
+	.contact-dialog__number,
+	.contact-dialog__actions > *
+) {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+/* Login uses a terminal gate rather than the classic centred product card. */
+html[data-ui-theme='control'] .login-shell {
+	position: relative;
+	display: grid;
+	min-height: 100dvh;
+	place-items: center;
+	padding: 4rem 1rem;
+	background:
+		radial-gradient(circle at 50% 42%, var(--accent-soft), transparent 29rem),
+		linear-gradient(var(--control-grid) 1px, transparent 1px),
+		linear-gradient(90deg, var(--control-grid) 1px, transparent 1px),
+		var(--canvas);
+	background-size: auto, 44px 44px, 44px 44px, auto;
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] .login-frame {
+	position: relative;
+	width: min(100%, 27rem);
+	border: 1px solid var(--control-line-strong);
+	border-radius: 0;
+	background: color-mix(in srgb, var(--surface) 96%, transparent);
+	box-shadow: 0 24px 70px rgba(0, 0, 0, .2);
+}
+
+html[data-ui-theme='control'] .login-frame::before {
+	position: absolute;
+	inset: 0 0 auto;
+	height: 2px;
+	background: var(--accent);
+	content: "";
+}
+
+html[data-ui-theme='control'] .login-panel {
+	padding: 2rem;
+}
+
+html[data-ui-theme='control'] .login-brand-lockup {
+	display: grid;
+	grid-template-columns: 1fr;
+	gap: .45rem;
+	margin-bottom: 1.7rem;
+}
+
+html[data-ui-theme='control'] .login-brand-lockup > svg,
+html[data-ui-theme='control'] .login-brand-lockup > img,
+html[data-ui-theme='control'] .login-brand-lockup > :first-child:not(div) {
+	display: none;
+}
+
+html[data-ui-theme='control'] .login-brand-lockup::before {
+	content: "[dd@console ~]$ login";
+	color: var(--accent);
+	font-size: .65rem;
+}
+
+html[data-ui-theme='control'] .login-brand-lockup strong {
+	display: block;
+	color: var(--ink);
+	font-size: 1.05rem;
+	font-weight: 620;
+}
+
+html[data-ui-theme='control'] .login-brand-lockup span {
+	color: var(--ink-soft);
+	font-size: .6rem;
+}
+
+html[data-ui-theme='control'] .login-panel-header {
+	margin-bottom: 1rem;
+	padding-bottom: .75rem;
+	border-bottom: 1px solid var(--line);
+}
+
+html[data-ui-theme='control'] .login-panel-header h1 {
+	font-size: .8rem;
+	font-weight: 600;
+}
+
+html[data-ui-theme='control'] .login-panel-header h1::before {
+	content: "## ";
+	color: var(--accent);
+}
+
+html[data-ui-theme='control'] .login-tabs {
+	border: 1px solid var(--line);
+	border-radius: 0;
+	background: var(--surface-muted);
+}
+
+html[data-ui-theme='control'] .login-tabs button {
+	border-radius: 0;
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] .login-tabs button.is-active {
+	background: var(--accent);
+	color: var(--canvas);
+	box-shadow: none;
+}
+
+html[data-ui-theme='control'] .login-field label {
+	color: var(--ink-soft);
+	font-family: var(--control-font);
+	font-size: .65rem;
+}
+
+html[data-ui-theme='control'] .login-field label::before {
+	content: "> ";
+	color: var(--accent);
+}
+
+html[data-ui-theme='control'] .login-field input,
+html[data-ui-theme='control'] .login-oauth-grid button,
+html[data-ui-theme='control'] .login-code-button {
+	border-color: var(--control-line-strong);
+	border-radius: 0;
+	background: var(--surface);
+	color: var(--ink);
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] .login-field input:focus {
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+html[data-ui-theme='control'] .login-submit {
+	border: 1px solid var(--accent);
+	border-radius: 0;
+	background: var(--accent);
+	color: var(--canvas);
+	font-family: var(--control-font);
+	box-shadow: none;
+}
+
+html[data-ui-theme='control'] .login-submit:hover:not(:disabled) {
+	background: transparent;
+	color: var(--accent);
+	box-shadow: none;
+	transform: none;
+}
+
+html[data-ui-theme='control'] .theme-toggle-float,
+html[data-ui-theme='control'] .interface-theme-switcher-float {
+	border-radius: 0;
+	background: var(--surface);
+	font-family: var(--control-font);
+}
+
+html[data-ui-theme='control'] .theme-toggle-float {
+	top: calc(var(--contact-banner-height) + 1rem);
+	right: 1rem;
+	bottom: auto;
+}
+
+html[data-ui-theme='control'] .interface-theme-switcher-float {
+	top: calc(var(--contact-banner-height) + 1rem);
+	right: 6.3rem;
+	bottom: auto;
+}
+
+/* Motion is brief and functional. */
+.control-deck-enter-active,
+.control-deck-leave-active {
+	transition: opacity .16s ease, transform .16s ease;
+	transform-origin: top center;
+}
+
+.control-deck-enter-from,
+.control-deck-leave-to {
+	opacity: 0;
+	transform: translateY(-.45rem);
+}
+
+.control-page-enter-active,
+.control-page-leave-active {
+	transition: opacity .12s ease;
+}
+
+.control-page-enter-from,
+.control-page-leave-to {
+	opacity: 0;
+}
+
+@media (max-width: 1180px) {
+	.control-brand {
+		min-width: auto;
+	}
+
+	.control-brand strong,
+	.control-primary-nav a:nth-last-child(-n + 2) {
+		display: none;
+	}
+
+	.control-command-grid {
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+	}
+
+	.control-command-group:nth-child(4n) {
+		border-right: 1px solid var(--line);
+	}
+
+	.control-command-group:nth-child(3n) {
+		border-right: 0;
+	}
+}
+
+@media (max-width: 820px) {
+	.control-masthead {
+		grid-template-columns: minmax(0, 1fr) auto;
+		min-height: 3.45rem;
+	}
+
+	.control-brand {
+		min-width: 0;
+		border-right: 0;
+	}
+
+	.control-brand strong {
+		display: block;
+	}
+
+	.control-primary-nav,
+	.control-masthead-actions {
+		display: none;
+	}
+
+	.control-mobile-trigger {
+		display: grid;
+		width: 3rem;
+		height: 3.45rem;
+		place-content: center;
+		gap: .27rem;
+		border-left: 1px solid var(--line);
+	}
+
+	.control-mobile-trigger span {
+		display: block;
+		width: 1rem;
+		height: 1px;
+		background: var(--accent);
+	}
+
+	.control-command-deck {
+		top: calc(var(--contact-banner-height) + 3.45rem);
+		right: .5rem;
+		left: .5rem;
+		max-height: calc(100dvh - 3.95rem);
+	}
+
+	.control-command-backdrop {
+		inset: calc(var(--contact-banner-height) + 3.45rem) 0 0;
+	}
+
+	.control-command-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.control-command-group:nth-child(3n) {
+		border-right: 1px solid var(--line);
+	}
+
+	.control-command-group:nth-child(2n) {
+		border-right: 0;
+	}
+
+	.control-workspace {
+		min-height: calc(100dvh - 3.45rem);
+		padding: 1rem .75rem .75rem;
+	}
+
+	.control-context-email {
+		display: none !important;
+	}
+
+	.control-app-shell :is(.console-page-head, .dashboard-head)::before {
+		display: none;
+	}
+
+	.control-app-shell .dashboard-ledger {
+		grid-template-columns: 1fr;
+	}
+
+	.control-app-shell .dashboard-ledger-balance {
+		min-height: 8.5rem;
+		border-right: 0;
+		border-bottom: 1px solid var(--control-line-strong);
+	}
+}
+
+@media (max-width: 560px) {
+	.control-brand-prompt {
+		font-size: .6rem;
+	}
+
+	.control-command-grid {
+		grid-template-columns: 1fr;
+	}
+
+	.control-command-group,
+	.control-command-group:nth-child(n) {
+		border-right: 0;
+	}
+
+	.control-context-bar {
+		min-height: 3.15rem;
+	}
+
+	.control-context-meta > span {
+		display: none;
+	}
+
+	.control-context-path {
+		max-width: calc(100vw - 9.5rem);
+	}
+
+	.control-app-shell :is(.console-page-head, .dashboard-head) {
+		align-items: flex-start;
+	}
+
+	.control-app-shell :is(.console-page-head, .dashboard-head) h1 {
+		font-size: 1.35rem;
+	}
+
+	.control-app-shell .dashboard-ledger-stats {
+		grid-template-columns: 1fr;
+	}
+
+	.control-app-shell .dashboard-ledger-stats > div {
+		padding: .8rem 1rem;
+		border-top: 1px solid var(--line);
+		border-left: 0;
+	}
+
+	html[data-ui-theme='control'] .login-shell {
+		padding: 0;
+		place-items: stretch;
+	}
+
+	html[data-ui-theme='control'] .login-frame {
+		width: 100%;
+		min-height: 100dvh;
+		border: 0;
+	}
+
+	html[data-ui-theme='control'] .login-panel {
+		padding: 5.5rem 1.1rem 2rem;
+	}
+
+	html[data-ui-theme='control'] .theme-toggle-float {
+		top: calc(var(--contact-banner-height) + .75rem);
+		right: .75rem;
+	}
+
+	html[data-ui-theme='control'] .interface-theme-switcher-float {
+		top: calc(var(--contact-banner-height) + .75rem);
+		right: 5.85rem;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.control-deck-enter-active,
+	.control-deck-leave-active,
+	.control-page-enter-active,
+	.control-page-leave-active {
+		transition: none;
+	}
+}

@@ -4,11 +4,15 @@ import { useRoute } from 'vue-router'
 import { useAuth } from '../stores/auth'
 import BrandMark from '../components/BrandMark.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
+import InterfaceThemeSwitcher from '../components/InterfaceThemeSwitcher.vue'
 import { formatMoney } from '../api/types'
+import { useTheme } from '../stores/theme'
 
 const auth = useAuth()
+const theme = useTheme()
 const route = useRoute()
 const railOpen = ref(false)
+const commandOpen = ref(false)
 
 const userNav = [
   { to: '/dashboard', label: '总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
@@ -68,16 +72,25 @@ const allNavigationItems = computed(() => [
 	...(isAdmin.value ? adminNav : []),
 ])
 const currentNavigation = computed(() => allNavigationItems.value.find((item) => isActive(item.to)))
+const terminalPrimaryPaths = new Set(['/dashboard', '/keys', '/usage', '/models', '/wallet'])
+const terminalPrimaryNavigation = computed(() => visibleUserNav.value.filter((item) => terminalPrimaryPaths.has(item.to)))
+const terminalUtilityNavigation = computed(() => visibleUserNav.value.filter((item) => !terminalPrimaryPaths.has(item.to)))
+const terminalCommandGroups = computed(() => [
+  { label: '账户工具', items: terminalUtilityNavigation.value },
+  ...(isAdmin.value ? adminNavGroups : []),
+])
 
 watch(
   () => route.fullPath,
   () => {
     railOpen.value = false
+    commandOpen.value = false
   },
 )
 
 function closeRail() {
   railOpen.value = false
+  commandOpen.value = false
 }
 
 function handleKeydown(event: KeyboardEvent) {
@@ -98,7 +111,7 @@ function isActive(to: string) {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute }">
+  <div v-if="theme.interfaceTheme === 'classic'" class="app-shell" :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute }">
     <div class="ambient-field" aria-hidden="true">
       <span class="ambient-orb ambient-orb--one"></span>
       <span class="ambient-orb ambient-orb--two"></span>
@@ -161,6 +174,7 @@ function isActive(to: string) {
             <span>可用余额</span><strong class="num">{{ balance }}</strong>
           </div>
           <div class="rail-account-actions">
+            <InterfaceThemeSwitcher />
             <ThemeToggle class="rail-theme-toggle" />
             <button type="button" class="rail-logout" aria-label="退出登录" title="退出登录" @click="auth.logout()">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg>
@@ -203,5 +217,121 @@ function isActive(to: string) {
         </main>
       </section>
     </div>
+  </div>
+
+  <div
+    v-else
+    class="app-shell control-app-shell"
+    :class="{ 'is-product-route': !isAdminRoute, 'is-admin-route': isAdminRoute, 'is-monitoring-route': isMonitoringRoute, 'is-command-open': commandOpen }"
+  >
+    <header class="control-masthead">
+      <RouterLink to="/dashboard" class="control-brand" aria-label="返回总览">
+        <span class="control-brand-prompt">[dd@console ~]$</span>
+        <strong>/ {{ auth.siteName }}</strong>
+      </RouterLink>
+
+      <nav class="control-primary-nav" aria-label="常用导航">
+        <RouterLink
+          v-for="item in terminalPrimaryNavigation"
+          :key="item.to"
+          :to="item.to"
+          :class="{ 'is-active': isActive(item.to) }"
+        >
+          <span>./</span>{{ item.label }}
+        </RouterLink>
+      </nav>
+
+      <div class="control-masthead-actions">
+        <button
+          type="button"
+          class="control-command-trigger"
+          :class="{ 'is-active': commandOpen || isAdminRoute }"
+          :aria-expanded="commandOpen"
+          aria-controls="control-command-deck"
+          @click="commandOpen = !commandOpen"
+        >
+          <span>⌘</span>{{ isAdmin ? '全部功能' : '更多' }}
+        </button>
+        <InterfaceThemeSwitcher />
+        <ThemeToggle />
+        <button type="button" class="control-logout" aria-label="退出登录" title="退出登录" @click="auth.logout()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H5v16h5v-2H7V6h3V4zm5.6 3.6L14.2 9l2 2H9v2h7.2l-2 2 1.4 1.4L20 12l-4.4-4.4z" /></svg>
+        </button>
+      </div>
+
+      <button
+        type="button"
+        class="control-mobile-trigger"
+        :aria-expanded="commandOpen"
+        aria-controls="control-command-deck"
+        :aria-label="commandOpen ? '关闭导航' : '打开导航'"
+        @click="commandOpen = !commandOpen"
+      >
+        <span></span><span></span><span></span>
+      </button>
+    </header>
+
+    <Transition name="control-deck">
+      <section v-if="commandOpen" id="control-command-deck" class="control-command-deck">
+        <div class="control-command-head">
+          <div><span>[dd@console nav]$</span><strong>select ./route</strong></div>
+          <button type="button" aria-label="关闭导航" @click="commandOpen = false">×</button>
+        </div>
+        <div class="control-command-grid">
+          <section v-for="(group, groupIndex) in terminalCommandGroups" :key="group.label" class="control-command-group">
+            <p><span>0{{ groupIndex + 1 }}</span>{{ group.label }}</p>
+            <RouterLink
+              v-for="item in group.items"
+              :key="item.to"
+              :to="item.to"
+              :class="{ 'is-active': isActive(item.to) }"
+            >
+              <span>./</span><strong>{{ item.label }}</strong><b>↗</b>
+            </RouterLink>
+          </section>
+          <section v-if="customMenuItems.length" class="control-command-group">
+            <p><span>0{{ terminalCommandGroups.length + 1 }}</span>自定义入口</p>
+            <a
+              v-for="item in customMenuItems"
+              :key="item.id"
+              :href="item.url"
+              :target="item.url.startsWith('http') ? '_blank' : undefined"
+              :rel="item.url.startsWith('http') ? 'noopener' : undefined"
+            >
+              <span>./</span><strong>{{ item.name }}</strong><b>↗</b>
+            </a>
+          </section>
+        </div>
+      </section>
+    </Transition>
+
+    <div v-if="commandOpen" class="control-command-backdrop" aria-hidden="true" @click="commandOpen = false"></div>
+
+    <section class="control-workspace">
+      <header class="control-context-bar">
+        <div class="control-context-path">
+          <span>[dd@console {{ isAdminRoute ? 'admin' : 'user' }}]$</span>
+          <strong>./{{ currentNavigation?.label || 'workspace' }}</strong>
+        </div>
+        <div class="control-context-meta">
+          <span><i></i>ONLINE</span>
+          <span class="control-context-email" :title="auth.user?.email">{{ auth.user?.email }}</span>
+          <RouterLink to="/wallet"><small>BALANCE</small><strong class="num">{{ balance }}</strong></RouterLink>
+        </div>
+      </header>
+
+      <main class="control-workspace-main workspace-main">
+        <RouterView v-slot="{ Component }">
+          <Transition name="control-page" mode="out-in">
+            <component :is="Component" />
+          </Transition>
+        </RouterView>
+      </main>
+
+      <footer class="control-footer">
+        <span>DENGDENG CONTROL INTERFACE</span>
+        <span>SESSION / {{ isAdmin ? 'ADMIN' : 'USER' }}</span>
+      </footer>
+    </section>
   </div>
 </template>
