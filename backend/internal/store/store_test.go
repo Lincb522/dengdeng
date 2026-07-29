@@ -59,6 +59,16 @@ func TestOpenRemovesLegacyZeroProxyForeignKey(t *testing.T) {
 	if err := legacy.Exec("DROP TABLE upstream_accounts_without_proxy_fk").Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := legacy.Exec(`CREATE TABLE legacy_account_refs (
+		id INTEGER PRIMARY KEY,
+		upstream_account_id INTEGER NOT NULL,
+		FOREIGN KEY (upstream_account_id) REFERENCES upstream_accounts(id)
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("INSERT INTO legacy_account_refs (id, upstream_account_id) VALUES (1, ?)", account.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	closeTestDB(t, legacy)
 
 	db, err = Open(cfg)
@@ -78,6 +88,13 @@ func TestOpenRemovesLegacyZeroProxyForeignKey(t *testing.T) {
 	}
 	if db.Migrator().HasConstraint(&model.UpstreamAccount{}, "Proxy") {
 		t.Fatal("legacy proxy constraint still exists")
+	}
+	var refCount int64
+	if err := db.Table("legacy_account_refs").Where("upstream_account_id = ?", account.ID).Count(&refCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refCount != 1 {
+		t.Fatalf("referencing rows were not preserved: %d", refCount)
 	}
 }
 

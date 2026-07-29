@@ -63,13 +63,11 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	// Older schemas created an invalid FK from proxy_id=0 to proxies.id. The
-	// zero value intentionally means "default egress", so remove that legacy
-	// constraint before enforcing the remaining SQLite foreign keys.
-	if db.Migrator().HasConstraint(&model.UpstreamAccount{}, "Proxy") {
-		if err := db.Migrator().DropConstraint(&model.UpstreamAccount{}, "Proxy"); err != nil {
-			return nil, fmt.Errorf("drop legacy proxy constraint: %w", err)
-		}
+	// Older SQLite schemas created an invalid FK from proxy_id=0 to proxies.id.
+	// The zero value intentionally means "default egress", so remove that
+	// legacy constraint before enforcing the remaining foreign keys.
+	if err := dropLegacySQLiteProxyConstraint(db, cfg); err != nil {
+		return nil, fmt.Errorf("drop legacy proxy constraint: %w", err)
 	}
 	// Existing databases receive these columns through ALTER TABLE and can have
 	// NULLs in historical rows. Backfill to zero so old usage entries keep the
@@ -151,6 +149,51 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("backfill ops errors: %w", err)
 	}
 	return db, nil
+}
+
+func dropLegacySQLiteProxyConstraint(db *gorm.DB, cfg *config.Config) error {
+	if cfg.Database.Driver != "" && cfg.Database.Driver != "sqlite" {
+		return nil
+	}
+	if !db.Migrator().HasConstraint(&model.UpstreamAccount{}, "Proxy") {
+		return nil
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	// SQLite's migrator removes a constraint by rebuilding the table. Existing
+	// quota snapshot tables legitimately reference upstream_accounts, so the
+	// rebuild must run on one connection with FK enforcement temporarily off.
+	// Startup is single-threaded here; restoring the pool limit immediately
+	// keeps normal request concurrency unchanged.
+	previousMaxOpen := sqlDB.Stats().MaxOpenConnections
+	sqlDB.SetMaxOpenConns(1)
+	defer sqlDB.SetMaxOpenConns(previousMaxOpen)
+
+	if err := db.Exec("PRAGMA foreign_keys = OFF").Error; err != nil {
+		return fmt.Errorf("disable foreign keys: %w", err)
+	}
+	dropErr := db.Migrator().DropConstraint(&model.UpstreamAccount{}, "Proxy")
+	enableErr := db.Exec("PRAGMA foreign_keys = ON").Error
+	if dropErr != nil {
+		return dropErr
+	}
+	if enableErr != nil {
+		return fmt.Errorf("restore foreign keys: %w", enableErr)
+	}
+
+	var violations []struct {
+		Table string
+	}
+	if err := db.Raw("PRAGMA foreign_key_check").Scan(&violations).Error; err != nil {
+		return fmt.Errorf("check foreign keys: %w", err)
+	}
+	if len(violations) > 0 {
+		return fmt.Errorf("foreign key check returned %d violation(s)", len(violations))
+	}
+	return nil
 }
 
 func backfillOpsErrorLogs(db *gorm.DB) error {
