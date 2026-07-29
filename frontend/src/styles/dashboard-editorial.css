@@ -107,29 +107,47 @@ html[data-theme='dark'] .app-shell.is-product-route .workspace-main:has(.dashboa
 .dashboard-editorial-traffic {
 	grid-column: 1 / span 7;
 	grid-row: 1 / span 2;
-	min-height: 28rem !important;
+	min-height: 0 !important;
 	padding: 1.05rem !important;
-	background: var(--dash-blue) !important;
-	color: #fff;
+	border: 1px solid var(--dash-line) !important;
+	background: color-mix(in srgb, var(--dash-ice) 62%, white) !important;
+	color: var(--dash-ink);
 }
 
-.dashboard-editorial-traffic :is(.data-chart-head h3, .data-chart-summary dd, .data-chart-detail dd) { color: #fff; }
-.dashboard-editorial-traffic :is(.data-chart-head p, .data-chart-legend, .data-chart-summary dt, .data-chart-detail dt) { color: rgb(255 255 255 / .72); }
-.dashboard-editorial-traffic .data-chart-summary { border-color: rgb(255 255 255 / .18); background: rgb(255 255 255 / .08); }
-.dashboard-editorial-traffic .data-chart-summary > div + div { border-color: rgb(255 255 255 / .16); }
-.dashboard-editorial-traffic .data-chart-grid { stroke: rgb(255 255 255 / .18); }
-.dashboard-editorial-traffic .data-chart-axis { fill: rgb(255 255 255 / .72); }
-.dashboard-editorial-traffic .data-chart-focus-band { fill: rgb(255 255 255 / .09); }
-.dashboard-editorial-traffic .data-chart-token-area { fill: color-mix(in srgb, var(--dash-mint) 20%, transparent); }
-.dashboard-editorial-traffic .data-chart-token-line { stroke: var(--dash-mint); }
-.dashboard-editorial-traffic .data-chart-token-point { fill: var(--dash-blue); stroke: var(--dash-mint); }
-.dashboard-editorial-traffic .data-chart-token-point.is-active { fill: var(--dash-mint); }
-.dashboard-editorial-traffic .data-chart-request-line { stroke: var(--dash-yellow); }
-.dashboard-editorial-traffic .data-chart-request-point { fill: var(--dash-blue); stroke: var(--dash-yellow); }
-.dashboard-editorial-traffic .data-chart-request-point.is-active { fill: var(--dash-yellow); }
-.dashboard-editorial-traffic .data-chart-detail > div { background: rgb(255 255 255 / .1); }
-.dashboard-editorial-traffic .data-chart-legend .is-token { background: var(--dash-mint); }
-.dashboard-editorial-traffic .data-chart-legend .is-request { background: var(--dash-yellow); }
+.dashboard-editorial-traffic :is(.data-chart-head h3, .data-chart-summary dd, .data-chart-detail dd) { color: var(--dash-ink); }
+.dashboard-editorial-traffic :is(.data-chart-legend, .data-chart-summary dt, .data-chart-detail dt) { color: color-mix(in srgb, var(--dash-ink) 56%, transparent); }
+.dashboard-editorial-traffic .usage-chart-title > span {
+	border-color: var(--dash-line);
+	background: color-mix(in srgb, var(--dash-blue) 7%, transparent);
+	color: color-mix(in srgb, var(--dash-blue) 80%, var(--dash-ink));
+}
+.dashboard-editorial-traffic .data-chart-summary { border-color: var(--dash-line); }
+.dashboard-editorial-traffic .usage-chart-plot {
+	border-color: var(--dash-line);
+	background: color-mix(in srgb, white 74%, var(--dash-ice));
+}
+.dashboard-editorial-traffic .data-chart-grid { stroke: color-mix(in srgb, var(--dash-ink) 10%, transparent); }
+.dashboard-editorial-traffic .data-chart-axis { fill: color-mix(in srgb, var(--dash-ink) 56%, transparent); }
+.dashboard-editorial-traffic .data-chart-focus-line { stroke: color-mix(in srgb, var(--dash-blue) 54%, transparent); }
+.dashboard-editorial-traffic .data-chart-token-area { fill: color-mix(in srgb, var(--dash-blue) 10%, transparent); }
+.dashboard-editorial-traffic .data-chart-token-line { stroke: var(--dash-blue); }
+.dashboard-editorial-traffic .data-chart-token-point { fill: color-mix(in srgb, white 88%, var(--dash-ice)); stroke: var(--dash-blue); }
+.dashboard-editorial-traffic .data-chart-token-point.is-active { fill: var(--dash-blue); }
+.dashboard-editorial-traffic .data-chart-request-line { stroke: var(--dash-coral); }
+.dashboard-editorial-traffic .data-chart-request-point { fill: color-mix(in srgb, white 88%, var(--dash-ice)); stroke: var(--dash-coral); }
+.dashboard-editorial-traffic .data-chart-request-point.is-active { fill: var(--dash-coral); }
+.dashboard-editorial-traffic .data-chart-legend .is-token { background: var(--dash-blue); }
+.dashboard-editorial-traffic .data-chart-legend .is-request { background: var(--dash-coral); }
+
+html[data-theme='dark'] .dashboard-editorial-traffic {
+	background: color-mix(in srgb, var(--dash-ice) 82%, #11182a) !important;
+}
+html[data-theme='dark'] .dashboard-editorial-traffic .usage-chart-plot {
+	background: color-mix(in srgb, var(--dash-ice) 86%, #11182a);
+}
+html[data-theme='dark'] .dashboard-editorial-traffic :is(.data-chart-token-point, .data-chart-request-point):not(.is-active) {
+	fill: #18213a;
+}
 
 .dashboard-editorial-spend,
 .dashboard-editorial-cache {
@@ -350,7 +368,7 @@ html[data-theme='dark'] .app-shell.is-product-route .workspace-main:has(.dashboa
 	.dashboard-editorial-models,
 	.dashboard-editorial-channels,
 	.dashboard-editorial-access { grid-column: 1 / span 12; }
-	.dashboard-editorial-traffic { min-height: 24rem !important; }
+	.dashboard-editorial-traffic { min-height: 0 !important; }
 	.dashboard-editorial-spend,
 	.dashboard-editorial-cache { min-height: 8.5rem; }
 	.dashboard-editorial-access { grid-template-columns: 1fr; }
@@ -365,7 +383,7 @@ html[data-theme='dark'] .app-shell.is-product-route .workspace-main:has(.dashboa
 
 @media (max-width: 460px) {
 	.dashboard-editorial-traffic .data-chart-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-	.dashboard-editorial-traffic .data-chart-canvas { min-width: 42rem; }
+	.dashboard-editorial-traffic .data-chart-canvas { min-width: 38rem; }
 	.dashboard-editorial-request-meta small { display: none; }
 	.dashboard-editorial-access dl { grid-template-columns: 1fr; }
 	.dashboard-editorial-access dl > div { border-top: 1px solid rgb(23 32 68 / .1); border-left: 0; }

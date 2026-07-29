@@ -6,9 +6,9 @@ import { formatMoney, formatTokens } from '../api/types'
 const props = defineProps<{ daily: DailyRow[] }>()
 
 const W = 920
-const H = 292
-const PAD = { top: 18, right: 64, bottom: 42, left: 64 }
-const TICK_COUNT = 5
+const H = 252
+const PAD = { top: 18, right: 60, bottom: 34, left: 60 }
+const TICK_COUNT = 4
 const activeIndex = ref<number | null>(null)
 
 function axisValue(value: number) {
@@ -77,13 +77,13 @@ const averageTokens = computed(() => rows.value.length ? Math.round(totalTokens.
 <template>
   <section class="data-chart usage-chart card" aria-labelledby="usage-chart-title">
     <header class="data-chart-head">
-      <div>
+      <div class="usage-chart-title">
         <h3 id="usage-chart-title">近 14 天调用趋势</h3>
-        <p>Token 使用量与请求数采用左右独立刻度。</p>
+        <span>14 天</span>
       </div>
       <div class="data-chart-legend" aria-label="图例">
-        <span><i class="is-token"></i>Token · 左轴</span>
-        <span><i class="is-request"></i>请求 · 右轴</span>
+        <span><i class="is-token"></i>Token</span>
+        <span><i class="is-request"></i>请求</span>
       </div>
     </header>
 
@@ -95,46 +95,55 @@ const averageTokens = computed(() => rows.value.length ? Math.round(totalTokens.
     </dl>
 
     <div v-if="!points.length" class="data-chart-empty">这段时间还没有调用记录</div>
-    <div v-else class="data-chart-scroll" @mouseleave="activeIndex = null">
-      <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="近十四天 Token 与请求双线趋势图">
-        <g v-for="tick in gridTicks" :key="tick.y">
-          <line class="data-chart-grid" :x1="PAD.left" :x2="W - PAD.right" :y1="tick.y" :y2="tick.y" />
-          <text class="data-chart-axis" :x="PAD.left - 12" :y="tick.y + 4" text-anchor="end">{{ axisValue(tick.tokens) }}</text>
-          <text class="data-chart-axis" :x="W - PAD.right + 12" :y="tick.y + 4">{{ axisValue(tick.requests) }}</text>
-        </g>
+    <div v-else class="usage-chart-plot" @mouseleave="activeIndex = null">
+      <dl v-if="selected" class="data-chart-detail" aria-live="polite">
+        <div class="is-date"><dt>当前日期</dt><dd>{{ selected.day }}</dd></div>
+        <div><dt>Token</dt><dd>{{ formatTokens(selected.tokens) }}</dd></div>
+        <div><dt>请求</dt><dd>{{ selected.requests.toLocaleString() }} 次</dd></div>
+        <div><dt>费用</dt><dd>{{ formatMoney(selected.cost_micro) }}</dd></div>
+      </dl>
 
-        <g v-for="(point, index) in points" :key="point.day">
-          <rect v-if="selectedIndex === index" class="data-chart-focus-band" :x="point.x - columnWidth / 2 + 2" :y="PAD.top" :width="columnWidth - 4" :height="plotHeight" rx="5" />
-          <text class="data-chart-axis" :x="point.x" :y="H - 14" text-anchor="middle">{{ point.day.slice(5) }}</text>
-        </g>
+      <div class="data-chart-scroll">
+        <svg :viewBox="`0 0 ${W} ${H}`" class="data-chart-canvas" role="img" aria-label="近十四天 Token 与请求双线趋势图">
+          <g v-for="tick in gridTicks" :key="tick.y">
+            <line class="data-chart-grid" :x1="PAD.left" :x2="W - PAD.right" :y1="tick.y" :y2="tick.y" />
+            <text class="data-chart-axis" :x="PAD.left - 12" :y="tick.y + 4" text-anchor="end">{{ axisValue(tick.tokens) }}</text>
+            <text class="data-chart-axis" :x="W - PAD.right + 12" :y="tick.y + 4">{{ axisValue(tick.requests) }}</text>
+          </g>
 
-        <path v-if="tokenArea" class="data-chart-token-area" :d="tokenArea" />
-        <path v-if="tokenLine" class="data-chart-token-line" :d="tokenLine" />
-        <path v-if="requestLine" class="data-chart-request-line" :d="requestLine" />
-        <circle v-for="(point, index) in points" :key="`token-${point.day}`" class="data-chart-token-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.tokenY" :r="selectedIndex === index ? 4 : 2.5" />
-        <circle v-for="(point, index) in points" :key="`request-${point.day}`" class="data-chart-request-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.requestY" :r="selectedIndex === index ? 4 : 2.5" />
+          <g v-for="(point, index) in points" :key="point.day">
+            <line
+              v-if="selectedIndex === index"
+              class="data-chart-focus-line"
+              :x1="point.x"
+              :x2="point.x"
+              :y1="PAD.top"
+              :y2="PAD.top + plotHeight"
+            />
+            <text class="data-chart-axis" :x="point.x" :y="H - 10" text-anchor="middle">{{ point.day.slice(5) }}</text>
+          </g>
 
-        <rect
-          v-for="(point, index) in points"
-          :key="`hit-${point.day}`"
-          class="data-chart-hit"
-          :x="point.x - columnWidth / 2"
-          :y="PAD.top"
-          :width="columnWidth"
-          :height="plotHeight"
-          tabindex="0"
-          :aria-label="`${point.day}，${formatTokens(point.tokens)} Token，${point.requests} 次请求，${formatMoney(point.cost_micro)}`"
-          @mouseenter="activeIndex = index"
-          @focus="activeIndex = index"
-        />
-      </svg>
+          <path v-if="tokenArea" class="data-chart-token-area" :d="tokenArea" />
+          <path v-if="tokenLine" class="data-chart-token-line" :d="tokenLine" />
+          <path v-if="requestLine" class="data-chart-request-line" :d="requestLine" />
+          <circle v-for="(point, index) in points" :key="`token-${point.day}`" class="data-chart-token-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.tokenY" :r="selectedIndex === index ? 4.5 : 2.2" />
+          <circle v-for="(point, index) in points" :key="`request-${point.day}`" class="data-chart-request-point" :class="{ 'is-active': selectedIndex === index }" :cx="point.x" :cy="point.requestY" :r="selectedIndex === index ? 4.5 : 2.2" />
+
+          <rect
+            v-for="(point, index) in points"
+            :key="`hit-${point.day}`"
+            class="data-chart-hit"
+            :x="point.x - columnWidth / 2"
+            :y="PAD.top"
+            :width="columnWidth"
+            :height="plotHeight"
+            tabindex="0"
+            :aria-label="`${point.day}，${formatTokens(point.tokens)} Token，${point.requests} 次请求，${formatMoney(point.cost_micro)}`"
+            @mouseenter="activeIndex = index"
+            @focus="activeIndex = index"
+          />
+        </svg>
+      </div>
     </div>
-
-    <dl v-if="selected" class="data-chart-detail" aria-live="polite">
-      <div><dt>日期</dt><dd>{{ selected.day }}</dd></div>
-      <div><dt>Token</dt><dd>{{ formatTokens(selected.tokens) }}</dd></div>
-      <div><dt>请求</dt><dd>{{ selected.requests.toLocaleString() }} 次</dd></div>
-      <div><dt>费用</dt><dd>{{ formatMoney(selected.cost_micro) }}</dd></div>
-    </dl>
   </section>
 </template>
