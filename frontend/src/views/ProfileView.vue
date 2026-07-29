@@ -1,13 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref } from 'vue'
 import QRCode from 'qrcode'
 import { api, withToast, setToken } from '../api/client'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
-const route = useRoute()
-const requiresAdminTOTP = computed(() => route.query.security === 'admin-totp-required' && auth.user?.role === 'admin' && !auth.user?.totp_enabled)
 const oldPassword = ref('')
 const newPassword = ref('')
 const confirm = ref('')
@@ -66,21 +63,12 @@ async function disableTOTP() {
   await auth.fetchMe()
 }
 
-async function verifySensitiveActions() {
-	const result = await withToast(() => api.post<{ token: string }>('/api/user/step-up', { password: totpPassword.value, code: totpCode.value }), '敏感操作验证已生效 15 分钟')
-	if (result?.token) setToken(result.token)
-}
 </script>
 
 <template>
   <div class="max-w-2xl">
     <div class="console-page-head">
       <h1>账户设置</h1>
-    </div>
-
-    <div v-if="requiresAdminTOTP" class="card mb-6 border-amber/30 p-5" role="alert">
-      <strong class="text-sm text-amber">请先开启验证器</strong>
-      <p class="mt-1 text-xs text-slate-400">管理员账户完成两步验证后才能进入管理功能。</p>
     </div>
 
     <div class="card mb-6 p-6">
@@ -129,11 +117,11 @@ async function verifySensitiveActions() {
       </div>
     </div>
 
-		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled || auth.user?.role === 'admin'" class="card p-6">
+		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled" class="card p-6">
 			<div class="mb-4 flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-sm font-semibold text-slate-200">验证器</h3>
-					<p class="mt-1 text-xs text-slate-500">管理员敏感操作会校验当前会话的 TOTP 状态。</p>
+					<p class="mt-1 text-xs text-slate-500">可选的登录验证码保护。</p>
 				</div>
 				<span :class="auth.user?.totp_enabled ? 'tag-green' : 'tag-gray'">{{ auth.user?.totp_enabled ? '已开启' : '未开启' }}</span>
 			</div>
@@ -157,7 +145,7 @@ async function verifySensitiveActions() {
 			</div>
 			<div v-else class="mt-4">
 				<button v-if="!auth.user?.totp_enabled" class="btn-primary" :disabled="totpBusy || !totpPassword" @click="setupTOTP">生成绑定信息</button>
-				<div v-else class="flex flex-wrap gap-2"><button class="btn-primary" :disabled="!totpPassword || totpCode.length !== 6" @click="verifySensitiveActions">验证敏感操作</button><button v-if="auth.user?.role !== 'admin'" class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button></div>
+				<button v-else class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button>
 			</div>
 		</div>
   </div>

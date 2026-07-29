@@ -87,19 +87,6 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	}
 	revealPath := "/api/user/keys/" + jsonNumber(created.Data.Key.ID) + "/secret"
 	reveal := callJSON(t, router, http.MethodGet, revealPath, nil, loginBody.Data.Token)
-	if reveal.Code != http.StatusForbidden {
-		t.Fatalf("unverified reveal status=%d body=%s", reveal.Code, reveal.Body.String())
-	}
-	stepUp := callJSON(t, router, http.MethodPost, "/api/user/step-up", map[string]any{"password": "admin12345"}, loginBody.Data.Token)
-	var stepUpBody struct {
-		Data struct {
-			Token string `json:"token"`
-		} `json:"data"`
-	}
-	if stepUp.Code != http.StatusOK || json.Unmarshal(stepUp.Body.Bytes(), &stepUpBody) != nil || stepUpBody.Data.Token == "" {
-		t.Fatalf("step-up status=%d body=%s", stepUp.Code, stepUp.Body.String())
-	}
-	reveal = callJSON(t, router, http.MethodGet, revealPath, nil, stepUpBody.Data.Token)
 	var revealed struct {
 		Data struct {
 			Plain string `json:"plain"`
@@ -126,15 +113,15 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	if err := db.Model(&model.APIKey{}).Where("id = ?", created.Data.Key.ID).Update("key_secret", "").Error; err != nil {
 		t.Fatalf("clear legacy secret: %v", err)
 	}
-	legacyReveal := callJSON(t, router, http.MethodGet, revealPath, nil, stepUpBody.Data.Token)
+	legacyReveal := callJSON(t, router, http.MethodGet, revealPath, nil, loginBody.Data.Token)
 	if legacyReveal.Code != http.StatusConflict {
 		t.Fatalf("legacy reveal status=%d body=%s", legacyReveal.Code, legacyReveal.Body.String())
 	}
-	wrongRecovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": "dd-not-the-key"}, stepUpBody.Data.Token)
+	wrongRecovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": "dd-not-the-key"}, loginBody.Data.Token)
 	if wrongRecovery.Code != http.StatusBadRequest {
 		t.Fatalf("wrong recovery status=%d body=%s", wrongRecovery.Code, wrongRecovery.Body.String())
 	}
-	recovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": created.Data.Plain}, stepUpBody.Data.Token)
+	recovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": created.Data.Plain}, loginBody.Data.Token)
 	if recovery.Code != http.StatusOK {
 		t.Fatalf("recovery status=%d body=%s", recovery.Code, recovery.Body.String())
 	}

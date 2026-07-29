@@ -34,40 +34,39 @@ func runAuthMiddleware(t *testing.T, method string, user *model.User, claims *ut
 	return response
 }
 
-func TestAdminOnlyRequiresTOTPAndMFASession(t *testing.T) {
+func TestAdminOnlyChecksRoleWithoutMFA(t *testing.T) {
 	admin := &model.User{Role: model.RoleAdmin}
-	response := runAuthMiddleware(t, http.MethodGet, admin, &util.Claims{MFA: true}, AdminOnly())
-	if response.Code != http.StatusForbidden {
-		t.Fatalf("admin without TOTP status=%d, want 403", response.Code)
-	}
-
-	admin.TOTPEnabled = true
-	response = runAuthMiddleware(t, http.MethodGet, admin, &util.Claims{}, AdminOnly())
-	if response.Code != http.StatusUnauthorized {
-		t.Fatalf("admin without MFA session status=%d, want 401", response.Code)
-	}
-
-	response = runAuthMiddleware(t, http.MethodGet, admin, &util.Claims{MFA: true}, AdminOnly())
+	response := runAuthMiddleware(t, http.MethodGet, admin, &util.Claims{}, AdminOnly())
 	if response.Code != http.StatusNoContent {
-		t.Fatalf("verified admin status=%d, want 204", response.Code)
+		t.Fatalf("admin status=%d, want 204", response.Code)
+	}
+
+	user := &model.User{Role: model.RoleUser}
+	response = runAuthMiddleware(t, http.MethodGet, user, &util.Claims{}, AdminOnly())
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("regular user status=%d, want 403", response.Code)
 	}
 }
 
-func TestAdminMutationRequiresRecentMFA(t *testing.T) {
+func TestRecentMFAExemptsAdministrators(t *testing.T) {
+	admin := &model.User{Role: model.RoleAdmin}
+	response := runAuthMiddleware(t, http.MethodGet, admin, &util.Claims{}, RequireRecentMFA())
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("administrator status=%d, want 204", response.Code)
+	}
+}
+
+func TestRecentMFAStillProtectsRegularUsers(t *testing.T) {
+	user := &model.User{Role: model.RoleUser}
 	oldClaims := &util.Claims{
 		MFA: true,
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt: jwt.NewNumericDate(time.Now().Add(-16 * time.Minute)),
 		},
 	}
-	response := runAuthMiddleware(t, http.MethodPost, nil, oldClaims, RequireAdminMutationMFA())
+	response := runAuthMiddleware(t, http.MethodGet, user, oldClaims, RequireRecentMFA())
 	if response.Code != http.StatusForbidden {
-		t.Fatalf("stale mutation status=%d, want 403", response.Code)
-	}
-
-	response = runAuthMiddleware(t, http.MethodGet, nil, oldClaims, RequireAdminMutationMFA())
-	if response.Code != http.StatusNoContent {
-		t.Fatalf("read-only request status=%d, want 204", response.Code)
+		t.Fatalf("stale verification status=%d, want 403", response.Code)
 	}
 
 	recentClaims := &util.Claims{
@@ -76,8 +75,8 @@ func TestAdminMutationRequiresRecentMFA(t *testing.T) {
 			IssuedAt: jwt.NewNumericDate(time.Now().Add(-time.Minute)),
 		},
 	}
-	response = runAuthMiddleware(t, http.MethodPost, nil, recentClaims, RequireAdminMutationMFA())
+	response = runAuthMiddleware(t, http.MethodGet, user, recentClaims, RequireRecentMFA())
 	if response.Code != http.StatusNoContent {
-		t.Fatalf("recent mutation status=%d, want 204", response.Code)
+		t.Fatalf("recent verification status=%d, want 204", response.Code)
 	}
 }

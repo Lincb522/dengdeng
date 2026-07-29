@@ -206,10 +206,6 @@ func (h *UserHandler) EnableTOTP(c *gin.Context) {
 
 func (h *UserHandler) DisableTOTP(c *gin.Context) {
 	user := middleware.CurrentUser(c)
-	if user.Role == model.RoleAdmin {
-		util.FailCode(c, http.StatusForbidden, "permission.admin_totp_required", "administrator two-factor authentication cannot be disabled")
-		return
-	}
 	var req totpDisableReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
 		util.FailCode(c, http.StatusForbidden, "auth.password_invalid", "current password is incorrect")

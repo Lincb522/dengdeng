@@ -137,7 +137,6 @@ const errorCopy: Record<string, ErrorCopy> = {
   'permission.denied': { title: '没有权限', message: '当前账户不能执行此操作。' },
   'permission.admin_required': { title: '仅管理员可用', message: '请使用管理员账户操作。' },
   'permission.step_up_required': { title: '需要二次验证', message: '请先完成身份验证器确认。' },
-  'permission.admin_totp_required': { title: '请先开启验证器', message: '管理员必须开启两步验证后才能进入管理功能。', action: '请在账户设置中绑定身份验证器。' },
   'resource.not_found': { title: '内容不存在', message: '目标可能已被删除或移动。' },
   'resource.conflict': { title: '状态已发生变化', message: '当前操作与最新数据冲突。', action: '请刷新页面后重试。', retryable: true },
   'resource.disabled': { title: '功能未启用', message: '当前功能或资源已被管理员停用。' },

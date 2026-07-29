@@ -64,7 +64,6 @@ router.beforeEach(async (to) => {
   }
   if (to.meta.admin || to.matched.some((r) => r.meta.admin)) {
     if (auth.user?.role !== 'admin') return { name: 'dashboard' }
-    if (!auth.user.totp_enabled) return { name: 'profile', query: { security: 'admin-totp-required' } }
   }
   return true
 })

@@ -552,7 +552,6 @@ onMounted(load)
 					<label class="settings-toggle-row"><span><strong>忘记密码</strong><small>允许用户通过验证邮件重置密码。</small></span><input v-model="form.security.password_reset_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>TOTP 双因素认证</strong><small>控制普通用户绑定入口；管理员始终需要验证器。</small></span><input v-model="form.security.totp_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>会话 IP / UA 绑定</strong><small>客户端指纹变化后要求重新登录。</small></span><input v-model="form.security.session_binding_enabled" type="checkbox" role="switch" /></label>
-					<label class="settings-toggle-row"><span><strong>敏感操作二次验证</strong><small>导出凭据、备份下载和安全设置变更要求最近完成 TOTP。</small></span><input v-model="form.security.step_up_enabled" type="checkbox" role="switch" /></label>
 				</div>
 			</section>
 			<section class="settings-section settings-section--quiet">
