@@ -20,6 +20,7 @@ const password = ref('')
 const confirm = ref('')
 const verificationCode = ref('')
 const totpCode = ref('')
+const totpRequired = ref(false)
 const referralCode = ref(new URLSearchParams(window.location.search).get('ref') || '')
 const busy = ref(false)
 const sendingCode = ref(false)
@@ -72,6 +73,10 @@ watch(
     if (agreementRequired.value && agreement.value.mode === 'modal') agreementVisible.value = true
   },
 )
+watch([email, mode], () => {
+  totpRequired.value = false
+  totpCode.value = ''
+})
 watch(agreementVisible, async (visible) => {
   if (!visible) {
     unlockAgreementPage()
@@ -240,6 +245,10 @@ async function completeOAuth() {
 		pendingOAuthCode.value = ''
 		await router.push('/dashboard')
 	} catch (e) {
+		if (isAppError(e) && e.code === 'auth.totp_invalid') {
+			totpRequired.value = true
+			totpCode.value = ''
+		}
 		toast.showError(e, '第三方登录确认失败')
 	} finally {
 		busy.value = false
@@ -285,6 +294,10 @@ async function submit() {
     }
     router.push('/dashboard')
   } catch (e) {
+    if (mode.value === 'login' && isAppError(e) && e.code === 'auth.totp_invalid') {
+      totpRequired.value = true
+      totpCode.value = ''
+    }
     if (mode.value === 'login' && isAppError(e) && e.code === 'auth.terms_required') {
       await auth.loadPublicSettings()
       acceptedAgreement.value = false
@@ -368,9 +381,9 @@ async function submit() {
             </div>
           </div>
 
-					<div v-if="mode === 'login'" class="login-field">
+					<div v-if="mode === 'login' && totpRequired" class="login-field">
 						<label for="totp-code">验证器验证码</label>
-						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="未开启时留空" />
+						<input id="totp-code" v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字" />
 					</div>
 			<button v-if="pendingOAuthCode" type="button" class="login-submit" :disabled="busy" @click="completeOAuth">完成第三方登录</button>
 

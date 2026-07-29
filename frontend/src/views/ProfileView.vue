@@ -117,7 +117,7 @@ async function disableTOTP() {
       </div>
     </div>
 
-		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled" class="card p-6">
+		<div v-if="auth.user?.role !== 'admin' && (auth.security.totp_enabled || auth.user?.totp_enabled)" class="card p-6">
 			<div class="mb-4 flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-sm font-semibold text-slate-200">验证器</h3>

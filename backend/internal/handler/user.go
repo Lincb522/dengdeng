@@ -55,10 +55,11 @@ func (h *UserHandler) requireTOTPFeature(c *gin.Context) bool {
 		return false
 	}
 	user := middleware.CurrentUser(c)
-	// Administrators must always be able to bind a verifier because access to
-	// the administration API requires it, even when self-service TOTP is
-	// disabled for ordinary users.
-	if !settings.Security.TOTPEnabled && user.Role != model.RoleAdmin {
+	if user.Role == model.RoleAdmin {
+		util.Fail(c, http.StatusForbidden, "administrator authenticator is disabled")
+		return false
+	}
+	if !settings.Security.TOTPEnabled {
 		util.Fail(c, http.StatusForbidden, "authenticator setup is disabled by the administrator")
 		return false
 	}
