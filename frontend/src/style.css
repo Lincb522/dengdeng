@@ -1481,25 +1481,26 @@ body.has-app-modal { overflow: hidden; }
 	.usage-model-trigger[aria-expanded='true'] { color: var(--ink); }
 	.usage-location-trigger:focus-visible,
 	.usage-model-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-	.usage-location-trigger svg,
-	.usage-model-trigger svg { width: .86rem; height: .86rem; flex: 0 0 auto; }
-	.usage-location-trigger circle,
-	.usage-location-trigger path,
-	.usage-model-trigger circle,
-	.usage-model-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
+	.usage-location-trigger > svg,
+	.usage-model-trigger > svg { width: .86rem; height: .86rem; flex: 0 0 auto; }
+	.usage-location-trigger > svg circle,
+	.usage-location-trigger > svg path,
+	.usage-model-trigger > svg circle,
+	.usage-model-trigger > svg path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
 	.usage-model-trigger {
 		display: grid;
 		width: max-content;
 		max-width: none;
-		grid-template-columns: minmax(7rem, auto) auto;
+		grid-template-columns: auto minmax(7rem, auto) auto;
 		grid-template-rows: auto auto;
 		gap: .1rem .42rem;
 		color: var(--ink);
 		text-align: left;
 	}
+	.usage-model-trigger > .provider-logo { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
 	.usage-model-trigger .usage-model-summary {
 		display: grid;
-		grid-column: 1;
+		grid-column: 2;
 		grid-row: 1 / span 2;
 		gap: .18rem;
 		width: max-content;
@@ -1522,7 +1523,7 @@ body.has-app-modal { overflow: hidden; }
 		line-height: 1.25;
 		white-space: nowrap;
 	}
-	.usage-model-trigger > svg { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+	.usage-model-trigger > svg { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
 	.usage-time {
 		display: grid;
 		gap: .18rem;
@@ -2071,9 +2072,9 @@ body.has-app-modal { overflow: hidden; }
 		text-align: left;
 		transition: color .16s ease, background .16s ease;
 	}
-	.account-route-trigger { grid-template-columns: minmax(0, 1fr) auto; }
+	.account-route-trigger { grid-template-columns: auto minmax(0, 1fr) auto; }
 	.account-quota-trigger { grid-template-columns: minmax(0, 1fr) auto auto; }
-	.account-route-trigger > span,
+	.account-route-trigger > .account-route-summary,
 	.account-quota-trigger > span { display: grid; min-width: 0; gap: .18rem; }
 	.account-route-trigger strong,
 	.account-quota-trigger strong { overflow: hidden; color: var(--ink); font-size: .72rem; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
@@ -2081,10 +2082,10 @@ body.has-app-modal { overflow: hidden; }
 	.account-quota-trigger small { overflow: hidden; color: var(--ink-soft); font-size: .64rem; text-overflow: ellipsis; white-space: nowrap; }
 	.account-route-trigger > svg,
 	.account-quota-trigger > svg { width: .84rem; height: .84rem; flex: 0 0 auto; color: var(--ink-soft); }
-	.account-route-trigger circle,
-	.account-route-trigger path,
-	.account-quota-trigger circle,
-	.account-quota-trigger path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
+	.account-route-trigger > svg circle,
+	.account-route-trigger > svg path,
+	.account-quota-trigger > svg circle,
+	.account-quota-trigger > svg path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
 	.account-route-trigger:hover,
 	.account-route-trigger[aria-expanded='true'],
 	.account-quota-trigger:hover,
@@ -4089,6 +4090,50 @@ body.has-app-modal { overflow: hidden; }
 .app-shell.is-product-route .dashboard-ledger-value { color: oklch(25% .05 65); }
 .app-shell.is-product-route .dashboard-ledger-balance a { color: oklch(38% .095 60); }
 .login-frame { border: 0; box-shadow: 0 5px 8px var(--shadow); }
+
+/* Provider identity ----------------------------------------------------- */
+.provider-logo {
+	--provider-logo-size: 1.5rem;
+	display: inline-grid;
+	width: var(--provider-logo-size);
+	height: var(--provider-logo-size);
+	flex: 0 0 auto;
+	place-items: center;
+	overflow: hidden;
+	border: 1px solid color-mix(in srgb, currentColor 16%, var(--line));
+	border-radius: .45rem;
+	background: color-mix(in srgb, currentColor 5%, var(--surface));
+	color: var(--ink);
+	line-height: 1;
+}
+.provider-logo.is-sm { --provider-logo-size: 1.22rem; border-radius: .36rem; }
+.provider-logo.is-lg { --provider-logo-size: 2rem; border-radius: .52rem; }
+.provider-logo svg { width: 58%; height: 58%; fill: currentColor; }
+.provider-logo.is-openai { color: var(--ink); }
+.provider-logo.is-anthropic { color: #b8563f; }
+.provider-logo.is-gemini { color: #6257c8; }
+.provider-logo.is-grok,
+.provider-logo.is-xai { color: var(--ink); }
+.provider-logo__xai {
+	font-family: ui-sans-serif, sans-serif;
+	font-size: calc(var(--provider-logo-size) * .33);
+	font-weight: 900;
+	letter-spacing: -.08em;
+}
+.provider-logo__fallback {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: calc(var(--provider-logo-size) * .42);
+	font-weight: 900;
+	text-transform: uppercase;
+}
+.provider-inline-label {
+	display: inline-flex !important;
+	align-items: center;
+	gap: .34rem;
+	white-space: nowrap;
+}
+:root[data-theme='dark'] .provider-logo.is-anthropic { color: #ef9d85; }
+:root[data-theme='dark'] .provider-logo.is-gemini { color: #afa7ff; }
 
 @media (max-width: 900px) {
 	.app-shell.is-product-route .dashboard-main-grid,

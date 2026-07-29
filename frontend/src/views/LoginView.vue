@@ -6,6 +6,7 @@ import { isAppError } from '../api/errors'
 import { useAuth } from '../stores/auth'
 import { useToast } from '../stores/toast'
 import BrandMark from '../components/BrandMark.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import TurnstileWidget from '../components/TurnstileWidget.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import InterfaceThemeSwitcher from '../components/InterfaceThemeSwitcher.vue'
@@ -321,10 +322,10 @@ async function submit() {
           <div><strong>{{ auth.siteName }}</strong><span>蹬蹬ai</span></div>
         </div>
         <div class="login-visual-stage" aria-hidden="true">
-          <span class="login-visual-node is-openai">OpenAI</span>
-          <span class="login-visual-node is-claude">Claude</span>
-          <span class="login-visual-node is-gemini">Gemini</span>
-          <span class="login-visual-node is-image">Image</span>
+          <span class="login-visual-node is-openai"><ProviderLogo platform="openai" size="sm" />OpenAI</span>
+          <span class="login-visual-node is-claude"><ProviderLogo platform="anthropic" size="sm" />Claude</span>
+          <span class="login-visual-node is-gemini"><ProviderLogo platform="gemini" size="sm" />Gemini</span>
+          <span class="login-visual-node is-xai"><ProviderLogo platform="grok" size="sm" />Grok</span>
           <span class="login-visual-route is-route-a"></span>
           <span class="login-visual-route is-route-b"></span>
           <span class="login-visual-center"><BrandMark :size="40" /></span>

@@ -4,6 +4,7 @@ import { api, withToast } from '../../api/client'
 import type { Group } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import AppModal from '../../components/AppModal.vue'
+import ProviderLogo from '../../components/ProviderLogo.vue'
 import { useTheme } from '../../stores/theme'
 
 const theme = useTheme()
@@ -219,7 +220,7 @@ async function togglePublic(g: Group) {
             <strong>{{ g.name }}</strong>
             <small>{{ g.description || '未填写说明' }}</small>
           </div>
-          <b>{{ PLATFORM_LABELS[g.platform] }}</b>
+          <b class="provider-inline-label"><ProviderLogo :platform="g.platform" size="sm" />{{ PLATFORM_LABELS[g.platform] }}</b>
         </header>
         <dl>
           <div>
@@ -272,7 +273,7 @@ async function togglePublic(g: Group) {
               <div class="font-medium text-slate-200">{{ g.name }}</div>
               <div class="text-xs text-slate-500">{{ g.description }}</div>
             </td>
-            <td><span class="tag-amber">{{ PLATFORM_LABELS[g.platform] }}</span></td>
+            <td><span class="tag-amber provider-inline-label"><ProviderLogo :platform="g.platform" size="sm" />{{ PLATFORM_LABELS[g.platform] }}</span></td>
             <td class="num text-sm">
               <span :class="(g.account_alive ?? 0) > 0 ? 'text-signal-green' : 'text-signal-red'">{{ g.account_alive ?? 0 }}</span>
               <span class="text-slate-500"> / {{ g.account_total ?? 0 }}</span>

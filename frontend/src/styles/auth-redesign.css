@@ -112,8 +112,12 @@ html[data-ui-theme] .login-visual::after {
 }
 
 .login-visual-node {
+	display: inline-flex;
 	min-width: 5.15rem;
 	min-height: 2.2rem;
+	align-items: center;
+	justify-content: center;
+	gap: .38rem;
 	border-radius: 9px;
 	padding: 0 .65rem;
 	color: var(--auth-navy);
@@ -124,7 +128,12 @@ html[data-ui-theme] .login-visual::after {
 .login-visual-node.is-openai { top: 8%; left: 50%; background: var(--auth-mint); transform: translateX(-50%); }
 .login-visual-node.is-claude { top: 43%; right: 0; background: var(--auth-yellow); }
 .login-visual-node.is-gemini { bottom: 8%; left: 50%; background: var(--auth-lilac); transform: translateX(-50%); }
-.login-visual-node.is-image { top: 43%; left: 0; background: #ffb4b2; }
+.login-visual-node.is-xai { top: 43%; left: 0; background: #ffb4b2; }
+
+.login-visual-node .provider-logo {
+	border-color: rgb(23 32 68 / .12);
+	background: rgb(255 255 255 / .72);
+}
 
 .login-visual-route {
 	position: absolute;

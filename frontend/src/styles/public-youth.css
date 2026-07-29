@@ -407,9 +407,17 @@
 }
 
 .home-model-name small {
+	display: inline-flex;
+	align-items: center;
+	gap: .32rem;
 	color: rgb(230 236 250 / .66);
 	font-size: .61rem;
 	font-weight: 700;
+}
+
+.home-model-name small .provider-logo {
+	border-color: rgb(255 255 255 / .16);
+	background: rgb(255 255 255 / .92);
 }
 
 .home-model-kind {
@@ -580,7 +588,10 @@
 }
 
 .model-platform-tabs button {
+	display: inline-flex;
 	min-height: 2.3rem;
+	align-items: center;
+	gap: .34rem;
 	padding: 0 .72rem;
 	border-radius: .5rem;
 	color: var(--public-muted);
@@ -603,8 +614,13 @@
 	color: rgb(255 255 255 / .8);
 }
 
+.model-platform-tabs button.is-active .provider-logo {
+	border-color: rgb(255 255 255 / .24);
+	background: rgb(255 255 255 / .14);
+	color: #fff;
+}
+
 .model-platform-tabs b {
-	margin-left: .18rem;
 	color: var(--public-muted);
 	font-size: .62rem;
 }
@@ -703,6 +719,9 @@
 }
 
 .model-platform-label {
+	display: inline-flex;
+	align-items: center;
+	gap: .38rem;
 	color: var(--public-muted);
 	font-size: .61rem;
 	font-weight: 800;
@@ -958,7 +977,8 @@
 	}
 
 	.model-platform-tabs {
-		overflow-x: auto;
+		flex-wrap: wrap;
+		overflow: visible;
 	}
 
 	.model-plaza-fields {

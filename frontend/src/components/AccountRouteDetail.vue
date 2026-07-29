@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { UpstreamAccount } from '../api/types'
 import { PLATFORM_LABELS } from '../api/types'
 import { useAnchoredPopover } from '../composables/useAnchoredPopover'
+import ProviderLogo from './ProviderLogo.vue'
 
 const props = defineProps<{ account: UpstreamAccount }>()
 const { trigger, panel, open, panelStyle, clearCloseTimer, show, scheduleClose, togglePinned } = useAnchoredPopover('start')
@@ -41,7 +42,8 @@ const proxyName = computed(() => props.account.proxy?.name || '默认出口')
 		@focus="show"
 		@blur="scheduleClose"
 	>
-		<span><strong>{{ summaryName }}</strong><small>{{ summaryRoute }}</small></span>
+		<ProviderLogo :platform="account.platform" size="md" />
+		<span class="account-route-summary"><strong>{{ summaryName }}</strong><small>{{ summaryRoute }}</small></span>
 		<svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.25" /><path d="M10 8.2v5M10 5.8h.01" /></svg>
 	</button>
 
@@ -57,7 +59,7 @@ const proxyName = computed(() => props.account.proxy?.name || '默认出口')
 				@mouseenter="clearCloseTimer"
 				@mouseleave="scheduleClose"
 			>
-				<header><strong>账号与路由</strong><span>{{ platformName }}</span></header>
+				<header><strong>账号与路由</strong><span class="provider-inline-label"><ProviderLogo :platform="account.platform" size="sm" />{{ platformName }}</span></header>
 				<dl class="usage-location-lines account-route-lines">
 					<div><dt>账号名称</dt><dd>{{ account.name || '未记录' }}</dd></div>
 					<div><dt>账号邮箱</dt><dd>{{ account.email || '未记录' }}</dd></div>

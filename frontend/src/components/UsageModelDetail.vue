@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import type { UsageLog } from '../api/types'
 import { reasoningLabel } from '../api/reasoning'
 import { useAnchoredPopover } from '../composables/useAnchoredPopover'
+import ProviderLogo from './ProviderLogo.vue'
 
 const props = defineProps<{ log: UsageLog; showInternal?: boolean }>()
 
@@ -50,16 +51,23 @@ function modelShortName(model?: string) {
 }
 
 function providerLabel(model?: string, platform?: string) {
-	const normalizedPlatform = (platform || '').toLowerCase()
+	const normalizedPlatform = providerPlatform(model, platform)
 	if (normalizedPlatform === 'anthropic') return 'Anthropic'
 	if (normalizedPlatform === 'gemini') return 'Google'
 	if (normalizedPlatform === 'openai') return 'OpenAI'
 	if (normalizedPlatform === 'grok') return 'xAI'
-	const normalized = (model || '').toLowerCase()
-	if (normalized.startsWith('claude-')) return 'Anthropic'
-	if (normalized.startsWith('gemini-')) return 'Google'
-	if (/^(gpt-|o\d|codex-)/.test(normalized)) return 'OpenAI'
 	return '自动识别'
+}
+
+function providerPlatform(model?: string, platform?: string) {
+	const normalizedPlatform = (platform || '').toLowerCase()
+	if (normalizedPlatform) return normalizedPlatform
+	const normalized = (model || '').toLowerCase()
+	if (normalized.startsWith('claude-')) return 'anthropic'
+	if (normalized.startsWith('gemini-')) return 'gemini'
+	if (normalized.startsWith('grok-')) return 'grok'
+	if (/^(gpt-|o\d|codex-)/.test(normalized)) return 'openai'
+	return ''
 }
 
 function protocolLabel(path?: string) {
@@ -73,6 +81,7 @@ function protocolLabel(path?: string) {
 
 const shortName = computed(() => modelShortName(props.log.model))
 const groupName = computed(() => (props.log.group_name || '').trim() || '未记录分组')
+const platform = computed(() => providerPlatform(props.log.model, props.log.platform))
 </script>
 
 <template>
@@ -89,6 +98,7 @@ const groupName = computed(() => (props.log.group_name || '').trim() || '未记�
 		@focus="show"
 		@blur="scheduleClose"
 	>
+		<ProviderLogo :platform="platform" size="md" />
 		<span class="usage-model-summary">
 			<strong>{{ groupName }}</strong>
 			<small>{{ log.model || '未记录模型' }}</small>
@@ -113,7 +123,7 @@ const groupName = computed(() => (props.log.group_name || '').trim() || '未记�
 			>
 				<header>
 					<strong>路由与模型</strong>
-					<span>{{ providerLabel(log.model, log.platform) }}</span>
+					<span class="provider-inline-label"><ProviderLogo :platform="platform" size="sm" />{{ providerLabel(log.model, log.platform) }}</span>
 				</header>
 
 				<dl class="usage-location-lines usage-model-lines">

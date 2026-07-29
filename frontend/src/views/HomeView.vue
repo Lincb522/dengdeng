@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { ModelCatalogueItem } from '../api/types'
 import { PLATFORM_LABELS } from '../api/types'
 import BrandMark from '../components/BrandMark.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import { useAuth } from '../stores/auth'
 
@@ -90,7 +91,7 @@ onMounted(() => {
             <span class="home-model-index">{{ String(index + 1).padStart(2, '0') }}</span>
             <span class="home-model-name">
               <strong>{{ item.name }}</strong>
-              <small>{{ PLATFORM_LABELS[item.platform] || item.platform }}</small>
+              <small><ProviderLogo :platform="item.platform" size="sm" />{{ PLATFORM_LABELS[item.platform] || item.platform }}</small>
             </span>
             <span class="home-model-kind">{{ item.kind === 'image' ? '图像' : '对话' }}</span>
           </RouterLink>

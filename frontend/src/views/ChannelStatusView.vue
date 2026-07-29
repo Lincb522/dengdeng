@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../api/client'
 import type { ChannelGroupStatus, ChannelStatusResponse } from '../api/types'
 import { PLATFORM_LABELS } from '../api/types'
+import ProviderLogo from '../components/ProviderLogo.vue'
 
 const ranges = [
   { value: '1h', label: '1 小时' },
@@ -122,7 +123,7 @@ onBeforeUnmount(() => {
         <div class="channel-card-grid">
           <article v-for="group in items" :key="group.id" class="channel-card" :class="`is-${group.state}`">
             <header class="channel-card-head">
-              <span class="channel-platform-mark" aria-hidden="true">{{ platformLabel(group.platform).slice(0, 1) }}</span>
+              <ProviderLogo class="channel-platform-mark" :platform="group.platform" size="lg" />
               <div>
                 <div><h3 :title="group.name">{{ group.name }}</h3><span v-if="data?.admin_view && !group.is_public" class="channel-private-tag">私有</span></div>
                 <p><span>{{ platformFamily(group.platform) }}</span><code :title="group.top_model">{{ group.top_model || '暂无请求模型' }}</code></p>
@@ -199,7 +200,7 @@ onBeforeUnmount(() => {
 }
 .channel-card:hover { background: color-mix(in srgb, var(--surface-muted) 42%, var(--surface)); }
 .channel-card-head { display: flex; min-width: 0; align-items: center; gap: .62rem; }
-.channel-platform-mark { display: grid; width: 2rem; height: 2rem; flex: 0 0 auto; place-items: center; border-radius: .48rem; background: var(--surface-muted); color: var(--ink); font-size: .68rem; font-weight: 900; }
+.channel-platform-mark { flex: 0 0 auto; }
 .channel-card-head > div { display: grid; min-width: 0; flex: 1; gap: .3rem; }
 .channel-card-head > div > div { display: flex; min-width: 0; align-items: center; gap: .42rem; }
 .channel-card-head h3 { overflow: hidden; font-size: .78rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }

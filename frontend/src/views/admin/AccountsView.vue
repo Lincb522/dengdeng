@@ -9,6 +9,7 @@ import { useToast } from '../../stores/toast'
 import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
 import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
+import ProviderLogo from '../../components/ProviderLogo.vue'
 import { useAuth } from '../../stores/auth'
 import { useTheme } from '../../stores/theme'
 import AppModal from '../../components/AppModal.vue'
@@ -1037,7 +1038,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         </header>
 
         <div class="account-card-tags">
-          <span class="tag-gray">{{ PLATFORM_LABELS[a.platform] }}</span>
+          <span class="tag-gray provider-inline-label"><ProviderLogo :platform="a.platform" size="sm" />{{ PLATFORM_LABELS[a.platform] }}</span>
           <span :class="authBadge(a).cls">{{ authBadge(a).label }}</span>
           <span :class="a.proxy ? 'tag-cyan' : 'tag-gray'" class="max-w-[11rem] truncate" :title="a.proxy?.name || '默认出口'">{{ a.proxy?.name || '默认出口' }}</span>
         </div>

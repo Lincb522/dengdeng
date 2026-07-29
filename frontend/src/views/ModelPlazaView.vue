@@ -4,6 +4,7 @@ import { api, getToken } from '../api/client'
 import type { ModelCatalogueItem } from '../api/types'
 import { PLATFORM_LABELS } from '../api/types'
 import BrandMark from '../components/BrandMark.vue'
+import ProviderLogo from '../components/ProviderLogo.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 
 const models = ref<ModelCatalogueItem[]>([])
@@ -30,6 +31,7 @@ const counts = computed(() => ({
   openai: models.value.filter((model) => model.platform === 'openai').length,
   anthropic: models.value.filter((model) => model.platform === 'anthropic').length,
   gemini: models.value.filter((model) => model.platform === 'gemini').length,
+  grok: models.value.filter((model) => model.platform === 'grok').length,
 }))
 
 function pricing(value: number | undefined) {
@@ -106,9 +108,10 @@ onMounted(load)
       <section class="model-plaza-toolbar" aria-label="模型筛选">
         <div class="model-platform-tabs">
           <button type="button" :class="{ 'is-active': platform === 'all' }" @click="platform = 'all'">全部 <b>{{ counts.all }}</b></button>
-          <button type="button" :class="{ 'is-active': platform === 'openai' }" @click="platform = 'openai'">OpenAI <b>{{ counts.openai }}</b></button>
-          <button type="button" :class="{ 'is-active': platform === 'anthropic' }" @click="platform = 'anthropic'">Claude <b>{{ counts.anthropic }}</b></button>
-          <button type="button" :class="{ 'is-active': platform === 'gemini' }" @click="platform = 'gemini'">Gemini <b>{{ counts.gemini }}</b></button>
+          <button type="button" :class="{ 'is-active': platform === 'openai' }" @click="platform = 'openai'"><ProviderLogo platform="openai" size="sm" />OpenAI <b>{{ counts.openai }}</b></button>
+          <button type="button" :class="{ 'is-active': platform === 'anthropic' }" @click="platform = 'anthropic'"><ProviderLogo platform="anthropic" size="sm" />Claude <b>{{ counts.anthropic }}</b></button>
+          <button type="button" :class="{ 'is-active': platform === 'gemini' }" @click="platform = 'gemini'"><ProviderLogo platform="gemini" size="sm" />Gemini <b>{{ counts.gemini }}</b></button>
+          <button v-if="counts.grok" type="button" :class="{ 'is-active': platform === 'grok' }" @click="platform = 'grok'"><ProviderLogo platform="grok" size="sm" />Grok <b>{{ counts.grok }}</b></button>
         </div>
         <div class="model-plaza-fields">
           <select v-model="kind" class="input model-kind-select"><option value="all">全部类型</option><option value="chat">对话模型</option><option value="image">图像模型</option></select>
@@ -127,7 +130,7 @@ onMounted(load)
           <div class="model-card-scroll">
             <div class="model-card-top">
               <div class="model-card-title">
-                <span class="model-platform-label">{{ PLATFORM_LABELS[item.platform] || item.platform }}</span>
+                <span class="model-platform-label"><ProviderLogo :platform="item.platform" size="sm" />{{ PLATFORM_LABELS[item.platform] || item.platform }}</span>
                 <h2 :title="item.name">{{ item.name }}</h2>
               </div>
               <span :class="item.available ? 'tag-green' : 'tag-amber'">{{ item.available ? '可调用' : '暂无可用上游' }}</span>
