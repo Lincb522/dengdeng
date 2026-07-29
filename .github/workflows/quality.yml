@@ -14,13 +14,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend tests and vulnerability scan
+  quality:
+    name: Build, tests and vulnerability scan
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: backend
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -29,23 +26,6 @@ jobs:
         with:
           go-version: "1.26.5"
           cache-dependency-path: backend/go.sum
-      - name: Verify modules
-        run: go mod verify
-      - name: Run tests
-        run: go test ./...
-      - name: Check reachable vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
-
-  frontend:
-    name: Frontend build and dependency audit
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up pnpm
         uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
@@ -58,7 +38,19 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+        working-directory: frontend
       - name: Build
         run: pnpm build
+        working-directory: frontend
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
+        working-directory: frontend
+      - name: Verify modules
+        run: go mod verify
+        working-directory: backend
+      - name: Run tests
+        run: go test ./...
+        working-directory: backend
+      - name: Check reachable vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        working-directory: backend
