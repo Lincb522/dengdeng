@@ -5,6 +5,8 @@ import type { Group, OpsAccountHealth, OpsErrorLog, OpsRank, OpsSnapshot } from 
 import { formatMoney, formatTokens, PLATFORM_LABELS } from '../../api/types'
 import { summarizeProviderError } from '../../api/errors'
 import OpsTrendChart from '../../components/OpsTrendChart.vue'
+import ProviderLogo from '../../components/ProviderLogo.vue'
+import ProviderSelect from '../../components/ProviderSelect.vue'
 import ServerMonitorPanel from '../../components/ServerMonitorPanel.vue'
 
 const snapshot = ref<OpsSnapshot | null>(null)
@@ -29,7 +31,7 @@ const overview = computed(() => snapshot.value?.overview)
 const lastUpdated = computed(() => snapshot.value ? new Date(snapshot.value.generated_at).toLocaleString() : '—')
 const visibleGroups = computed(() => groups.value.filter((group) => !platform.value || group.platform === platform.value))
 const rankSections = computed(() => [
-  { title: '模型分布', items: snapshot.value?.top_models ?? [] },
+  { title: '模型分布', items: snapshot.value?.top_models ?? [], showProvider: true },
   { title: '分组负载', items: snapshot.value?.top_groups ?? [] },
   { title: '调用用户', items: snapshot.value?.top_users ?? [] },
 ])
@@ -153,6 +155,28 @@ function schedulerGroupName(groupId: number) {
 	return groups.value.find((group) => group.id === groupId)?.name || `分组 #${groupId}`
 }
 
+function schedulerGroupPlatform(groupId: number) {
+	return groups.value.find((group) => group.id === groupId)?.platform || ''
+}
+
+function modelPlatform(model?: string) {
+	const normalized = (model || '').trim().toLowerCase().replace(/^models\//, '')
+	if (normalized.startsWith('claude-')) return 'anthropic'
+	if (normalized.startsWith('gemini-')) return 'gemini'
+	if (normalized.startsWith('grok-')) return 'grok'
+	if (/^(gpt-|o\d|codex-)/.test(normalized)) return 'openai'
+	return platform.value
+}
+
+function namedPlatform(name?: string) {
+	const normalized = (name || '').trim().toLowerCase()
+	if (normalized === 'claude' || normalized === 'anthropic') return 'anthropic'
+	if (normalized === 'google' || normalized === 'gemini') return 'gemini'
+	if (normalized === 'xai' || normalized === 'grok') return 'grok'
+	if (normalized === 'openai') return 'openai'
+	return ''
+}
+
 async function triggerAllProbes() {
   probingAll.value = true
   try {
@@ -249,7 +273,7 @@ onBeforeUnmount(() => {
         <button v-for="item in [{ value: '5m', label: '5 分钟' }, { value: '30m', label: '30 分钟' }, { value: '1h', label: '1 小时' }, { value: '6h', label: '6 小时' }, { value: '24h', label: '24 小时' }, { value: '7d', label: '7 天' }, { value: '30d', label: '30 天' }]" :key="item.value" type="button" :class="{ 'is-active': range === item.value }" @click="setRange(item.value)">{{ item.label }}</button>
       </div>
       <div class="ops-filter-selects">
-        <select v-model="platform" class="input"><option value="">全部平台</option><option value="anthropic">Claude</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
+        <ProviderSelect v-model="platform" include-all aria-label="监控平台筛选" />
         <select v-model="groupID" class="input"><option value="">全部分组</option><option v-for="group in visibleGroups" :key="group.id" :value="String(group.id)">{{ group.name }}</option></select>
       </div>
       <time class="ops-updated">{{ lastUpdated }}</time>
@@ -274,6 +298,7 @@ onBeforeUnmount(() => {
 
       <section v-if="snapshot?.scheduler_diagnostics.length" class="ops-diagnostic-list" aria-label="调度诊断">
         <article v-for="diagnostic in snapshot.scheduler_diagnostics" :key="diagnostic.group_id" class="ops-diagnostic">
+          <ProviderLogo :platform="schedulerGroupPlatform(diagnostic.group_id) || modelPlatform(diagnostic.model)" size="md" />
           <div><span>503 调度</span><strong>{{ schedulerGroupName(diagnostic.group_id) }}</strong><code v-if="diagnostic.model">{{ diagnostic.model }}</code></div>
           <div class="ops-diagnostic-reasons"><span v-for="(count, reason) in diagnostic.reasons" :key="reason">{{ schedulerReasonLabel(String(reason)) }} {{ count }}</span></div>
           <time>{{ new Date(diagnostic.updated_at).toLocaleString() }}</time>
@@ -346,7 +371,7 @@ onBeforeUnmount(() => {
 
       <section class="ops-console-section">
         <header><h2>实时并发</h2></header>
-        <div class="ops-concurrency-grid"><article v-for="item in snapshot?.realtime.breakdown" :key="`capacity-${item.scope}-${item.id || item.name}`"><header><span>{{ ({platform:'平台',group:'分组',account:'账号',user:'用户'} as Record<string,string>)[item.scope] }}</span><strong :title="item.name">{{ item.name }}</strong></header><div class="ops-capacity-value"><b>{{ item.in_flight }}</b><span>/ {{ item.max_capacity || '不限' }}</span></div><div class="ops-capacity-track"><i :style="{ width: `${Math.min(item.load_percentage || 0, 100)}%` }"></i></div><footer><span>负载 {{ item.max_capacity ? percent(item.load_percentage) : '不限' }}</span><span>等待 {{ item.waiting || 0 }}</span></footer></article></div>
+        <div class="ops-concurrency-grid"><article v-for="item in snapshot?.realtime.breakdown" :key="`capacity-${item.scope}-${item.id || item.name}`"><header><ProviderLogo v-if="item.scope === 'platform'" :platform="namedPlatform(item.name)" size="sm" /><span class="ops-capacity-scope">{{ ({platform:'平台',group:'分组',account:'账号',user:'用户'} as Record<string,string>)[item.scope] }}</span><strong :title="item.name">{{ item.name }}</strong></header><div class="ops-capacity-value"><b>{{ item.in_flight }}</b><span>/ {{ item.max_capacity || '不限' }}</span></div><div class="ops-capacity-track"><i :style="{ width: `${Math.min(item.load_percentage || 0, 100)}%` }"></i></div><footer><span>负载 {{ item.max_capacity ? percent(item.load_percentage) : '不限' }}</span><span>等待 {{ item.waiting || 0 }}</span></footer></article></div>
       </section>
 
       <p v-if="snapshot?.sample_truncated" class="ops-sample-note">明细超过 50,000 条，趋势与排行按最近样本计算。</p>
@@ -355,7 +380,7 @@ onBeforeUnmount(() => {
         <article v-for="section in rankSections" :key="section.title" class="ops-rank-panel card">
           <div class="ops-section-title"><h3>{{ section.title }}</h3></div>
           <div v-if="section.items.length" class="ops-rank-list">
-            <div v-for="(rank, index) in section.items" :key="`${rank.id || rank.name}-${index}`" class="ops-rank-row"><span class="ops-rank-index">{{ String(index + 1).padStart(2, '0') }}</span><div class="min-w-0"><strong :title="rank.name">{{ rank.name }}</strong><small>{{ rank.requests.toLocaleString() }} 次 · {{ formatTokens(rank.tokens) }}</small></div><div class="text-right"><b>{{ percent(rankErrorRate(rank)) }}</b><small>失败率</small></div></div>
+            <div v-for="(rank, index) in section.items" :key="`${rank.id || rank.name}-${index}`" class="ops-rank-row" :class="{ 'has-provider': section.showProvider }"><span class="ops-rank-index">{{ String(index + 1).padStart(2, '0') }}</span><ProviderLogo v-if="section.showProvider" :platform="modelPlatform(rank.name)" size="sm" /><div class="min-w-0"><strong :title="rank.name">{{ rank.name }}</strong><small>{{ rank.requests.toLocaleString() }} 次 · {{ formatTokens(rank.tokens) }}</small></div><div class="text-right"><b>{{ percent(rankErrorRate(rank)) }}</b><small>失败率</small></div></div>
           </div>
           <div v-else class="ops-empty">暂无调用</div>
         </article>
@@ -369,7 +394,7 @@ onBeforeUnmount(() => {
               <thead><tr><th>模型</th><th class="text-right">请求</th><th class="text-right">输入</th><th class="text-right">输出</th><th class="text-right">缓存读</th><th class="text-right">5m 写入</th><th class="text-right">1h 写入</th><th class="text-right">失败率</th><th class="text-right">平均 TTFT</th><th class="text-right">平均 TPS</th><th class="text-right">平均总耗时</th><th class="text-right">费用</th></tr></thead>
               <tbody>
                 <tr v-for="item in snapshot?.model_usage" :key="item.name">
-                  <td class="font-mono text-xs text-slate-200">{{ item.name }}</td>
+                  <td class="font-mono text-xs text-slate-200"><span class="provider-model-name"><ProviderLogo :platform="modelPlatform(item.name)" size="sm" /><span>{{ item.name }}</span></span></td>
                   <td class="num text-right">{{ item.requests.toLocaleString() }}</td>
                   <td class="num text-right">{{ formatTokens(item.input_tokens) }}</td>
                   <td class="num text-right">{{ formatTokens(item.output_tokens) }}</td>
@@ -396,7 +421,7 @@ onBeforeUnmount(() => {
               <tbody>
                 <tr v-for="profile in snapshot?.rate_profiles" :key="profile.id">
                   <td class="font-medium text-slate-200">{{ profile.name }}</td>
-                  <td><span class="tag-gray">{{ PLATFORM_LABELS[profile.platform] || profile.platform }}</span></td>
+                  <td><span class="tag-gray provider-inline-label"><ProviderLogo :platform="profile.platform" size="sm" />{{ PLATFORM_LABELS[profile.platform] || profile.platform }}</span></td>
                   <td class="num text-right">×{{ profile.rate_multiplier }}</td>
                   <td class="num text-right">×{{ profile.cache_read_multiplier }}</td>
                   <td class="num text-right">×{{ profile.cache_write_5m_multiplier }}</td>
@@ -418,7 +443,7 @@ onBeforeUnmount(() => {
               <thead><tr><th>账号</th><th>分组</th><th>状态</th><th>最近探测</th><th>探测结果</th><th class="text-right">错误次数</th><th>操作</th></tr></thead>
               <tbody>
                 <tr v-for="account in snapshot?.account_health" :key="account.id">
-                  <td><div class="font-medium text-slate-200">{{ account.name }}</div><div class="text-xs text-slate-500">{{ account.email || PLATFORM_LABELS[account.platform] || account.platform }}</div></td>
+                  <td><div class="provider-cell"><ProviderLogo :platform="account.platform" size="md" /><div><div class="font-medium text-slate-200">{{ account.name }}</div><div class="text-xs text-slate-500">{{ account.email || PLATFORM_LABELS[account.platform] || account.platform }}</div></div></div></td>
                   <td class="text-xs text-slate-400">{{ account.group_name || '—' }}</td>
                   <td><span :class="healthClass(account.health)">{{ healthLabel(account.health) }}</span></td>
                   <td class="whitespace-nowrap text-xs text-slate-500">{{ account.probe_checked_at ? new Date(account.probe_checked_at).toLocaleString() : '尚未检测' }}</td>

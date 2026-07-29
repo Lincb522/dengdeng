@@ -10,6 +10,7 @@ import Pagination from '../../components/Pagination.vue'
 import AccountQuotaDetail from '../../components/AccountQuotaDetail.vue'
 import AccountRouteDetail from '../../components/AccountRouteDetail.vue'
 import ProviderLogo from '../../components/ProviderLogo.vue'
+import ProviderSelect from '../../components/ProviderSelect.vue'
 import { useAuth } from '../../stores/auth'
 import { useTheme } from '../../stores/theme'
 import AppModal from '../../components/AppModal.vue'
@@ -1137,12 +1138,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <div v-if="editing || accountEntryMode === 'new' || selectedExistingAccountID" class="modal-grid modal-grid--two">
             <label class="modal-field">
               <span class="label">账号平台</span>
-              <select v-model="selectedPlatform" class="input" :disabled="!!editing || accountEntryMode === 'existing'" @change="changeAccountPlatform">
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Claude</option>
-                <option value="gemini">Gemini</option>
-                <option value="grok">Grok</option>
-              </select>
+              <ProviderSelect v-model="selectedPlatform" :disabled="!!editing || accountEntryMode === 'existing'" aria-label="账号平台" @update:model-value="changeAccountPlatform" />
             </label>
             <div class="account-group-picker-head"><span><strong>可用分组</strong><small>已选 {{ form.group_ids.length }} 个</small></span><button type="button" @click="inlineGroupOpen = !inlineGroupOpen">{{ inlineGroupOpen ? '取消创建' : '新建分组' }}</button></div>
           </div>
@@ -1174,6 +1170,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 
           <template v-else-if="form.auth_type === 'oauth'">
             <div v-if="!editing" class="oauth-primary-path">
+              <ProviderLogo :platform="platformOfSelectedGroup" size="lg" />
               <div>
                 <strong>登录 {{ oauthProviderLabel }}</strong>
                 <p v-if="platformOfSelectedGroup === 'anthropic'">完成授权后，复制页面显示的授权码。</p>
@@ -1227,7 +1224,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
 		<Teleport to="body">
 			<div v-if="diagnostic" class="legacy-modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" @click.self="diagnostic = null">
 				<div class="card max-h-[88vh] w-full max-w-lg overflow-y-auto p-6">
-					<div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ accountGroupNames(diagnostic) }}</p></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
+					<div class="mb-5 flex items-start justify-between gap-4"><div class="provider-cell"><ProviderLogo :platform="diagnostic.platform" size="lg" /><div><h3 class="text-base font-semibold text-slate-100">账号诊断</h3><p class="mt-1 text-sm text-slate-500">{{ diagnostic.name }} · {{ accountGroupNames(diagnostic) }}</p></div></div><button class="btn-ghost !px-2.5 !py-1 text-xs" @click="diagnostic = null">关闭</button></div>
 					<div class="grid gap-3 sm:grid-cols-2">
 						<section class="rounded-lg border border-ink-700 bg-ink-850 p-3">
 							<p class="text-xs text-slate-500">调度可用度</p>
@@ -1297,7 +1294,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
               </div>
               <textarea v-model="imp.data" rows="9" class="input font-mono text-xs" placeholder='{"accounts":[{"name":"...","platform":"anthropic","type":"oauth","credentials":{"access_token":"...","refresh_token":"..."}}]}' @change="matchImportGroup(imp.data, false)"></textarea>
               <p class="mt-1 text-xs text-slate-600">支持 sub2api、Codex auth.json、Claude Code credentials 与 CPA 导出；文件上限 850 KB。</p>
-              <p v-if="detectedImportPlatforms.length === 1" class="mt-1 text-xs text-signal-cyan">已识别平台：{{ PLATFORM_LABELS[detectedImportPlatforms[0]] }}。请确认目标分组；系统会保留你的选择。</p>
+              <p v-if="detectedImportPlatforms.length === 1" class="provider-inline-label mt-1 text-xs text-signal-cyan"><ProviderLogo :platform="detectedImportPlatforms[0]" size="sm" />已识别平台：{{ PLATFORM_LABELS[detectedImportPlatforms[0]] }}。请确认目标分组；系统会保留你的选择。</p>
               <p v-else-if="detectedImportPlatforms.length > 1" class="mt-1 text-xs text-amber">文件包含多个平台，请按目标分组分别导入；不匹配的条目会跳过。</p>
 							<p v-else-if="imp.data.trim() && selectedImportGroup" class="mt-1 text-xs text-signal-cyan">文件未声明平台，将按目标分组「{{ selectedImportGroup.name }}」识别。</p>
             </div>

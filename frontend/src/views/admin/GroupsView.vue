@@ -5,6 +5,7 @@ import type { Group } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
 import AppModal from '../../components/AppModal.vue'
 import ProviderLogo from '../../components/ProviderLogo.vue'
+import ProviderSelect from '../../components/ProviderSelect.vue'
 import { useTheme } from '../../stores/theme'
 
 const theme = useTheme()
@@ -318,9 +319,7 @@ async function togglePublic(g: Group) {
           <div class="modal-grid modal-grid--two">
             <label class="modal-field">
               <span class="label">平台</span>
-              <select v-model="form.platform" class="input" :disabled="!!editing">
-                <option value="anthropic">Claude (Anthropic)</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="grok">Grok (xAI)</option>
-              </select>
+              <ProviderSelect v-model="form.platform" :disabled="!!editing" aria-label="分组平台" />
               <small v-if="editing" class="modal-field__hint">已有账号依赖当前平台，编辑时不可更换。</small>
             </label>
             <label class="modal-field"><span class="label">基础倍率</span><input v-model.number="form.rate_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>

@@ -3,6 +3,8 @@ import { onMounted, ref } from 'vue'
 import { api, withToast } from '../../api/client'
 import type { ModelPrice } from '../../api/types'
 import { PLATFORM_LABELS } from '../../api/types'
+import ProviderLogo from '../../components/ProviderLogo.vue'
+import ProviderSelect from '../../components/ProviderSelect.vue'
 
 const prices = ref<ModelPrice[]>([])
 const showForm = ref(false)
@@ -117,7 +119,7 @@ async function remove(p: ModelPrice) {
         <tbody>
           <tr v-for="p in prices" :key="p.id">
             <td class="font-mono text-sm text-slate-200">{{ p.match }}</td>
-            <td><span class="tag-gray">{{ PLATFORM_LABELS[p.platform] || p.platform || '-' }}</span></td>
+            <td><span class="tag-gray provider-inline-label"><ProviderLogo :platform="p.platform" size="sm" />{{ PLATFORM_LABELS[p.platform] || p.platform || '-' }}</span></td>
             <td class="num text-right">${{ p.input_price }}</td>
             <td class="num text-right">${{ p.output_price }}</td>
             <td class="num text-right text-slate-500">${{ p.cache_read_price }}</td>
@@ -149,11 +151,7 @@ async function remove(p: ModelPrice) {
             </div>
             <div>
               <label class="label">平台(标注用)</label>
-              <select v-model="form.platform" class="input">
-                <option value="anthropic">Claude</option>
-                <option value="openai">OpenAI</option>
-                <option value="gemini">Gemini</option>
-              </select>
+              <ProviderSelect v-model="form.platform" :platforms="['anthropic', 'openai', 'gemini']" aria-label="定价平台" />
             </div>
             <div class="grid grid-cols-2 gap-4">
               <div>

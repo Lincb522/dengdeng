@@ -5,6 +5,7 @@ import type { ApiKey, Group } from '../api/types'
 import { PLATFORM_LABELS } from '../api/types'
 import { useAnchoredPopover } from '../composables/useAnchoredPopover'
 import { useToast } from '../stores/toast'
+import ProviderLogo from './ProviderLogo.vue'
 
 const props = defineProps<{
 	apiKey: ApiKey
@@ -103,9 +104,7 @@ async function saveRoute() {
 		:disabled="saving || !groups.length"
 		@click.stop="togglePinned"
 	>
-		<span class="key-route-mark" :class="`is-${selectedGroups[0]?.platform || 'none'}`" aria-hidden="true">
-			{{ (PLATFORM_LABELS[selectedGroups[0]?.platform] || '?').slice(0, 1) }}
-		</span>
+		<ProviderLogo class="key-route-mark" :platform="selectedGroups[0]?.platform" size="md" />
 		<span class="key-route-summary">
 			<strong>{{ routeTitle }}</strong>
 			<small>{{ routeMeta }}</small>
@@ -132,7 +131,7 @@ async function saveRoute() {
 
 				<div class="key-route-options">
 					<section v-for="[platform, options] in groupedOptions" :key="platform">
-						<h4>{{ PLATFORM_LABELS[platform] || platform }}</h4>
+						<h4 class="provider-inline-label"><ProviderLogo :platform="platform" size="sm" />{{ PLATFORM_LABELS[platform] || platform }}</h4>
 						<button
 							v-for="group in options"
 							:key="group.id"

@@ -7,6 +7,8 @@ import { normalizeReasoningEffort, OFFICIAL_REASONING_EFFORTS, REASONING_OPTIONS
 import { PLATFORM_LABELS } from '../api/types'
 import { useToast } from '../stores/toast'
 import AppModal from './AppModal.vue'
+import ProviderLogo from './ProviderLogo.vue'
+import ProviderSelect from './ProviderSelect.vue'
 
 type ClientID = 'claude' | 'codex' | 'gemini' | 'chatbox' | 'cline' | 'opencode' | 'ccswitch' | 'cherry' | 'nextchat' | 'continue'
 type ShellID = 'unix' | 'cmd' | 'powershell' | 'windows'
@@ -463,7 +465,8 @@ function nextStep() {
         <div class="key-setup-summary">
           <div class="key-setup-secret key-setup-secret--full"><span>API 密钥</span><input v-model="workingApiKey" class="key-setup-key-input" type="text" name="dengdeng-api-token" autocomplete="one-time-code" autocapitalize="none" inputmode="text" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" :disabled="loadingSecret" :placeholder="loadingSecret ? '正在读取密钥…' : '粘贴已有密钥'" /><div class="key-setup-secret-actions"><button class="btn-ghost" :disabled="!configuredApiKey" @click="copy(configuredApiKey, 'key')">{{ copied === 'key' ? '已复制' : '复制' }}</button><button v-if="configuredApiKey && !secretStored" class="btn-primary" :disabled="savingSecret" @click="saveRecoveredSecret()">{{ savingSecret ? '保存中…' : '保存到账号' }}</button><small v-else-if="secretStored">账号已保存</small></div></div>
           <div class="key-setup-secret"><span>接口地址</span><code :title="activeEndpoint">{{ activeEndpoint }}</code><button class="btn-ghost" @click="copy(activeEndpoint, 'endpoint')">{{ copied === 'endpoint' ? '已复制' : '复制' }}</button></div>
-		  <div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><select v-model="activePlatform" class="input key-setup-effort" aria-label="接入平台"><option v-for="item in availablePlatforms" :key="item" :value="item">{{ PLATFORM_LABELS[item] || item }}</option></select><small>{{ availablePlatforms.length }} 个</small></div>
+		  <div v-if="availablePlatforms.length > 1" class="key-setup-secret"><span>接入平台</span><ProviderSelect v-model="activePlatform" :platforms="availablePlatforms" class="key-setup-effort" aria-label="接入平台" /><small>{{ availablePlatforms.length }} 个</small></div>
+		  <div v-else class="key-setup-secret"><span>接入平台</span><strong class="provider-inline-label"><ProviderLogo :platform="activePlatform" size="sm" />{{ PLATFORM_LABELS[activePlatform] || activePlatform }}</strong><small>当前</small></div>
 		  <div v-if="availablePlatforms.includes('openai')" class="key-setup-secret"><span>思考强度</span><select class="input key-setup-effort" aria-label="思考强度" :value="reasoningEffort" :disabled="savingEffort || !keyId" @change="changeReasoningEffort"><option v-for="option in REASONING_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select><small>{{ savingEffort ? '保存中…' : 'Effort' }}</small></div>
         </div>
 		<p v-if="invalidApiKeyInput" class="key-setup-status is-error" role="alert">输入内容不是有效的 dd- 密钥；浏览器可能自动填入了登录密码。</p>
@@ -475,7 +478,7 @@ function nextStep() {
           <label><span>模型</span><select v-model="selectedModel" class="input" :disabled="modelsState === 'loading' || !models.length"><option v-if="!models.length" value="">{{ modelsState === 'loading' ? '正在读取模型…' : '暂无模型' }}</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
           <button class="btn-ghost" :disabled="modelsState === 'loading'" @click="loadModels">{{ modelsState === 'loading' ? '验证中…' : '验证并刷新' }}</button>
         </div>
-        <p v-if="modelsState === 'ready' && models.length" class="key-setup-status is-ok" role="status">验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 可用 {{ models.length }} 个模型。</p>
+        <p v-if="modelsState === 'ready' && models.length" class="key-setup-status is-ok provider-inline-label" role="status"><ProviderLogo :platform="activePlatform" size="sm" />验证成功，{{ PLATFORM_LABELS[activePlatform] || activePlatform }} 可用 {{ models.length }} 个模型。</p>
         <p v-else-if="modelsState === 'ready'" class="key-setup-status is-empty" role="status">密钥有效，但当前分组没有返回模型，请检查分组和模型配置。</p>
         <p v-else-if="modelsState === 'error'" class="key-setup-status is-error" role="alert">{{ modelsError }}</p>
         <p v-else-if="modelsState === 'idle'" class="key-setup-status">点击“验证并刷新”读取模型。</p>
