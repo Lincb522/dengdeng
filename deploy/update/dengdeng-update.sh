@@ -169,16 +169,17 @@ current = os.environ["DD_UPDATE_CURRENT_COMMIT"]
 target = os.environ["DD_UPDATE_TARGET_COMMIT"]
 path = pathlib.Path(os.environ["DD_UPDATE_CHANGELOG_FILE"])
 changes = []
+git = ["git", "-c", f"safe.directory={source}", "-C", source]
 
 if target and target != current:
     revision = target
     if current:
         exists = subprocess.run(
-            ["git", "-C", source, "cat-file", "-e", current + "^{commit}"],
+            [*git, "cat-file", "-e", current + "^{commit}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ).returncode == 0
         ancestor = exists and subprocess.run(
-            ["git", "-C", source, "merge-base", "--is-ancestor", current, target],
+            [*git, "merge-base", "--is-ancestor", current, target],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ).returncode == 0
         if ancestor:
@@ -187,7 +188,7 @@ if target and target != current:
     # bullet points become structured details in the admin update page, so a
     # release keeps its full explanation instead of only a terse subject line.
     result = subprocess.run(
-        ["git", "-C", source, "log", "--max-count=30", "--format=%H%x1f%s%x1f%cI%x1f%b%x1e", revision],
+        [*git, "log", "--max-count=30", "--format=%H%x1f%s%x1f%cI%x1f%b%x1e", revision],
         check=False, capture_output=True, text=True,
     )
     if result.returncode == 0:
