@@ -4110,7 +4110,8 @@ body.has-app-modal { overflow: hidden; }
 .provider-logo.is-lg { --provider-logo-size: 2rem; border-radius: .52rem; }
 .provider-logo svg { width: 58%; height: 58%; fill: currentColor; }
 .provider-logo.is-openai { color: var(--ink); }
-.provider-logo.is-anthropic { color: #b8563f; }
+.provider-logo.is-anthropic,
+.provider-logo.is-claude { color: #d97757; }
 .provider-logo.is-gemini { color: #6257c8; }
 .provider-logo.is-grok,
 .provider-logo.is-xai { color: var(--ink); }
@@ -4132,7 +4133,8 @@ body.has-app-modal { overflow: hidden; }
 	gap: .34rem;
 	white-space: nowrap;
 }
-:root[data-theme='dark'] .provider-logo.is-anthropic { color: #ef9d85; }
+:root[data-theme='dark'] .provider-logo.is-anthropic,
+:root[data-theme='dark'] .provider-logo.is-claude { color: #f09a7f; }
 :root[data-theme='dark'] .provider-logo.is-gemini { color: #afa7ff; }
 
 @media (max-width: 900px) {
