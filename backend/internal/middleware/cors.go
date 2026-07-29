@@ -7,13 +7,33 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func isPublicRelayPath(path string) bool {
+	if strings.HasPrefix(path, "/v1/") || strings.HasPrefix(path, "/v1beta/") {
+		return true
+	}
+	for _, prefix := range []string{
+		"/messages",
+		"/chat/completions",
+		"/responses",
+		"/images/",
+		"/models",
+		"/usage",
+		"/backend-api/codex/",
+	} {
+		if path == prefix || strings.HasPrefix(path, strings.TrimSuffix(prefix, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // PublicCORS enables browser-based OpenAI/Anthropic/Gemini-compatible clients
 // (including Chatbox) to call the public relay. It deliberately excludes the
 // console's /api routes, which use administrator/user JWTs.
 func PublicCORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		path := c.Request.URL.Path
-		if !strings.HasPrefix(path, "/v1/") && !strings.HasPrefix(path, "/v1beta/") {
+		if !isPublicRelayPath(path) {
 			c.Next()
 			return
 		}

@@ -77,12 +77,46 @@ func AdminOnly() gin.HandlerFunc {
 			return
 		}
 		claims := CurrentClaims(c)
-		if user.TOTPEnabled && (claims == nil || !claims.MFA) {
-			util.Fail(c, http.StatusUnauthorized, "TOTP verification is required for administrator actions")
+		if !user.TOTPEnabled {
+			util.FailCode(c, http.StatusForbidden, "permission.admin_totp_required", "administrator must enable two-factor authentication")
+			c.Abort()
+			return
+		}
+		if claims == nil || !claims.MFA {
+			util.FailCode(c, http.StatusUnauthorized, "permission.step_up_required", "two-factor verification is required for administrator actions")
 			c.Abort()
 			return
 		}
 		c.Next()
+	}
+}
+
+// RequireRecentMFA protects credential disclosure and other sensitive
+// operations independently from the optional site-wide policy switch.
+func RequireRecentMFA() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		claims := CurrentClaims(c)
+		if claims == nil || !claims.MFA || claims.IssuedAt == nil || time.Since(claims.IssuedAt.Time) > 15*time.Minute {
+			util.FailCode(c, http.StatusForbidden, "permission.step_up_required", "recent identity verification is required")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// RequireAdminMutationMFA leaves read-only monitoring available throughout an
+// administrator session but requires a recent TOTP verification for every
+// state-changing administration request.
+func RequireAdminMutationMFA() gin.HandlerFunc {
+	recent := RequireRecentMFA()
+	return func(c *gin.Context) {
+		switch c.Request.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			c.Next()
+		default:
+			recent(c)
+		}
 	}
 }
 

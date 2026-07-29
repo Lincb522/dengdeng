@@ -11,6 +11,8 @@ import { useTheme } from '../stores/theme'
 import KeyQuickSetupModal from '../components/KeyQuickSetupModal.vue'
 import KeyRouteSelector from '../components/KeyRouteSelector.vue'
 import AppModal from '../components/AppModal.vue'
+import StepUpModal from '../components/StepUpModal.vue'
+import { isAppError } from '../api/errors'
 
 const toast = useToast()
 const auth = useAuth()
@@ -44,6 +46,8 @@ const savingSettings = ref(false)
 const settingsGroupsOpen = ref(false)
 const settingsQuotaOpen = ref(false)
 const networkSecurityOpen = ref(false)
+const stepUpOpen = ref(false)
+let stepUpResolver: ((verified: boolean) => void) | null = null
 const settingsForm = ref({ name: '', group_ids: [] as number[], reasoning_effort: 'auto', quota: 0, daily_quota: 0, status: 'active', rpm: 0, concurrency: 0, allowed_ips: '', blocked_ips: '', expires_at: '' })
 
 const reasoningOptions = REASONING_OPTIONS
@@ -162,9 +166,31 @@ async function fetchKeySecret(key: ApiKey) {
     const result = await api.get<{ plain: string }>(`/api/user/keys/${key.id}/secret`)
     cacheKeySecret(key.id, result.plain)
     return result.plain
+  } catch (error) {
+    if (isAppError(error) && error.code === 'permission.step_up_required' && await requestStepUp()) {
+      const result = await api.get<{ plain: string }>(`/api/user/keys/${key.id}/secret`)
+      cacheKeySecret(key.id, result.plain)
+      return result.plain
+    }
+    throw error
   } finally {
     setSecretLoading(key.id, false)
   }
+}
+
+function requestStepUp() {
+  if (stepUpResolver) return Promise.resolve(false)
+  stepUpOpen.value = true
+  return new Promise<boolean>((resolve) => {
+    stepUpResolver = resolve
+  })
+}
+
+function finishStepUp(verified: boolean) {
+  stepUpOpen.value = false
+  const resolve = stepUpResolver
+  stepUpResolver = null
+  resolve?.(verified)
 }
 
 async function migrateLegacySecrets(items: ApiKey[]) {
@@ -718,5 +744,11 @@ function onSetupSecretSaved(value: string) {
 			@effort-updated="onSetupEffortUpdated"
 			@secret-saved="onSetupSecretSaved"
 		/>
+    <StepUpModal
+      :open="stepUpOpen"
+      :totp-enabled="Boolean(auth.user?.totp_enabled)"
+      @close="finishStepUp(false)"
+      @verified="finishStepUp(true)"
+    />
   </div>
 </template>

@@ -27,6 +27,7 @@ import (
 const (
 	maxLoginFailures         = 5
 	lockoutDuration          = 15 * time.Minute
+	maxTrackedLoginAttempts  = 20_000
 	codeTTL                  = 10 * time.Minute
 	codeCooldown             = time.Minute
 	registrationCodePurpose  = "register"
@@ -36,6 +37,7 @@ const (
 type loginAttempt struct {
 	failures int
 	until    time.Time
+	lastSeen time.Time
 }
 
 type AuthHandler struct {
@@ -44,8 +46,10 @@ type AuthHandler struct {
 	mailer   service.RegistrationMailer
 	settings *service.SystemSettingsService
 
-	mu       sync.Mutex
-	attempts map[string]*loginAttempt // keyed by email
+	mu sync.Mutex
+	// Scope failures to both account and source. An email-only counter lets
+	// anyone who knows an address lock the real owner out remotely.
+	attempts map[string]*loginAttempt
 }
 
 func NewAuthHandler(db *gorm.DB, cfg *config.Config) *AuthHandler {
@@ -59,39 +63,61 @@ func NewAuthHandlerWithMailer(db *gorm.DB, cfg *config.Config, mailer service.Re
 	}
 }
 
-// lockoutRemaining reports the exact remaining lockout duration for an email.
-// Returning the duration lets the client show a useful countdown.
-func (h *AuthHandler) lockoutRemaining(email string) time.Duration {
+func loginAttemptKey(email, clientIP string) string {
+	return normalizedEmail(email) + "\x00" + strings.TrimSpace(clientIP)
+}
+
+// lockoutRemaining reports the exact remaining lockout duration for one
+// account/source pair.
+func (h *AuthHandler) lockoutRemaining(key string) time.Duration {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	a := h.attempts[email]
+	a := h.attempts[key]
 	if a == nil || a.failures < maxLoginFailures {
 		return 0
 	}
 	remaining := time.Until(a.until)
 	if remaining <= 0 {
-		delete(h.attempts, email)
+		delete(h.attempts, key)
 		return 0
 	}
 	return remaining
 }
 
-func (h *AuthHandler) recordFailure(email string) {
+func (h *AuthHandler) recordFailure(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	a := h.attempts[email]
-	if a == nil || time.Now().After(a.until) {
+	now := time.Now()
+	if len(h.attempts) >= maxTrackedLoginAttempts {
+		var oldestKey string
+		var oldestTime time.Time
+		for candidate, attempt := range h.attempts {
+			if now.After(attempt.until) {
+				delete(h.attempts, candidate)
+				continue
+			}
+			if oldestKey == "" || attempt.lastSeen.Before(oldestTime) {
+				oldestKey, oldestTime = candidate, attempt.lastSeen
+			}
+		}
+		if len(h.attempts) >= maxTrackedLoginAttempts && oldestKey != "" {
+			delete(h.attempts, oldestKey)
+		}
+	}
+	a := h.attempts[key]
+	if a == nil || now.After(a.until) {
 		a = &loginAttempt{}
-		h.attempts[email] = a
+		h.attempts[key] = a
 	}
 	a.failures++
-	a.until = time.Now().Add(lockoutDuration)
+	a.until = now.Add(lockoutDuration)
+	a.lastSeen = now
 }
 
-func (h *AuthHandler) clearFailures(email string) {
+func (h *AuthHandler) clearFailures(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.attempts, email)
+	delete(h.attempts, key)
 }
 
 type credentials struct {
@@ -528,20 +554,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	email := normalizedEmail(req.Email)
+	attemptKey := loginAttemptKey(email, c.ClientIP())
 
-	if remaining := h.lockoutRemaining(email); remaining > 0 {
+	if remaining := h.lockoutRemaining(attemptKey); remaining > 0 {
 		util.FailRetry(c, http.StatusTooManyRequests, "auth.too_many_attempts", "too many failed attempts, try again later", remaining)
 		return
 	}
 
 	var user model.User
 	if err := h.db.Where("email = ?", email).First(&user).Error; err != nil {
-		h.recordFailure(email)
+		h.recordFailure(attemptKey)
 		util.FailCode(c, http.StatusUnauthorized, "auth.invalid_credentials", "incorrect email or password")
 		return
 	}
 	if !util.CheckPassword(user.PasswordHash, req.Password) {
-		h.recordFailure(email)
+		h.recordFailure(attemptKey)
 		util.FailCode(c, http.StatusUnauthorized, "auth.invalid_credentials", "incorrect email or password")
 		return
 	}
@@ -550,7 +577,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 	if user.TOTPEnabled && !util.ValidateTOTP(string(user.TOTPSecret), req.TOTPCode, time.Now()) {
-		h.recordFailure(email)
+		h.recordFailure(attemptKey)
 		util.FailCode(c, http.StatusUnauthorized, "auth.totp_invalid", "authenticator code is required or invalid")
 		return
 	}
@@ -574,7 +601,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			user.TermsRevision, user.TermsAcceptedAt = revision, &now
 		}
 	}
-	h.clearFailures(email)
+	h.clearFailures(attemptKey)
 	h.issueToken(c, &user)
 }
 

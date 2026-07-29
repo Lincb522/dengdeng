@@ -47,7 +47,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   if (!resp.ok) {
     const error = resolveApiError(resp.status, payload, resp.headers)
-    if (resp.status === 401 && !path.startsWith('/api/auth')) {
+    if (error.code === 'permission.step_up_required' && path.startsWith('/api/admin/')) {
+      window.dispatchEvent(new CustomEvent('dengdeng:admin-step-up-required'))
+    }
+    const sessionInvalid = error.code === 'auth.required' || error.code === 'auth.session_expired' || error.code === 'auth.session_changed'
+    if (resp.status === 401 && sessionInvalid && !path.startsWith('/api/auth')) {
       clearToken()
       window.location.href = '/login'
     }

@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import QRCode from 'qrcode'
 import { api, withToast, setToken } from '../api/client'
 import { useAuth } from '../stores/auth'
 
 const auth = useAuth()
+const route = useRoute()
+const requiresAdminTOTP = computed(() => route.query.security === 'admin-totp-required' && auth.user?.role === 'admin' && !auth.user?.totp_enabled)
 const oldPassword = ref('')
 const newPassword = ref('')
 const confirm = ref('')
@@ -75,6 +78,11 @@ async function verifySensitiveActions() {
       <h1>账户设置</h1>
     </div>
 
+    <div v-if="requiresAdminTOTP" class="card mb-6 border-amber/30 p-5" role="alert">
+      <strong class="text-sm text-amber">请先开启验证器</strong>
+      <p class="mt-1 text-xs text-slate-400">管理员账户完成两步验证后才能进入管理功能。</p>
+    </div>
+
     <div class="card mb-6 p-6">
       <h3 class="mb-4 text-sm font-semibold text-slate-200">基本信息</h3>
       <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
@@ -121,7 +129,7 @@ async function verifySensitiveActions() {
       </div>
     </div>
 
-		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled" class="card p-6">
+		<div v-if="auth.security.totp_enabled || auth.user?.totp_enabled || auth.user?.role === 'admin'" class="card p-6">
 			<div class="mb-4 flex items-center justify-between gap-3">
 				<div>
 					<h3 class="text-sm font-semibold text-slate-200">验证器</h3>
@@ -149,7 +157,7 @@ async function verifySensitiveActions() {
 			</div>
 			<div v-else class="mt-4">
 				<button v-if="!auth.user?.totp_enabled" class="btn-primary" :disabled="totpBusy || !totpPassword" @click="setupTOTP">生成绑定信息</button>
-				<div v-else class="flex flex-wrap gap-2"><button class="btn-primary" :disabled="!totpPassword || totpCode.length !== 6" @click="verifySensitiveActions">验证敏感操作</button><button class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button></div>
+				<div v-else class="flex flex-wrap gap-2"><button class="btn-primary" :disabled="!totpPassword || totpCode.length !== 6" @click="verifySensitiveActions">验证敏感操作</button><button v-if="auth.user?.role !== 'admin'" class="btn-danger" :disabled="!totpPassword || totpCode.length !== 6" @click="disableTOTP">关闭验证器</button></div>
 			</div>
 		</div>
   </div>

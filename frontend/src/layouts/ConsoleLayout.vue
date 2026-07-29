@@ -5,14 +5,18 @@ import { useAuth } from '../stores/auth'
 import BrandMark from '../components/BrandMark.vue'
 import ThemeToggle from '../components/ThemeToggle.vue'
 import InterfaceThemeSwitcher from '../components/InterfaceThemeSwitcher.vue'
+import StepUpModal from '../components/StepUpModal.vue'
 import { formatMoney } from '../api/types'
 import { useTheme } from '../stores/theme'
+import { useToast } from '../stores/toast'
 
 const auth = useAuth()
 const theme = useTheme()
+const toast = useToast()
 const route = useRoute()
 const railOpen = ref(false)
 const commandOpen = ref(false)
+const adminStepUpOpen = ref(false)
 
 const userNav = [
   { to: '/dashboard', label: '总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
@@ -97,12 +101,23 @@ function handleKeydown(event: KeyboardEvent) {
 	if (event.key === 'Escape') closeRail()
 }
 
+function requestAdminStepUp() {
+  if (auth.user?.role === 'admin') adminStepUpOpen.value = true
+}
+
+function finishAdminStepUp(verified: boolean) {
+  adminStepUpOpen.value = false
+  if (verified) toast.show('身份已确认，请重新提交刚才的操作', 'success')
+}
+
 onMounted(() => {
   void auth.loadPublicSettings()
   window.addEventListener('keydown', handleKeydown)
+  window.addEventListener('dengdeng:admin-step-up-required', requestAdminStepUp)
 })
 onBeforeUnmount(() => {
 	window.removeEventListener('keydown', handleKeydown)
+  window.removeEventListener('dengdeng:admin-step-up-required', requestAdminStepUp)
 })
 
 function isActive(to: string) {
@@ -346,4 +361,10 @@ function isActive(to: string) {
     </section>
   </div>
 
+  <StepUpModal
+    :open="adminStepUpOpen"
+    :totp-enabled="Boolean(auth.user?.totp_enabled)"
+    @close="finishAdminStepUp(false)"
+    @verified="finishAdminStepUp(true)"
+  />
 </template>

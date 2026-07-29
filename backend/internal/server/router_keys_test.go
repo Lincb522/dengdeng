@@ -85,7 +85,21 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	if storedSecret == "" || storedSecret == created.Data.Plain {
 		t.Fatalf("secret is not encrypted at rest: %q", storedSecret)
 	}
-	reveal := callJSON(t, router, http.MethodGet, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", nil, loginBody.Data.Token)
+	revealPath := "/api/user/keys/" + jsonNumber(created.Data.Key.ID) + "/secret"
+	reveal := callJSON(t, router, http.MethodGet, revealPath, nil, loginBody.Data.Token)
+	if reveal.Code != http.StatusForbidden {
+		t.Fatalf("unverified reveal status=%d body=%s", reveal.Code, reveal.Body.String())
+	}
+	stepUp := callJSON(t, router, http.MethodPost, "/api/user/step-up", map[string]any{"password": "admin12345"}, loginBody.Data.Token)
+	var stepUpBody struct {
+		Data struct {
+			Token string `json:"token"`
+		} `json:"data"`
+	}
+	if stepUp.Code != http.StatusOK || json.Unmarshal(stepUp.Body.Bytes(), &stepUpBody) != nil || stepUpBody.Data.Token == "" {
+		t.Fatalf("step-up status=%d body=%s", stepUp.Code, stepUp.Body.String())
+	}
+	reveal = callJSON(t, router, http.MethodGet, revealPath, nil, stepUpBody.Data.Token)
 	var revealed struct {
 		Data struct {
 			Plain string `json:"plain"`
@@ -112,15 +126,15 @@ func TestAPIKeySupportsMultipleGroups(t *testing.T) {
 	if err := db.Model(&model.APIKey{}).Where("id = ?", created.Data.Key.ID).Update("key_secret", "").Error; err != nil {
 		t.Fatalf("clear legacy secret: %v", err)
 	}
-	legacyReveal := callJSON(t, router, http.MethodGet, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", nil, loginBody.Data.Token)
+	legacyReveal := callJSON(t, router, http.MethodGet, revealPath, nil, stepUpBody.Data.Token)
 	if legacyReveal.Code != http.StatusConflict {
 		t.Fatalf("legacy reveal status=%d body=%s", legacyReveal.Code, legacyReveal.Body.String())
 	}
-	wrongRecovery := callJSON(t, router, http.MethodPut, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", map[string]any{"plain": "dd-not-the-key"}, loginBody.Data.Token)
+	wrongRecovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": "dd-not-the-key"}, stepUpBody.Data.Token)
 	if wrongRecovery.Code != http.StatusBadRequest {
 		t.Fatalf("wrong recovery status=%d body=%s", wrongRecovery.Code, wrongRecovery.Body.String())
 	}
-	recovery := callJSON(t, router, http.MethodPut, "/api/user/keys/"+jsonNumber(created.Data.Key.ID)+"/secret", map[string]any{"plain": created.Data.Plain}, loginBody.Data.Token)
+	recovery := callJSON(t, router, http.MethodPut, revealPath, map[string]any{"plain": created.Data.Plain}, stepUpBody.Data.Token)
 	if recovery.Code != http.StatusOK {
 		t.Fatalf("recovery status=%d body=%s", recovery.Code, recovery.Body.String())
 	}
@@ -206,6 +220,15 @@ func TestAPIKeyRouteVisibilityAndUsageProjection(t *testing.T) {
 	}
 	if err := db.Create(&groups).Error; err != nil {
 		t.Fatalf("create groups: %v", err)
+	}
+	if err := db.Create(&model.UpstreamAccount{
+		GroupID:  groups[0].ID,
+		Name:     "public-ready",
+		Platform: model.PlatformOpenAI,
+		AuthType: model.AuthAPIKey,
+		Status:   model.StatusActive,
+	}).Error; err != nil {
+		t.Fatalf("create ready upstream: %v", err)
 	}
 	if err := db.Model(&model.Group{}).Where("id = ?", groups[1].ID).UpdateColumn("is_public", false).Error; err != nil {
 		t.Fatalf("make group private: %v", err)

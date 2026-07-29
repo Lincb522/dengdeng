@@ -27,8 +27,9 @@ func SecurityHeaders() gin.HandlerFunc {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(self), usb=()")
 		// Only set CSP for the console/SPA, not the relay API responses.
-		if p := c.Request.URL.Path; len(p) < 3 || p[:3] != "/v1" {
+		if !isPublicRelayPath(c.Request.URL.Path) {
 			h.Set("Content-Security-Policy", csp)
 		}
 		c.Next()

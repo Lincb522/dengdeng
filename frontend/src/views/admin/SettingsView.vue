@@ -550,7 +550,7 @@ onMounted(load)
 				<div class="settings-toggle-stack">
 					<label class="settings-toggle-row"><span><strong>注册邮箱验证</strong><small>开启且 SMTP 可用时，新用户必须使用邮件验证码。</small></span><input v-model="form.security.email_verification_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>忘记密码</strong><small>允许用户通过验证邮件重置密码。</small></span><input v-model="form.security.password_reset_enabled" type="checkbox" role="switch" /></label>
-					<label class="settings-toggle-row"><span><strong>TOTP 双因素认证</strong><small>允许账户绑定验证器；已绑定账户不因关闭开关而自动解除。</small></span><input v-model="form.security.totp_enabled" type="checkbox" role="switch" /></label>
+					<label class="settings-toggle-row"><span><strong>TOTP 双因素认证</strong><small>控制普通用户绑定入口；管理员始终需要验证器。</small></span><input v-model="form.security.totp_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>会话 IP / UA 绑定</strong><small>客户端指纹变化后要求重新登录。</small></span><input v-model="form.security.session_binding_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>敏感操作二次验证</strong><small>导出凭据、备份下载和安全设置变更要求最近完成 TOTP。</small></span><input v-model="form.security.step_up_enabled" type="checkbox" role="switch" /></label>
 				</div>

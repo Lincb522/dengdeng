@@ -84,6 +84,9 @@ type User struct {
 	Role          string `gorm:"size:16;not null;default:user" json:"role"`
 	Status        string `gorm:"size:16;not null;default:active" json:"status"`
 	BalanceMicro  int64  `gorm:"not null;default:0" json:"balance_micro"`
+	// BalanceHeldMicro is an internal in-flight reservation. It prevents
+	// concurrent requests from all passing the same balance check.
+	BalanceHeldMicro int64 `gorm:"not null;default:0" json:"-"`
 	// AccessExpiresAt grants time-based access. While it is in the future,
 	// requests are recorded but do not consume the cash balance.
 	AccessExpiresAt   *time.Time `gorm:"index" json:"access_expires_at"`
@@ -222,13 +225,15 @@ type APIKey struct {
 	// means the key follows the owner's shared balance without a key-level cap.
 	QuotaMicro     int64 `gorm:"not null;default:0" json:"quota_micro"`
 	QuotaUsedMicro int64 `gorm:"not null;default:0" json:"quota_used_micro"`
+	QuotaHeldMicro int64 `gorm:"not null;default:0" json:"-"`
 	// UsageTodayMicro and Usage30dMicro are read-only list projections derived
 	// from the immutable usage ledger. They are never persisted on the key row.
 	UsageTodayMicro int64 `gorm:"-" json:"usage_today_micro"`
 	Usage30dMicro   int64 `gorm:"-" json:"usage_30d_micro"`
 	// DailyQuotaMicro is an optional rolling calendar-day budget for one key.
 	// Its actual consumption is derived from the immutable usage ledger.
-	DailyQuotaMicro int64 `gorm:"not null;default:0" json:"daily_quota_micro"`
+	DailyQuotaMicro     int64 `gorm:"not null;default:0" json:"daily_quota_micro"`
+	DailyQuotaHeldMicro int64 `gorm:"not null;default:0" json:"-"`
 	// Concurrency optionally narrows the owning user's concurrency for this one
 	// credential. Zero means no additional key-level cap.
 	Concurrency int `gorm:"not null;default:0" json:"concurrency"`
@@ -449,7 +454,9 @@ type UpstreamAccount struct {
 
 	Group  *Group  `gorm:"foreignKey:GroupID" json:"group,omitempty"`
 	Groups []Group `gorm:"many2many:upstream_account_groups;constraint:OnDelete:CASCADE;" json:"groups,omitempty"`
-	Proxy  *Proxy  `gorm:"foreignKey:ProxyID" json:"proxy,omitempty"`
+	// ProxyID uses zero as the public/API representation of "no dedicated
+	// proxy". Do not create a database foreign key to that sentinel value.
+	Proxy *Proxy `gorm:"foreignKey:ProxyID;-:migration" json:"proxy,omitempty"`
 	// Quota is the normalized provider allowance plus DengDeng-observed usage.
 	// Every platform receives a snapshot. Providers with a subscription usage
 	// endpoint add real upstream windows; API-key providers that do not expose

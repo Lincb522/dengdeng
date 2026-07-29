@@ -3,11 +3,75 @@ package service
 import (
 	"testing"
 
+	"dengdeng/internal/config"
 	"dengdeng/internal/model"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestBillingSettlesReservationWhenReferralsAreDisabled(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:billing-reservation?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(
+		&model.User{}, &model.APIKey{}, &model.ModelPrice{}, &model.UsageLog{},
+		&model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{},
+		&model.ReferralCommission{}, &model.ReferralCashAccount{}, &model.ReferralPayoutConfig{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{
+		Email: "reservation@example.test", PasswordHash: "x", Role: model.RoleUser,
+		Status: model.StatusActive, BalanceMicro: 2_000_000, BalanceHeldMicro: 1_200_000,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	key := model.APIKey{
+		UserID: user.ID, GroupID: 1, KeyHash: "reservation-hash",
+		KeyPreview: "reservation", Name: "reservation", Status: model.StatusActive,
+		QuotaMicro: 2_000_000, QuotaHeldMicro: 1_200_000,
+		DailyQuotaMicro: 2_000_000, DailyQuotaHeldMicro: 1_200_000,
+	}
+	if err := db.Create(&key).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ModelPrice{Match: "gpt-reservation", InputPrice: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	settingsService := NewSystemSettingsService(db, config.Default())
+	settings, err := settingsService.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings.Features.ReferralEnabled = false
+	if _, err := settingsService.Update(settings); err != nil {
+		t.Fatal(err)
+	}
+	billing := NewBillingService(db, NewPricingService(db))
+	billing.SetSystemSettings(settingsService)
+	if err := billing.Record(BillContext{
+		UserID: user.ID, APIKeyID: key.ID, GroupID: 1, Model: "gpt-reservation",
+		Usage: Usage{InputTokens: 1_000_000}, Rates: RatePlan{Base: 1}, StatusCode: 200,
+		ReservedBalanceMicro: 1_200_000, ReservedKeyQuotaMicro: 1_200_000, ReservedDailyMicro: 1_200_000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&user, user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&key, key.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if user.BalanceMicro != 1_000_000 || user.BalanceHeldMicro != 0 {
+		t.Fatalf("balance=%d held=%d, want 1000000/0", user.BalanceMicro, user.BalanceHeldMicro)
+	}
+	if key.QuotaUsedMicro != 1_000_000 || key.QuotaHeldMicro != 0 || key.DailyQuotaHeldMicro != 0 {
+		t.Fatalf("key used=%d held=%d daily-held=%d", key.QuotaUsedMicro, key.QuotaHeldMicro, key.DailyQuotaHeldMicro)
+	}
+}
 
 func TestBillingSettlesReferralCommissionFromPaidUsage(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:billing-referral?mode=memory&cache=shared"), &gorm.Config{})

@@ -92,6 +92,38 @@ func TestPaymentConfirmRejectsAmountMismatch(t *testing.T) {
 	}
 }
 
+func TestPaymentConfirmCreditsRecentlyExpiredOrder(t *testing.T) {
+	svc, db := paymentTestService(t)
+	user := model.User{Email: "late-payment@example.test", PasswordHash: "x", Role: model.RoleUser, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	order := model.PaymentOrder{
+		OutTradeNo: "ddp_late_payment", UserID: user.ID, ProviderID: 1,
+		ProviderKey: "wxpay", PaymentMethod: "wxpay",
+		Status: model.PaymentStatusExpired, Currency: "CNY",
+		AmountMinor: 100, CreditMicro: 1_000_000,
+		ExpiresAt: time.Now().UTC().Add(-time.Minute),
+	}
+	if err := db.Create(&order).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.confirmPayment(order, "late_trade", 100, "CNY", "webhook"); err != nil {
+		t.Fatalf("confirm expired order: %v", err)
+	}
+	var gotUser model.User
+	var gotOrder model.PaymentOrder
+	if err := db.First(&gotUser, user.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&gotOrder, order.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotUser.BalanceMicro != 1_000_000 || gotOrder.Status != model.PaymentStatusCompleted {
+		t.Fatalf("late settlement balance=%d status=%s", gotUser.BalanceMicro, gotOrder.Status)
+	}
+}
+
 func TestPaymentConfigRequiresPublicURLAndRate(t *testing.T) {
 	svc, _ := paymentTestService(t)
 	svc.publicURL = ""

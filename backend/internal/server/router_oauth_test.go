@@ -8,14 +8,23 @@ import (
 	"net/url"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dengdeng/internal/config"
 	"dengdeng/internal/crypto"
 	"dengdeng/internal/model"
-	"dengdeng/internal/service"
 	"dengdeng/internal/store"
 	"dengdeng/internal/util"
 )
+
+func verifiedAdminToken(t *testing.T, secret string, userID int64) string {
+	t.Helper()
+	token, err := util.SignJWTBound(secret, userID, model.RoleAdmin, 0, time.Hour, "", true)
+	if err != nil {
+		t.Fatalf("sign admin token: %v", err)
+	}
+	return token
+}
 
 func TestOpenAIOAuthPastedCallbackCreatesUpstreamAccount(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,29 +61,14 @@ func TestOpenAIOAuthPastedCallbackCreatesUpstreamAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	if err := db.Create(&model.User{Email: "admin@example.test", PasswordHash: hash, Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1}).Error; err != nil {
+	admin := model.User{Email: "admin@example.test", PasswordHash: hash, Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1, TOTPEnabled: true}
+	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
 	router := NewRouter(cfg, db)
+	adminToken := verifiedAdminToken(t, cfg.JWT.Secret, admin.ID)
 
-	settings, err := service.NewSystemSettingsService(db, cfg).Get()
-	if err != nil {
-		t.Fatalf("load settings: %v", err)
-	}
-	login := callJSON(t, router, http.MethodPost, "/api/auth/login", map[string]any{"email": "admin@example.test", "password": "admin12345", "terms_revision": settings.LoginAgreement.Revision()}, "")
-	if login.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
-	}
-	var loginBody struct {
-		Data struct {
-			Token string `json:"token"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(login.Body.Bytes(), &loginBody); err != nil || loginBody.Data.Token == "" {
-		t.Fatalf("decode login: %v, body=%s", err, login.Body.String())
-	}
-
-	group := callJSON(t, router, http.MethodPost, "/api/admin/groups", map[string]any{"name": "openai", "platform": "openai"}, loginBody.Data.Token)
+	group := callJSON(t, router, http.MethodPost, "/api/admin/groups", map[string]any{"name": "openai", "platform": "openai"}, adminToken)
 	if group.Code != http.StatusOK {
 		t.Fatalf("group status=%d body=%s", group.Code, group.Body.String())
 	}
@@ -87,7 +81,7 @@ func TestOpenAIOAuthPastedCallbackCreatesUpstreamAccount(t *testing.T) {
 		t.Fatalf("decode group: %v", err)
 	}
 
-	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/openai/start", map[string]any{"group_id": groupBody.Data.ID, "name": "browser-login", "priority": 42}, loginBody.Data.Token)
+	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/openai/start", map[string]any{"group_id": groupBody.Data.ID, "name": "browser-login", "priority": 42}, adminToken)
 	if start.Code != http.StatusOK {
 		t.Fatalf("oauth start status=%d body=%s", start.Code, start.Body.String())
 	}
@@ -127,7 +121,7 @@ func TestOpenAIOAuthPastedCallbackCreatesUpstreamAccount(t *testing.T) {
 	complete := callJSON(t, router, http.MethodPost, "/api/admin/oauth/openai/complete", map[string]any{
 		"state": state,
 		"code":  redirectURI.String(),
-	}, loginBody.Data.Token)
+	}, adminToken)
 	if complete.Code != http.StatusOK {
 		t.Fatalf("oauth complete status=%d body=%s", complete.Code, complete.Body.String())
 	}
@@ -170,7 +164,8 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	if err := db.Create(&model.User{Email: "admin@example.test", PasswordHash: hash, Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1}).Error; err != nil {
+	admin := model.User{Email: "admin@example.test", PasswordHash: hash, Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1, TOTPEnabled: true}
+	if err := db.Create(&admin).Error; err != nil {
 		t.Fatalf("create admin: %v", err)
 	}
 	group := model.Group{Name: "claude", Platform: model.PlatformAnthropic, Status: model.StatusActive, RateMultiplier: 1}
@@ -182,25 +177,9 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 		t.Fatalf("create secondary group: %v", err)
 	}
 	router := NewRouter(cfg, db)
+	adminToken := verifiedAdminToken(t, cfg.JWT.Secret, admin.ID)
 
-	settings, err := service.NewSystemSettingsService(db, cfg).Get()
-	if err != nil {
-		t.Fatalf("load settings: %v", err)
-	}
-	login := callJSON(t, router, http.MethodPost, "/api/auth/login", map[string]any{"email": "admin@example.test", "password": "admin12345", "terms_revision": settings.LoginAgreement.Revision()}, "")
-	if login.Code != http.StatusOK {
-		t.Fatalf("login status=%d body=%s", login.Code, login.Body.String())
-	}
-	var loginBody struct {
-		Data struct {
-			Token string `json:"token"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(login.Body.Bytes(), &loginBody); err != nil || loginBody.Data.Token == "" {
-		t.Fatalf("decode login: %v, body=%s", err, login.Body.String())
-	}
-
-	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/anthropic/start", map[string]any{"group_ids": []int64{group.ID, secondaryGroup.ID}, "name": "claude-login"}, loginBody.Data.Token)
+	start := callJSON(t, router, http.MethodPost, "/api/admin/oauth/anthropic/start", map[string]any{"group_ids": []int64{group.ID, secondaryGroup.ID}, "name": "claude-login"}, adminToken)
 	if start.Code != http.StatusOK {
 		t.Fatalf("oauth start status=%d body=%s", start.Code, start.Body.String())
 	}
@@ -225,7 +204,7 @@ func TestClaudeOAuthPastedCodeCreatesUpstreamAccount(t *testing.T) {
 	complete := callJSON(t, router, http.MethodPost, "/api/admin/oauth/anthropic/complete", map[string]any{
 		"state": startBody.Data.State,
 		"code":  "provider-code#" + startBody.Data.State,
-	}, loginBody.Data.Token)
+	}, adminToken)
 	if complete.Code != http.StatusOK {
 		t.Fatalf("oauth complete status=%d body=%s", complete.Code, complete.Body.String())
 	}

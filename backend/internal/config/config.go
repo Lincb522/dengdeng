@@ -136,7 +136,7 @@ func Default() *Config {
 			ForwardedClientIPHeaders: []string{"X-Forwarded-For", "X-Real-IP"},
 		},
 		Database: DatabaseConfig{Driver: "sqlite", Path: "data/dengdeng.db", Host: "localhost", Port: 5432, User: "dengdeng", DBName: "dengdeng", SSLMode: "disable"},
-		JWT:      JWTConfig{ExpireHour: 72},
+		JWT:      JWTConfig{ExpireHour: 24},
 		Admin:    AdminConfig{Email: "admin@dengdeng.local", Password: ""},
 		Site:     SiteConfig{Name: "DengDeng AI · 蹬蹬ai", AllowRegister: true, InitBalanceMicro: 0},
 		SMTP:     SMTPConfig{Host: "smtp.qq.com", Port: 465, Secure: true, FromName: "DengDeng AI"},

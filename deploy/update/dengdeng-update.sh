@@ -44,6 +44,7 @@ CURRENT_VERSION_FILE="$RELEASE_DIRECTORY/CURRENT_VERSION"
 PREVIOUS_COMMIT_FILE="$RELEASE_DIRECTORY/PREVIOUS_COMMIT"
 PREVIOUS_BINARY="$RELEASE_DIRECTORY/dengdeng.previous"
 HOME_DIRECTORY="/opt/dengdeng/.update-home"
+BUILD_DIRECTORY="$SOURCE_DIRECTORY/.build"
 
 for path in "$SOURCE_DIRECTORY" "$RELEASE_DIRECTORY" "$RUNTIME_BINARY" "$STATE_DIRECTORY"; do
   [[ "$path" == /* ]] || { echo "update paths must be absolute" >&2; exit 2; }
@@ -52,10 +53,19 @@ done
 [[ "$SERVICE" =~ ^[A-Za-z0-9_.@-]+\.service$ ]] || { echo "invalid service" >&2; exit 2; }
 [[ "$BUILD_JOBS" =~ ^[1-9][0-9]?$ ]] || BUILD_JOBS=2
 
-install -d -m 0750 -o dengdeng -g dengdeng "$STATE_DIRECTORY"
-install -d -m 0750 "$SOURCE_DIRECTORY" "$RELEASE_DIRECTORY" "$HOME_DIRECTORY"
+install -d -m 0750 -o dengdeng -g dengdeng "$STATE_DIRECTORY" "$SOURCE_DIRECTORY" "$HOME_DIRECTORY"
+install -d -m 0750 -o root -g dengdeng "$RELEASE_DIRECTORY"
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
+
+builder() {
+  runuser -u dengdeng -- env \
+    HOME="$HOME_DIRECTORY" \
+    PNPM_HOME="$HOME_DIRECTORY/pnpm" \
+    GOPROXY="$GOPROXY" \
+    PATH="$HOME_DIRECTORY/pnpm:/usr/local/bin:/usr/bin:/bin" \
+    "$@"
+}
 
 ACTION=""
 REQUESTED_BY=""
@@ -340,7 +350,7 @@ restore_after_failure() {
 on_error() {
   local code=$?
   trap - ERR
-  git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html 2>/dev/null || true
+  builder git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html 2>/dev/null || true
   restore_after_failure
   exit "$code"
 }
@@ -350,11 +360,12 @@ prepare_repository() {
   set_stage "fetching" "正在同步远程仓库"
   if [[ ! -d "$SOURCE_DIRECTORY/.git" ]]; then
     rm -rf "$SOURCE_DIRECTORY"
-    git clone --filter=blob:none --no-tags --branch "$BRANCH" "$REPOSITORY" "$SOURCE_DIRECTORY"
+    install -d -m 0750 -o dengdeng -g dengdeng "$SOURCE_DIRECTORY"
+    builder git clone --filter=blob:none --no-tags --branch "$BRANCH" "$REPOSITORY" "$SOURCE_DIRECTORY"
   fi
-  git -C "$SOURCE_DIRECTORY" remote set-url origin "$REPOSITORY"
-  git -C "$SOURCE_DIRECTORY" fetch --prune --tags origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-  TARGET_COMMIT="$(git -C "$SOURCE_DIRECTORY" rev-parse --verify "origin/$BRANCH^{commit}")"
+  builder git -C "$SOURCE_DIRECTORY" remote set-url origin "$REPOSITORY"
+  builder git -C "$SOURCE_DIRECTORY" fetch --prune --tags origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  TARGET_COMMIT="$(builder git -C "$SOURCE_DIRECTORY" rev-parse --verify "origin/$BRANCH^{commit}")"
   [[ "$TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]]
   if [[ -n "$CURRENT_COMMIT" && "$CURRENT_COMMIT" == "$TARGET_COMMIT" ]]; then
     UPDATE_AVAILABLE="false"
@@ -366,39 +377,24 @@ prepare_repository() {
 
 build_release() {
   set_stage "building_frontend" "正在构建管理端"
-  git -C "$SOURCE_DIRECTORY" checkout -f -B "$BRANCH" "origin/$BRANCH"
-  git -C "$SOURCE_DIRECTORY" reset --hard "$TARGET_COMMIT"
-  git -C "$SOURCE_DIRECTORY" clean -ffd
-  export HOME="$HOME_DIRECTORY"
-  export PNPM_HOME="$HOME_DIRECTORY/pnpm"
-  export GOPROXY
-  export PATH="$PNPM_HOME:/usr/local/bin:/usr/bin:/bin"
-  cd "$SOURCE_DIRECTORY/frontend"
-  pnpm install --frozen-lockfile --prefer-offline
-  pnpm build
+  builder git -C "$SOURCE_DIRECTORY" checkout -f -B "$BRANCH" "origin/$BRANCH"
+  builder git -C "$SOURCE_DIRECTORY" reset --hard "$TARGET_COMMIT"
+  builder git -C "$SOURCE_DIRECTORY" clean -ffd
+  builder bash -c 'cd "$1" && pnpm install --frozen-lockfile --prefer-offline && pnpm build' _ "$SOURCE_DIRECTORY/frontend"
 
   set_stage "building_backend" "正在构建服务端"
-  local release version_name build_time ldflags
+  local release build_output version_name build_time ldflags
   release="$RELEASE_DIRECTORY/dengdeng-$TARGET_COMMIT"
-  version_name="$(git -C "$SOURCE_DIRECTORY" describe --tags --always "$TARGET_COMMIT")"
+  build_output="$BUILD_DIRECTORY/dengdeng-$TARGET_COMMIT"
+  version_name="$(builder git -C "$SOURCE_DIRECTORY" describe --tags --always "$TARGET_COMMIT")"
   build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   ldflags="-s -w -X dengdeng/internal/version.Version=$version_name -X dengdeng/internal/version.Commit=$TARGET_COMMIT -X dengdeng/internal/version.BuildTime=$build_time"
-  cd "$SOURCE_DIRECTORY/backend"
-  GOMAXPROCS="$BUILD_JOBS" CGO_ENABLED=0 go build -p "$BUILD_JOBS" -trimpath -ldflags "$ldflags" -o "$release.tmp" ./cmd/server
-  git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html
-  chmod 0755 "$release.tmp"
-  mv -f "$release.tmp" "$release"
+  builder install -d -m 0750 "$BUILD_DIRECTORY"
+  builder bash -c 'cd "$1" && GOMAXPROCS="$2" CGO_ENABLED=0 go build -p "$2" -trimpath -ldflags "$3" -o "$4" ./cmd/server' _ "$SOURCE_DIRECTORY/backend" "$BUILD_JOBS" "$ldflags" "$build_output"
+  builder git -C "$SOURCE_DIRECTORY" restore -- backend/internal/web/dist/index.html
+  install -m 0755 -o root -g dengdeng "$build_output" "$release"
+  builder rm -f "$build_output"
   TARGET_VERSION="$version_name"
-}
-
-sync_updater_components() {
-  set_stage "health_check" "正在同步更新组件"
-  bash -n "$SOURCE_DIRECTORY/deploy/update/dengdeng-update.sh" "$SOURCE_DIRECTORY/deploy/update/install.sh"
-  install -m 0755 "$SOURCE_DIRECTORY/deploy/update/dengdeng-update.sh" /usr/local/sbin/dengdeng-update.next
-  mv -f /usr/local/sbin/dengdeng-update.next /usr/local/sbin/dengdeng-update
-  install -m 0644 "$SOURCE_DIRECTORY/deploy/systemd/dengdeng-updater.service" /etc/systemd/system/dengdeng-updater.service
-  install -m 0644 "$SOURCE_DIRECTORY/deploy/polkit/49-dengdeng-updater.rules" /etc/polkit-1/rules.d/49-dengdeng-updater.rules
-  systemctl daemon-reload
 }
 
 apply_release() {
@@ -431,7 +427,6 @@ apply_release() {
   CURRENT_VERSION="$TARGET_VERSION"
   PREVIOUS_COMMIT="$RESTORE_COMMIT"
   UPDATE_AVAILABLE="false"
-  sync_updater_components
   rm -f "$RESTORE_BINARY"
   SWITCHED="false"
   STATUS="succeeded"

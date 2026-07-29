@@ -60,9 +60,36 @@ type BillContext struct {
 	// SkipBalance is true for a valid day pass or a request quota that was
 	// reserved by the gateway. Usage is still logged at its normal cost.
 	SkipBalance bool
+	// Reservations are created atomically before the upstream request. Billing
+	// releases them and records the actual charge in the same transaction.
+	ReservedBalanceMicro  int64
+	ReservedKeyQuotaMicro int64
+	ReservedDailyMicro    int64
 }
 
-func (s *BillingService) Record(bc BillContext) {
+// EstimateMaximum reserves a conservative upper bound before a request starts.
+// Counting every request byte as an input token intentionally overestimates
+// UTF-8/JSON prompts; the margin also covers cache-write premiums.
+func (s *BillingService) EstimateMaximum(modelName string, bodyBytes int, maxOutputTokens, imageCount int64, rates RatePlan) int64 {
+	if imageCount > 0 {
+		estimate := s.pricing.Cost(modelName, Usage{ImageCount: imageCount}, rates)
+		return estimate + estimate/10
+	}
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = 8_192
+	}
+	inputTokens := int64(bodyBytes)
+	if inputTokens < 1 {
+		inputTokens = 1
+	}
+	estimate := s.pricing.Cost(modelName, Usage{
+		InputTokens:  inputTokens,
+		OutputTokens: maxOutputTokens,
+	}, rates)
+	return estimate + estimate/5
+}
+
+func (s *BillingService) Record(bc BillContext) error {
 	referralsEnabled := true
 	if s.settings != nil {
 		settings, err := s.settings.Get()
@@ -135,22 +162,42 @@ func (s *BillingService) Record(bc BillContext) {
 				log.Printf("[billing] ops error sidecar unavailable for request %s: %v", entry.RequestID, err)
 			}
 		}
-		if referralsEnabled && cost > 0 && !bc.SkipBalance {
-			if err := tx.Model(&model.User{}).Where("id = ?", bc.UserID).
-				Update("balance_micro", gorm.Expr("balance_micro - ?", cost)).Error; err != nil {
+		if bc.ReservedBalanceMicro > 0 || (cost > 0 && !bc.SkipBalance) {
+			if err := tx.Model(&model.User{}).Where("id = ?", bc.UserID).Updates(map[string]any{
+				"balance_held_micro": gorm.Expr(
+					"CASE WHEN balance_held_micro >= ? THEN balance_held_micro - ? ELSE 0 END",
+					bc.ReservedBalanceMicro, bc.ReservedBalanceMicro,
+				),
+				"balance_micro": gorm.Expr(
+					"CASE WHEN balance_micro >= ? THEN balance_micro - ? ELSE 0 END",
+					cost, cost,
+				),
+			}).Error; err != nil {
 				return err
 			}
 		}
-		if cost > 0 && bc.APIKeyID > 0 {
-			if err := tx.Model(&model.APIKey{}).Where("id = ?", bc.APIKeyID).
-				Update("quota_used_micro", gorm.Expr("quota_used_micro + ?", cost)).Error; err != nil {
+		if bc.APIKeyID > 0 && (cost > 0 || bc.ReservedKeyQuotaMicro > 0 || bc.ReservedDailyMicro > 0) {
+			if err := tx.Model(&model.APIKey{}).Where("id = ?", bc.APIKeyID).Updates(map[string]any{
+				"quota_held_micro": gorm.Expr(
+					"CASE WHEN quota_held_micro >= ? THEN quota_held_micro - ? ELSE 0 END",
+					bc.ReservedKeyQuotaMicro, bc.ReservedKeyQuotaMicro,
+				),
+				"daily_quota_held_micro": gorm.Expr(
+					"CASE WHEN daily_quota_held_micro >= ? THEN daily_quota_held_micro - ? ELSE 0 END",
+					bc.ReservedDailyMicro, bc.ReservedDailyMicro,
+				),
+				"quota_used_micro": gorm.Expr(
+					"CASE WHEN quota_micro > 0 AND quota_used_micro + ? > quota_micro THEN quota_micro ELSE quota_used_micro + ? END",
+					cost, cost,
+				),
+			}).Error; err != nil {
 				return err
 			}
 		}
 		// Commission follows real paid usage only. Day passes, request cards and
 		// administrators do not create commission because no cash balance was
 		// deducted for those calls.
-		if cost > 0 && !bc.SkipBalance {
+		if referralsEnabled && cost > 0 && !bc.SkipBalance {
 			if err := settleReferralCommission(tx, entry.ID, bc.UserID, cost); err != nil {
 				return err
 			}
@@ -158,11 +205,12 @@ func (s *BillingService) Record(bc BillContext) {
 		return nil
 	}); err != nil {
 		log.Printf("[billing] failed to settle usage for user %d: %v", bc.UserID, err)
-		return
+		return err
 	}
 	if s.geo != nil && entry.ClientIP != "" {
 		s.geo.Enrich(entry.ID, errorLogID, entry.ClientIP)
 	}
+	return nil
 }
 
 func opsErrorFromUsage(entry model.UsageLog, platform string) model.OpsErrorLog {

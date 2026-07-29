@@ -13,6 +13,7 @@ func TestPublicCORSPreflightForRelayOnly(t *testing.T) {
 	router := gin.New()
 	router.Use(PublicCORS())
 	router.GET("/v1/models", func(c *gin.Context) { c.Status(http.StatusOK) })
+	router.POST("/chat/completions", func(c *gin.Context) { c.Status(http.StatusOK) })
 	router.GET("/api/user/me", func(c *gin.Context) { c.Status(http.StatusOK) })
 
 	preflight := httptest.NewRequest(http.MethodOptions, "/v1/models", nil)
@@ -32,6 +33,14 @@ func TestPublicCORSPreflightForRelayOnly(t *testing.T) {
 	}
 	if got := recorder.Header().Get("Access-Control-Expose-Headers"); got != "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID" {
 		t.Fatalf("expose headers = %q", got)
+	}
+
+	aliasPreflight := httptest.NewRequest(http.MethodOptions, "/chat/completions", nil)
+	aliasPreflight.Header.Set("Origin", "https://app.chatboxai.app")
+	aliasRecorder := httptest.NewRecorder()
+	router.ServeHTTP(aliasRecorder, aliasPreflight)
+	if aliasRecorder.Code != http.StatusNoContent || aliasRecorder.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatalf("unversioned relay preflight status=%d allow-origin=%q", aliasRecorder.Code, aliasRecorder.Header().Get("Access-Control-Allow-Origin"))
 	}
 
 	console := httptest.NewRequest(http.MethodGet, "/api/user/me", nil)

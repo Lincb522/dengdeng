@@ -92,6 +92,55 @@ BACKUP_RETENTION_COUNT=30
 
 “立即清理”只立即执行同一套自动备份保留规则，不会清空数据库、用量日志或手动备份。
 
+### GitHub 加密异地备份
+
+不要把 SQLite 明文、环境变量或恢复密钥提交到 GitHub。仓库提供的 `deploy/backup/dengdeng-github-backup.sh` 会先用 `VACUUM INTO` 创建一致性快照，通过 `PRAGMA integrity_check` 后进行压缩和 GPG AES-256 加密，再把密文推送到独立私有仓库。默认保留最近 7 份完整数据库快照和 2 份脱敏全栈快照，并把大文件切成 90 MiB 分片。
+
+全栈快照包含当前提交的源码、运行二进制、Nginx/systemd 配置、运行环境文件和一份业务数据库副本。生成副本时会停用在线支付和推广提现，删除支付渠道、商户密钥、用户提现 OpenID，并清空订单渠道快照和外部支付流水绑定。TLS 私钥、GitHub deploy key 和备份解密口令不会进入快照。其他业务数据与加密上游凭据仍会保留，因此全栈文件即使加密后也必须只放在私有仓库。
+
+为备份仓库创建一把只用于该仓库的可写 deploy key。服务器私钥、恢复口令和主应用密钥相互独立：
+
+```bash
+sudo install -d -m 0700 -o dengdeng -g dengdeng /var/lib/dengdeng/github-backup
+sudo -u dengdeng ssh-keygen -t ed25519 -N '' \
+  -f /var/lib/dengdeng/github-backup/id_ed25519 \
+  -C 'dengdeng-github-backup'
+sudo install -m 0644 deploy/systemd/dengdeng-github-backup.service /etc/systemd/system/
+sudo install -m 0644 deploy/systemd/dengdeng-github-backup.timer /etc/systemd/system/
+sudo install -m 0755 deploy/backup/dengdeng-github-backup.sh /usr/local/sbin/
+sudo install -m 0755 deploy/backup/dengdeng-github-restore.sh /usr/local/sbin/
+sudo install -m 0755 deploy/backup/dengdeng-fullstack-restore.sh /usr/local/sbin/
+sudo install -m 0640 -o root -g dengdeng \
+  deploy/backup/github-backup.conf.example /etc/dengdeng/github-backup.conf
+sudo sh -c 'umask 027; openssl rand -base64 48 > /etc/dengdeng/github-backup.pass'
+sudo chown root:dengdeng /etc/dengdeng/github-backup.pass
+```
+
+把 GitHub 官方公布的 `github.com` Ed25519 主机公钥写入 `/var/lib/dengdeng/github-backup/known_hosts`，将生成的公钥注册为备份仓库的可写 deploy key，再修改 `/etc/dengdeng/github-backup.conf` 中的仓库地址。首次执行应同时验证上传与恢复：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start dengdeng-github-backup.service
+sudo journalctl -u dengdeng-github-backup.service --no-pager -n 50
+
+git clone git@github.com:YOUR_ACCOUNT/dengdeng-backups.git /tmp/dengdeng-backups
+sudo DENGDENG_BACKUP_PASSPHRASE_FILE=/etc/dengdeng/github-backup.pass \
+  /usr/local/sbin/dengdeng-github-restore \
+  /tmp/dengdeng-backups latest /tmp/dengdeng-restored.db
+sudo sqlite3 /tmp/dengdeng-restored.db 'PRAGMA integrity_check;'
+
+sudo DENGDENG_BACKUP_PASSPHRASE_FILE=/etc/dengdeng/github-backup.pass \
+  /usr/local/sbin/dengdeng-fullstack-restore \
+  /tmp/dengdeng-backups latest /tmp/dengdeng-fullstack-restored
+sudo sqlite3 /tmp/dengdeng-fullstack-restored/database/dengdeng.sanitized.db \
+  'PRAGMA integrity_check;'
+
+sudo systemctl enable --now dengdeng-github-backup.timer
+systemctl list-timers dengdeng-github-backup.timer
+```
+
+恢复脚本永远只写入新文件，不会自动覆盖生产数据库。恢复口令必须另存到服务器之外且权限设为 `0600`；丢失口令后 GitHub 中的密文无法恢复。
+
 ## 服务器直连仓库与版本更新
 
 二进制 + systemd 部署可以安装独立更新器，让管理员在「系统维护 → 版本更新」检查 `main`、执行更新或恢复上一版本。源码固定放在 `/opt/dengdeng/source`，运行二进制仍是 `/opt/dengdeng/dengdeng`；前端和后端全部构建成功前不会触碰线上进程，构建结束后也会恢复仓库中的前端占位文件以保持工作区干净。

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -171,6 +172,7 @@ type authedKey struct {
 	Groups          []model.Group
 	AccessActive    bool
 	RequestReserved bool
+	Budget          usageBudgetReservation
 }
 
 func usageBillingMode(ak *authedKey) string {
@@ -501,6 +503,135 @@ func (g *Gateway) refundRequestQuota(userID int64) {
 	}
 }
 
+type usageBudgetReservation struct {
+	BalanceMicro int64
+	KeyMicro     int64
+	DailyMicro   int64
+}
+
+var errInsufficientUsageBudget = errors.New("insufficient available usage budget")
+
+func (g *Gateway) reserveUsageBudget(ak *authedKey, amount int64) (usageBudgetReservation, error) {
+	var reserved usageBudgetReservation
+	if ak == nil || amount <= 0 {
+		return reserved, nil
+	}
+	err := g.db.Transaction(func(tx *gorm.DB) error {
+		cashBilling := ak.User.Role != model.RoleAdmin && !ak.AccessActive && !ak.RequestReserved
+		if cashBilling {
+			result := tx.Model(&model.User{}).
+				Where("id = ? AND balance_micro - balance_held_micro >= ?", ak.User.ID, amount).
+				Update("balance_held_micro", gorm.Expr("balance_held_micro + ?", amount))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errInsufficientUsageBudget
+			}
+			reserved.BalanceMicro = amount
+		}
+
+		// Serialize reservations and settlements for one key before reading the
+		// usage ledger. Without this lock, a concurrent settlement can move an
+		// amount from daily_quota_held_micro into usage_logs between the SUM and
+		// UPDATE, letting both values briefly disappear from the limit check.
+		keyLock := tx.Model(&model.APIKey{}).Where("id = ?", ak.Key.ID).
+			UpdateColumn("quota_held_micro", gorm.Expr("quota_held_micro"))
+		if keyLock.Error != nil {
+			return keyLock.Error
+		}
+		if keyLock.RowsAffected != 1 {
+			return errInsufficientUsageBudget
+		}
+
+		var limits struct {
+			QuotaMicro      int64
+			DailyQuotaMicro int64
+		}
+		if err := tx.Model(&model.APIKey{}).Select("quota_micro", "daily_quota_micro").Where("id = ?", ak.Key.ID).Scan(&limits).Error; err != nil {
+			return err
+		}
+		if limits.QuotaMicro <= 0 && limits.DailyQuotaMicro <= 0 {
+			return nil
+		}
+		now := time.Now()
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		var dailyUsed int64
+		if limits.DailyQuotaMicro > 0 {
+			if err := tx.Model(&model.UsageLog{}).
+				Where("api_key_id = ? AND created_at >= ?", ak.Key.ID, dayStart).
+				Select("COALESCE(SUM(cost_micro), 0)").Scan(&dailyUsed).Error; err != nil {
+				return err
+			}
+		}
+		result := tx.Model(&model.APIKey{}).
+			Where(
+				"id = ? AND (quota_micro = 0 OR quota_used_micro + quota_held_micro + ? <= quota_micro) AND (daily_quota_micro = 0 OR ? + daily_quota_held_micro + ? <= daily_quota_micro)",
+				ak.Key.ID, amount, dailyUsed, amount,
+			).
+			Updates(map[string]any{
+				"quota_held_micro": gorm.Expr(
+					"CASE WHEN quota_micro > 0 THEN quota_held_micro + ? ELSE quota_held_micro END",
+					amount,
+				),
+				"daily_quota_held_micro": gorm.Expr(
+					"CASE WHEN daily_quota_micro > 0 THEN daily_quota_held_micro + ? ELSE daily_quota_held_micro END",
+					amount,
+				),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errInsufficientUsageBudget
+		}
+		if limits.QuotaMicro > 0 {
+			reserved.KeyMicro = amount
+		}
+		if limits.DailyQuotaMicro > 0 {
+			reserved.DailyMicro = amount
+		}
+		return nil
+	})
+	return reserved, err
+}
+
+func (g *Gateway) releaseUsageBudget(ak *authedKey) {
+	if ak == nil {
+		return
+	}
+	reserved := ak.Budget
+	if reserved.BalanceMicro <= 0 && reserved.KeyMicro <= 0 && reserved.DailyMicro <= 0 {
+		return
+	}
+	if err := g.db.Transaction(func(tx *gorm.DB) error {
+		if reserved.BalanceMicro > 0 {
+			if err := tx.Model(&model.User{}).Where("id = ?", ak.User.ID).Update(
+				"balance_held_micro",
+				gorm.Expr("CASE WHEN balance_held_micro >= ? THEN balance_held_micro - ? ELSE 0 END", reserved.BalanceMicro, reserved.BalanceMicro),
+			).Error; err != nil {
+				return err
+			}
+		}
+		if reserved.KeyMicro > 0 || reserved.DailyMicro > 0 {
+			return tx.Model(&model.APIKey{}).Where("id = ?", ak.Key.ID).Updates(map[string]any{
+				"quota_held_micro": gorm.Expr(
+					"CASE WHEN quota_held_micro >= ? THEN quota_held_micro - ? ELSE 0 END",
+					reserved.KeyMicro, reserved.KeyMicro,
+				),
+				"daily_quota_held_micro": gorm.Expr(
+					"CASE WHEN daily_quota_held_micro >= ? THEN daily_quota_held_micro - ? ELSE 0 END",
+					reserved.DailyMicro, reserved.DailyMicro,
+				),
+			}).Error
+		}
+		return nil
+	}); err != nil {
+		log.Printf("[gateway] failed to release usage reservation for user %d: %v", ak.User.ID, err)
+	}
+	ak.Budget = usageBudgetReservation{}
+}
+
 type relayRequest struct {
 	Platform string // platform this endpoint belongs to
 	Path     string // upstream path (incl. query for gemini)
@@ -635,6 +766,42 @@ func jsonStringPath(root map[string]any, path ...string) string {
 	}
 	value, _ := current.(string)
 	return strings.TrimSpace(value)
+}
+
+func maxRatePlan(current, candidate service.RatePlan) service.RatePlan {
+	current.Base = math.Max(current.Base, candidate.Base)
+	current.CacheRead = math.Max(current.CacheRead, candidate.CacheRead)
+	current.CacheWrite5m = math.Max(current.CacheWrite5m, candidate.CacheWrite5m)
+	current.CacheWrite1h = math.Max(current.CacheWrite1h, candidate.CacheWrite1h)
+	current.Image = math.Max(current.Image, candidate.Image)
+	return current
+}
+
+func (g *Gateway) estimateRequestBudget(ak *authedKey, req relayRequest, groups []model.Group) int64 {
+	if g.billing == nil || ak == nil || !req.Billable {
+		return 0
+	}
+	var rates service.RatePlan
+	for _, group := range groups {
+		candidate := g.effortRates(
+			billingRates(ak.User, group, g.rates.Resolve(ak.User.ID, group.ID, group.RateMultiplier)),
+			req.Effort,
+		)
+		rates = maxRatePlan(rates, candidate)
+	}
+	var maxOutput, imageCount int64
+	if req.Image {
+		imageCount = 1
+	}
+	if fields := peekJSON(req.Body); fields != nil {
+		maxOutput = firstPositive(fields["max_output_tokens"], fields["max_completion_tokens"], fields["max_tokens"])
+		if req.Image {
+			if count := firstPositive(fields["n"]); count > 0 {
+				imageCount = count
+			}
+		}
+	}
+	return g.billing.EstimateMaximum(req.Model, len(req.Body), maxOutput, imageCount, rates)
 }
 
 // relay runs the account failover loop and, on success, streams the response
@@ -783,6 +950,26 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		}
 	}
 
+	budgetSettled := false
+	if req.Billable {
+		estimate := g.estimateRequestBudget(ak, req, routeGroups)
+		reserved, err := g.reserveUsageBudget(ak, estimate)
+		if err != nil {
+			if errors.Is(err, errInsufficientUsageBudget) {
+				failInsufficientQuota(c, "insufficient available balance or API key quota")
+			} else {
+				util.Fail(c, http.StatusInternalServerError, "reserve usage budget failed")
+			}
+			return
+		}
+		ak.Budget = reserved
+		defer func() {
+			if !budgetSettled {
+				g.releaseUsageBudget(ak)
+			}
+		}()
+	}
+
 	var tried []int64
 	var lastStatus int
 	var lastBody []byte
@@ -909,33 +1096,40 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		g.scheduler.Release(acc.ID)
 
 		if req.Billable {
-			g.billing.Record(service.BillContext{
-				RequestID:       middleware.RequestIDFromContext(c),
-				ClientRequestID: clientRequestID(c),
-				UserID:          ak.User.ID,
-				APIKeyID:        ak.Key.ID,
-				AccountID:       acc.ID,
-				GroupID:         routeGroup.ID,
-				Model:           req.Model,
-				Platform:        req.Platform,
-				RequestPath:     publicRequestPath(c),
-				ClientIP:        c.ClientIP(),
-				UserAgent:       truncate(c.Request.UserAgent(), 512),
-				Stream:          streamed,
-				Effort:          req.Effort,
-				ServiceTier:     req.ServiceTier,
-				BillingMode:     usageBillingMode(ak),
-				Usage:           usage,
-				Rates:           g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
-				FirstTokenMs:    timingWriter.firstTokenMs,
-				DurationMs:      time.Since(start).Milliseconds(),
-				QueueMs:         trace.QueueMs,
-				ScheduleMs:      trace.ScheduleMs,
-				UpstreamMs:      trace.UpstreamMs,
-				AttemptCount:    trace.AttemptCount,
-				StatusCode:      resp.StatusCode,
-				SkipBalance:     ak.AccessActive || ak.RequestReserved,
-			})
+			if err := g.billing.Record(service.BillContext{
+				RequestID:             middleware.RequestIDFromContext(c),
+				ClientRequestID:       clientRequestID(c),
+				UserID:                ak.User.ID,
+				APIKeyID:              ak.Key.ID,
+				AccountID:             acc.ID,
+				GroupID:               routeGroup.ID,
+				Model:                 req.Model,
+				Platform:              req.Platform,
+				RequestPath:           publicRequestPath(c),
+				ClientIP:              c.ClientIP(),
+				UserAgent:             truncate(c.Request.UserAgent(), 512),
+				Stream:                streamed,
+				Effort:                req.Effort,
+				ServiceTier:           req.ServiceTier,
+				BillingMode:           usageBillingMode(ak),
+				Usage:                 usage,
+				Rates:                 g.effortRates(billingRates(ak.User, routeGroup, g.rates.Resolve(ak.User.ID, routeGroup.ID, routeGroup.RateMultiplier)), req.Effort),
+				FirstTokenMs:          timingWriter.firstTokenMs,
+				DurationMs:            time.Since(start).Milliseconds(),
+				QueueMs:               trace.QueueMs,
+				ScheduleMs:            trace.ScheduleMs,
+				UpstreamMs:            trace.UpstreamMs,
+				AttemptCount:          trace.AttemptCount,
+				StatusCode:            resp.StatusCode,
+				SkipBalance:           ak.AccessActive || ak.RequestReserved,
+				ReservedBalanceMicro:  ak.Budget.BalanceMicro,
+				ReservedKeyQuotaMicro: ak.Budget.KeyMicro,
+				ReservedDailyMicro:    ak.Budget.DailyMicro,
+			}); err != nil {
+				return
+			}
+			budgetSettled = true
+			ak.Budget = usageBudgetReservation{}
 		}
 		completed = true
 		return

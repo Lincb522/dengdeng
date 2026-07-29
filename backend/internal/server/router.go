@@ -144,7 +144,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		user := api.Group("/user", middleware.JWTAuth(db, cfg.JWT.Secret, systemSettings))
 		{
-			stepUp := middleware.RequireStepUp(systemSettings)
+			recentMFA := middleware.RequireRecentMFA()
 			user.GET("/me", userH.Me)
 			user.POST("/step-up", userH.StepUp)
 			user.POST("/password", userH.ChangePassword)
@@ -155,9 +155,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			user.GET("/keys", userH.ListKeys)
 			user.POST("/keys", userH.CreateKey)
 			user.PUT("/keys/:id", userH.UpdateKey)
-			user.GET("/keys/:id/secret", userH.RevealKeySecret)
-			user.PUT("/keys/:id/secret", userH.RecoverKeySecret)
-			user.POST("/keys/:id/rotate", stepUp, userH.RotateKey)
+			user.GET("/keys/:id/secret", recentMFA, userH.RevealKeySecret)
+			user.PUT("/keys/:id/secret", recentMFA, userH.RecoverKeySecret)
+			user.POST("/keys/:id/rotate", recentMFA, userH.RotateKey)
 			user.DELETE("/keys/:id", userH.DeleteKey)
 			user.GET("/model-catalog", userH.ModelCatalogue)
 			user.GET("/usage", userH.Usage)
@@ -180,7 +180,12 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			user.POST("/payment/orders/:id/refund-request", paymentH.RequestRefund)
 		}
 
-		admin := api.Group("/admin", middleware.JWTAuth(db, cfg.JWT.Secret, systemSettings), middleware.AdminOnly())
+		admin := api.Group(
+			"/admin",
+			middleware.JWTAuth(db, cfg.JWT.Secret, systemSettings),
+			middleware.AdminOnly(),
+			middleware.RequireAdminMutationMFA(),
+		)
 		{
 			stepUp := middleware.RequireStepUp(systemSettings)
 			admin.GET("/dashboard", adminH.Dashboard)
@@ -250,7 +255,7 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.GET("/backups/policy", backupH.Policy)
 			admin.PUT("/backups/policy", backupH.UpdatePolicy)
 			admin.POST("/backups/cleanup", backupH.Cleanup)
-			admin.GET("/backups/:id/download", stepUp, backupH.Download)
+			admin.GET("/backups/:id/download", middleware.RequireRecentMFA(), backupH.Download)
 			admin.DELETE("/backups/:id", backupH.Delete)
 			admin.GET("/update/status", updateH.Status)
 			admin.POST("/update/check", updateH.Check)

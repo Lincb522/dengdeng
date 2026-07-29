@@ -29,10 +29,14 @@ const acceptedAgreement = ref(false)
 const agreementVisible = ref(false)
 const agreementDocumentID = ref('')
 const agreementCloseButton = ref<HTMLButtonElement | null>(null)
+const agreementDialog = ref<HTMLElement | null>(null)
+const agreementBackdropPointerStarted = ref(false)
 const turnstileToken = ref('')
 const turnstileNonce = ref(0)
 const pendingOAuthCode = ref(new URLSearchParams(window.location.search).get('oauth_code') || '')
 let cooldownTimer: number | undefined
+let agreementReturnFocus: HTMLElement | null = null
+let agreementPageLocked = false
 
 const agreement = computed(() => auth.loginAgreement)
 const agreementRequired = computed(() => agreement.value.enabled && agreement.value.documents.length > 0)
@@ -69,11 +73,34 @@ watch(
   },
 )
 watch(agreementVisible, async (visible) => {
-  if (!visible) return
+  if (!visible) {
+    unlockAgreementPage()
+    await nextTick()
+    if (agreementReturnFocus?.isConnected) agreementReturnFocus.focus()
+    agreementReturnFocus = null
+    return
+  }
+  agreementReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  lockAgreementPage()
   if (!agreementDocumentID.value) agreementDocumentID.value = agreement.value.documents[0]?.id || ''
   await nextTick()
   agreementCloseButton.value?.focus()
 })
+
+function lockAgreementPage() {
+  if (agreementPageLocked) return
+  agreementPageLocked = true
+  document.body.dataset.modalOpenCount = String(Number(document.body.dataset.modalOpenCount || 0) + 1)
+  document.body.classList.add('has-app-modal')
+}
+
+function unlockAgreementPage() {
+  if (!agreementPageLocked) return
+  agreementPageLocked = false
+  const nextCount = Math.max(0, Number(document.body.dataset.modalOpenCount || 1) - 1)
+  document.body.dataset.modalOpenCount = String(nextCount)
+  if (!nextCount) document.body.classList.remove('has-app-modal')
+}
 
 function beginCooldown(seconds: number) {
   resendAfter.value = seconds
@@ -104,8 +131,41 @@ function rejectAgreement() {
   agreementVisible.value = false
 }
 
+function handleAgreementPointerDown(event: PointerEvent) {
+  agreementBackdropPointerStarted.value = event.target === event.currentTarget
+}
+
+function handleAgreementPointerUp(event: PointerEvent) {
+  const shouldClose = agreementBackdropPointerStarted.value && event.target === event.currentTarget
+  agreementBackdropPointerStarted.value = false
+  if (shouldClose) rejectAgreement()
+}
+
 function handleAgreementKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && agreementVisible.value) rejectAgreement()
+  if (!agreementVisible.value) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    rejectAgreement()
+    return
+  }
+  if (event.key !== 'Tab' || !agreementDialog.value) return
+  const focusable = [...agreementDialog.value.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )].filter((element) => element.offsetParent !== null)
+  if (!focusable.length) {
+    event.preventDefault()
+    agreementDialog.value.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 async function sendVerificationCode() {
@@ -189,6 +249,7 @@ async function completeOAuth() {
 onBeforeUnmount(() => {
   if (cooldownTimer) window.clearInterval(cooldownTimer)
   window.removeEventListener('keydown', handleAgreementKeydown)
+  unlockAgreementPage()
 })
 
 async function submit() {
@@ -348,8 +409,15 @@ async function submit() {
 	<InterfaceThemeSwitcher class="interface-theme-switcher-float" />
 
     <Teleport to="body">
-      <div v-if="agreementVisible && agreementRequired" class="agreement-backdrop" role="presentation" @click.self="rejectAgreement">
-        <section class="agreement-dialog" role="dialog" aria-modal="true" aria-labelledby="agreement-title">
+      <div
+        v-if="agreementVisible && agreementRequired"
+        class="agreement-backdrop"
+        role="presentation"
+        @pointercancel="agreementBackdropPointerStarted = false"
+        @pointerdown="handleAgreementPointerDown"
+        @pointerup="handleAgreementPointerUp"
+      >
+        <section ref="agreementDialog" class="agreement-dialog" role="dialog" aria-modal="true" aria-labelledby="agreement-title" tabindex="-1">
           <header class="agreement-dialog__head">
             <div class="agreement-dialog__brand">
               <BrandMark :size="32" />

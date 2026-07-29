@@ -1,0 +1,11 @@
+[Unit]
+Description=Run DengDeng AI encrypted GitHub backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:35:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=dengdeng-github-backup.service
+
+[Install]
+WantedBy=timers.target

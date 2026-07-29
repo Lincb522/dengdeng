@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,74 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestOpenRemovesLegacyZeroProxyForeignKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-proxy.db")
+	cfg := config.Default()
+	cfg.Database.Path = path
+	db, err := Open(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := model.Group{Name: "legacy", Platform: model.PlatformOpenAI, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	account := model.UpstreamAccount{
+		GroupID: group.ID, Name: "legacy", Platform: model.PlatformOpenAI,
+		AuthType: model.AuthAPIKey, Status: model.StatusActive, ProxyID: 0,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	legacy, err := gorm.Open(sqlite.Open(path+"?_pragma=foreign_keys(0)"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var createSQL string
+	if err := legacy.Raw("SELECT sql FROM sqlite_master WHERE type='table' AND name='upstream_accounts'").Scan(&createSQL).Error; err != nil {
+		t.Fatal(err)
+	}
+	closing := strings.LastIndex(createSQL, ")")
+	if closing < 0 {
+		t.Fatalf("unexpected upstream schema: %s", createSQL)
+	}
+	createSQL = createSQL[:closing] + ", CONSTRAINT `fk_upstream_accounts_proxy` FOREIGN KEY (`proxy_id`) REFERENCES `proxies`(`id`)" + createSQL[closing:]
+	if err := legacy.Exec("ALTER TABLE upstream_accounts RENAME TO upstream_accounts_without_proxy_fk").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec(createSQL).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("INSERT INTO upstream_accounts SELECT * FROM upstream_accounts_without_proxy_fk").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Exec("DROP TABLE upstream_accounts_without_proxy_fk").Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, legacy)
+
+	db, err = Open(cfg)
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	defer closeTestDB(t, db)
+
+	var violations []struct {
+		Table string
+	}
+	if err := db.Raw("PRAGMA foreign_key_check").Scan(&violations).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("foreign key violations remain: %#v", violations)
+	}
+	if db.Migrator().HasConstraint(&model.UpstreamAccount{}, "Proxy") {
+		t.Fatal("legacy proxy constraint still exists")
+	}
+}
 
 func TestOpenBackfillsLegacyGroupBindings(t *testing.T) {
 	cfg := config.Default()

@@ -36,16 +36,21 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		db, err = gorm.Open(postgres.Open(cfg.PostgresDSN()), gcfg)
 	case "", "sqlite":
 		if dir := filepath.Dir(cfg.Database.Path); dir != "." {
-			if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 				return nil, mkErr
 			}
 		}
-		db, err = gorm.Open(sqlite.Open(cfg.Database.Path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"), gcfg)
+		db, err = gorm.Open(sqlite.Open(cfg.Database.Path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"), gcfg)
 	default:
 		return nil, fmt.Errorf("unsupported database driver: %s", cfg.Database.Driver)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
+	}
+	if (cfg.Database.Driver == "" || cfg.Database.Driver == "sqlite") && cfg.Database.Path != "" {
+		if chmodErr := os.Chmod(cfg.Database.Path, 0o600); chmodErr != nil {
+			return nil, fmt.Errorf("protect database file: %w", chmodErr)
+		}
 	}
 
 	if err := db.AutoMigrate(
@@ -57,6 +62,14 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		&model.ImageStorageConfig{}, &model.ImageTask{},
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	// Older schemas created an invalid FK from proxy_id=0 to proxies.id. The
+	// zero value intentionally means "default egress", so remove that legacy
+	// constraint before enforcing the remaining SQLite foreign keys.
+	if db.Migrator().HasConstraint(&model.UpstreamAccount{}, "Proxy") {
+		if err := db.Migrator().DropConstraint(&model.UpstreamAccount{}, "Proxy"); err != nil {
+			return nil, fmt.Errorf("drop legacy proxy constraint: %w", err)
+		}
 	}
 	// Existing databases receive these columns through ALTER TABLE and can have
 	// NULLs in historical rows. Backfill to zero so old usage entries keep the
@@ -83,6 +96,17 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		Where("reasoning_effort IN ?", []string{"fast", "minimal"}).
 		Update("reasoning_effort", "low").Error; err != nil {
 		return nil, fmt.Errorf("migrate legacy reasoning effort: %w", err)
+	}
+	// Reservations exist only while one gateway process is serving a request.
+	// A clean start means no old request can still settle, so clear holds left
+	// behind by a crash before accepting new traffic.
+	if err := db.Model(&model.User{}).Where("balance_held_micro <> 0").Update("balance_held_micro", 0).Error; err != nil {
+		return nil, fmt.Errorf("clear stale balance reservations: %w", err)
+	}
+	if err := db.Model(&model.APIKey{}).
+		Where("quota_held_micro <> 0 OR daily_quota_held_micro <> 0").
+		Updates(map[string]any{"quota_held_micro": 0, "daily_quota_held_micro": 0}).Error; err != nil {
+		return nil, fmt.Errorf("clear stale key reservations: %w", err)
 	}
 	if err := backfillPaymentLedger(db); err != nil {
 		return nil, fmt.Errorf("backfill payment ledger: %w", err)

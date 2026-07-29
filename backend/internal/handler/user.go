@@ -54,7 +54,11 @@ func (h *UserHandler) requireTOTPFeature(c *gin.Context) bool {
 	if !ok {
 		return false
 	}
-	if !settings.Security.TOTPEnabled {
+	user := middleware.CurrentUser(c)
+	// Administrators must always be able to bind a verifier because access to
+	// the administration API requires it, even when self-service TOTP is
+	// disabled for ordinary users.
+	if !settings.Security.TOTPEnabled && user.Role != model.RoleAdmin {
 		util.Fail(c, http.StatusForbidden, "authenticator setup is disabled by the administrator")
 		return false
 	}
@@ -116,14 +120,14 @@ func (h *UserHandler) StepUp(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var req struct {
 		Password string `json:"password" binding:"required"`
-		Code     string `json:"code" binding:"required"`
+		Code     string `json:"code"`
 	}
 	if c.ShouldBindJSON(&req) != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
-		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		util.FailCode(c, http.StatusForbidden, "auth.password_invalid", "current password is incorrect")
 		return
 	}
-	if !user.TOTPEnabled || !util.ValidateTOTP(string(user.TOTPSecret), req.Code, time.Now()) {
-		util.Fail(c, http.StatusUnauthorized, "authenticator code is invalid")
+	if user.TOTPEnabled && !util.ValidateTOTP(string(user.TOTPSecret), req.Code, time.Now()) {
+		util.FailCode(c, http.StatusForbidden, "auth.totp_invalid", "authenticator code is invalid")
 		return
 	}
 	token, err := h.signBoundToken(c, user, user.TokenVersion, true)
@@ -156,7 +160,7 @@ func (h *UserHandler) SetupTOTP(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var req totpPasswordReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
-		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		util.FailCode(c, http.StatusForbidden, "auth.password_invalid", "current password is incorrect")
 		return
 	}
 	secret, err := util.NewTOTPSecret()
@@ -178,7 +182,7 @@ func (h *UserHandler) EnableTOTP(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	var req totpEnableReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
-		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		util.FailCode(c, http.StatusForbidden, "auth.password_invalid", "current password is incorrect")
 		return
 	}
 	if !util.ValidateTOTP(req.Secret, req.Code, time.Now()) {
@@ -202,9 +206,13 @@ func (h *UserHandler) EnableTOTP(c *gin.Context) {
 
 func (h *UserHandler) DisableTOTP(c *gin.Context) {
 	user := middleware.CurrentUser(c)
+	if user.Role == model.RoleAdmin {
+		util.FailCode(c, http.StatusForbidden, "permission.admin_totp_required", "administrator two-factor authentication cannot be disabled")
+		return
+	}
 	var req totpDisableReq
 	if err := c.ShouldBindJSON(&req); err != nil || !util.CheckPassword(user.PasswordHash, req.Password) {
-		util.Fail(c, http.StatusUnauthorized, "current password is incorrect")
+		util.FailCode(c, http.StatusForbidden, "auth.password_invalid", "current password is incorrect")
 		return
 	}
 	if !user.TOTPEnabled || !util.ValidateTOTP(string(user.TOTPSecret), req.Code, time.Now()) {
@@ -302,6 +310,7 @@ func (h *UserHandler) RevealKeySecret(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("Pragma", "no-cache")
+	_ = service.NewAuditService(h.db).Record(user, "API_KEY_SECRET_REVEALED", "api_key", fmt.Sprint(key.ID), "owner revealed one recoverable key", c.ClientIP())
 	util.OK(c, gin.H{"plain": plain})
 }
 
@@ -332,6 +341,7 @@ func (h *UserHandler) RecoverKeySecret(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "save key secret failed")
 		return
 	}
+	_ = service.NewAuditService(h.db).Record(user, "API_KEY_SECRET_RECOVERED", "api_key", fmt.Sprint(key.ID), "owner restored one recoverable key", c.ClientIP())
 	c.Header("Cache-Control", "no-store")
 	util.OK(c, gin.H{"saved": true})
 }
@@ -606,6 +616,17 @@ func (h *UserHandler) resolveKeyGroups(user *model.User, ids []int64) ([]model.G
 		byID[group.ID] = group
 	}
 	ordered := make([]model.Group, 0, len(ids))
+	var ready map[int64]bool
+	if user.Role != model.RoleAdmin {
+		readyIDs, err := h.readyGroupIDs(time.Now().UTC())
+		if err != nil {
+			return nil, http.StatusInternalServerError, "load available groups failed"
+		}
+		ready = make(map[int64]bool, len(readyIDs))
+		for _, id := range readyIDs {
+			ready[id] = true
+		}
+	}
 	for _, id := range ids {
 		group, ok := byID[id]
 		if !ok {
@@ -616,6 +637,9 @@ func (h *UserHandler) resolveKeyGroups(user *model.User, ids []int64) ([]model.G
 		}
 		if !group.IsPublic && user.Role != model.RoleAdmin {
 			return nil, http.StatusForbidden, "group is not open"
+		}
+		if user.Role != model.RoleAdmin && !ready[group.ID] {
+			return nil, http.StatusServiceUnavailable, "group has no available upstream account"
 		}
 		ordered = append(ordered, group)
 	}
@@ -745,10 +769,37 @@ func (h *UserHandler) ListGroups(c *gin.Context) {
 	var groups []model.Group
 	q := h.db.Where("status = ?", model.StatusActive)
 	if user.Role != model.RoleAdmin {
-		q = q.Where("is_public = ?", true)
+		ready, err := h.readyGroupIDs(time.Now().UTC())
+		if err != nil {
+			util.Fail(c, http.StatusInternalServerError, "load available groups failed")
+			return
+		}
+		if len(ready) == 0 {
+			util.OK(c, []model.Group{})
+			return
+		}
+		q = q.Where("is_public = ? AND id IN ?", true, ready)
 	}
 	q.Order("id").Find(&groups)
 	util.OK(c, groups)
+}
+
+func (h *UserHandler) readyGroupIDs(now time.Time) ([]int64, error) {
+	var ids []int64
+	err := h.db.Raw(`
+		SELECT DISTINCT memberships.group_id
+		FROM (
+			SELECT group_id
+			FROM upstream_accounts
+			WHERE status = ? AND (cooldown_until IS NULL OR cooldown_until <= ?)
+			UNION
+			SELECT membership.group_id
+			FROM upstream_account_groups AS membership
+			JOIN upstream_accounts AS account ON account.id = membership.upstream_account_id
+			WHERE account.status = ? AND (account.cooldown_until IS NULL OR account.cooldown_until <= ?)
+		) AS memberships
+	`, model.StatusActive, now, model.StatusActive, now).Scan(&ids).Error
+	return ids, err
 }
 
 type catalogueGroup struct {
@@ -819,11 +870,8 @@ func (h *UserHandler) modelCatalogue(c *gin.Context, includePrivate bool) {
 		return
 	}
 
-	var readyGroupIDs []int64
-	now := time.Now()
-	if err := h.db.Model(&model.UpstreamAccount{}).
-		Where("status = ? AND (cooldown_until IS NULL OR cooldown_until <= ?)", model.StatusActive, now).
-		Distinct("group_id").Pluck("group_id", &readyGroupIDs).Error; err != nil {
+	readyGroupIDs, err := h.readyGroupIDs(time.Now().UTC())
+	if err != nil {
 		util.Fail(c, http.StatusInternalServerError, "load upstream status failed")
 		return
 	}

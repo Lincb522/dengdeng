@@ -89,12 +89,12 @@ func (s *BackupService) GetPolicy() (BackupPolicy, error) {
 	}
 	policy := s.defaultPolicy()
 	var setting model.Setting
-	err := s.db.First(&setting, "key = ?", backupPolicyKey).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return policy, nil
+	result := s.db.Where("key = ?", backupPolicyKey).Limit(1).Find(&setting)
+	if result.Error != nil {
+		return BackupPolicy{}, result.Error
 	}
-	if err != nil {
-		return BackupPolicy{}, err
+	if result.RowsAffected == 0 {
+		return policy, nil
 	}
 	if err := json.Unmarshal([]byte(setting.Value), &policy); err != nil {
 		return BackupPolicy{}, fmt.Errorf("decode backup policy: %w", err)

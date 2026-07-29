@@ -33,6 +33,10 @@ const (
 	paymentReconcileInterval = 15 * time.Second
 	paymentQueryTimeout      = 10 * time.Second
 	pendingReconcileBatch    = 100
+	// Providers may deliver a successful callback after the local checkout
+	// window has elapsed. Keep recently expired orders reconcilable so money
+	// received by the merchant can never be stranded without user credit.
+	paymentLateSettlementGrace = 24 * time.Hour
 )
 
 // PaymentService ports the Sub2API lifecycle into this application's GORM
@@ -290,6 +294,16 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID, amountMinor in
 	expires := now.Add(time.Duration(cfg.OrderExpiryMinutes) * time.Minute)
 	order := model.PaymentOrder{OutTradeNo: newPaymentOrderNo(selected.ProviderKey), UserID: userID, ProviderID: selected.ID, ProviderKey: selected.ProviderKey, PaymentMethod: method, Status: model.PaymentStatusPending, Currency: cfg.Currency, AmountMinor: amountMinor, CreditMicro: credit, ExpiresAt: expires, ProviderSnapshot: providerSnapshot(selected)}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		// Serialize checkout creation per user. A plain COUNT/SUM followed by
+		// INSERT lets simultaneous requests all observe the same old totals.
+		userLock := tx.Model(&model.User{}).Where("id = ?", userID).
+			UpdateColumn("balance_micro", gorm.Expr("balance_micro"))
+		if userLock.Error != nil {
+			return userLock.Error
+		}
+		if userLock.RowsAffected != 1 {
+			return ErrOrderNotFound
+		}
 		var pending int64
 		if err := tx.Model(&model.PaymentOrder{}).Where("user_id = ? AND status = ?", userID, model.PaymentStatusPending).Count(&pending).Error; err != nil {
 			return err
@@ -300,7 +314,14 @@ func (s *PaymentService) CreateOrder(ctx context.Context, userID, amountMinor in
 		if cfg.DailyLimitMinor > 0 {
 			var total int64
 			start := now.Truncate(24 * time.Hour)
-			if err := tx.Model(&model.PaymentOrder{}).Where("user_id = ? AND created_at >= ? AND status IN ?", userID, start, []string{model.PaymentStatusPaid, model.PaymentStatusCompleted}).Select("COALESCE(SUM(amount_minor), 0)").Scan(&total).Error; err != nil {
+			// Pending orders reserve the daily allowance as well. Otherwise a
+			// client can create several concurrent checkouts that each pass the
+			// limit before any one of them is paid.
+			if err := tx.Model(&model.PaymentOrder{}).Where("user_id = ? AND created_at >= ? AND status IN ?", userID, start, []string{
+				model.PaymentStatusPending,
+				model.PaymentStatusPaid,
+				model.PaymentStatusCompleted,
+			}).Select("COALESCE(SUM(amount_minor), 0)").Scan(&total).Error; err != nil {
 				return err
 			}
 			if total+amountMinor > cfg.DailyLimitMinor {
@@ -366,12 +387,8 @@ func (s *PaymentService) VerifyOrder(ctx context.Context, userID, id int64) (Ord
 	if err := s.db.Where("id=? AND user_id=?", id, userID).First(&order).Error; err != nil {
 		return OrderResult{}, ErrOrderNotFound
 	}
-	if order.Status != model.PaymentStatusPending {
-		return orderResult(order), nil
-	}
-	if order.ExpiresAt.Before(time.Now().UTC()) {
-		_ = s.expireOrder(order.ID)
-		_ = s.db.First(&order, id).Error
+	if order.Status != model.PaymentStatusPending &&
+		!(order.Status == model.PaymentStatusExpired && order.ExpiresAt.After(time.Now().UTC().Add(-paymentLateSettlementGrace))) {
 		return orderResult(order), nil
 	}
 	p, err := s.providerByID(order.ProviderID)
@@ -388,6 +405,8 @@ func (s *PaymentService) VerifyOrder(ctx context.Context, userID, id int64) (Ord
 		}
 	} else if query.Status == payment.StatusFailed {
 		_ = s.db.Model(&model.PaymentOrder{}).Where("id=? AND status=?", order.ID, model.PaymentStatusPending).Updates(map[string]any{"status": model.PaymentStatusFailed, "failure_reason": "payment rejected by provider"}).Error
+	} else if order.Status == model.PaymentStatusPending && order.ExpiresAt.Before(time.Now().UTC()) {
+		_ = s.expireOrder(order.ID)
 	}
 	_ = s.db.First(&order, id).Error
 	return orderResult(order), nil
@@ -644,7 +663,16 @@ func (s *PaymentService) confirmPayment(order model.PaymentOrder, tradeNo string
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		res := tx.Model(&model.PaymentOrder{}).Where("id=? AND status=?", order.ID, model.PaymentStatusPending).Updates(map[string]any{"status": model.PaymentStatusPaid, "provider_trade_no": tradeNo, "paid_at": now, "failure_reason": ""})
+		// A signed provider notification is authoritative even when it arrives
+		// after our local expiry/cancellation transition. Refunded and already
+		// completed orders are intentionally excluded.
+		payableStatuses := []string{
+			model.PaymentStatusPending,
+			model.PaymentStatusExpired,
+			model.PaymentStatusCancelled,
+			model.PaymentStatusFailed,
+		}
+		res := tx.Model(&model.PaymentOrder{}).Where("id=? AND status IN ?", order.ID, payableStatuses).Updates(map[string]any{"status": model.PaymentStatusPaid, "provider_trade_no": tradeNo, "paid_at": now, "failure_reason": ""})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -742,7 +770,13 @@ func (s *PaymentService) StartReconciler() {
 func (s *PaymentService) ReconcilePending(ctx context.Context) error {
 	now := time.Now().UTC()
 	var orders []model.PaymentOrder
-	if err := s.db.Where("status = ? AND expires_at > ? AND provider_trade_no <> ?", model.PaymentStatusPending, now, "").Order("id ASC").Limit(pendingReconcileBatch).Find(&orders).Error; err != nil {
+	if err := s.db.Where(
+		"provider_trade_no <> ? AND ((status = ?) OR (status = ? AND expires_at > ?))",
+		"",
+		model.PaymentStatusPending,
+		model.PaymentStatusExpired,
+		now.Add(-paymentLateSettlementGrace),
+	).Order("id ASC").Limit(pendingReconcileBatch).Find(&orders).Error; err != nil {
 		return err
 	}
 	for _, order := range orders {

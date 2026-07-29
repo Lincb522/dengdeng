@@ -1,0 +1,16 @@
+DATABASE_PATH=/var/lib/dengdeng/dengdeng.db
+BACKUP_REPOSITORY=git@github.com:YOUR_ACCOUNT/dengdeng-backups.git
+BACKUP_BRANCH=main
+BACKUP_WORK_DIRECTORY=/var/lib/dengdeng/github-backup
+BACKUP_IDENTITY_FILE=/var/lib/dengdeng/github-backup/id_ed25519
+BACKUP_KNOWN_HOSTS_FILE=/var/lib/dengdeng/github-backup/known_hosts
+BACKUP_PASSPHRASE_FILE=/etc/dengdeng/github-backup.pass
+BACKUP_RETENTION_COUNT=7
+BACKUP_FULLSTACK_ENABLED=true
+BACKUP_FULLSTACK_RETENTION_COUNT=2
+BACKUP_PART_SIZE=90m
+BACKUP_MAX_REPOSITORY_KIB=921600
+FULLSTACK_SOURCE_DIRECTORY=/opt/dengdeng/source
+FULLSTACK_BINARY=/opt/dengdeng/dengdeng
+FULLSTACK_ENV_FILE=/etc/dengdeng/dengdeng.env
+FULLSTACK_UPDATE_CONFIG=/etc/dengdeng/update.conf
