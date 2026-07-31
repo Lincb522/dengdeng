@@ -504,6 +504,12 @@ body.has-app-modal { overflow: hidden; }
 .studio-infinite-canvas.is-hand, .studio-infinite-canvas.is-panning { cursor: grab; }
 .studio-infinite-canvas.is-panning { cursor: grabbing; }
 .studio-infinite-canvas.is-note { cursor: crosshair; }
+.studio-fabric-canvas .canvas-container { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; }
+.studio-fabric-canvas .lower-canvas, .studio-fabric-canvas .upper-canvas { width: 100% !important; height: 100% !important; }
+.studio-selection-actions { position: absolute; z-index: 13; top: 1rem; left: 50%; display: flex; gap: .22rem; padding: .28rem; border: 1px solid #ded5c8; border-radius: .62rem; background: #fffdf9; box-shadow: 0 8px 22px rgba(80,61,40,.1); transform: translateX(-50%); }
+.studio-selection-actions button { min-height: 2rem; padding: 0 .65rem; border-radius: .4rem; color: #675c51; font-size: .65rem; font-weight: 760; }
+.studio-selection-actions button:hover { background: #f4eee6; color: #29231e; }
+.studio-selection-actions button.is-danger:hover { background: #fff0eb; color: #ae4c38; }
 .studio-canvas-world { position: absolute; inset: 0 auto auto 0; width: 1px; height: 1px; transform-origin: 0 0; will-change: transform; }
 .studio-canvas-empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .studio-canvas-empty span { padding: .55rem .78rem; border: 1px solid rgba(188,176,161,.65); border-radius: .5rem; background: rgba(255,253,249,.72); color: #8e8378; font-size: .65rem; backdrop-filter: blur(6px); }

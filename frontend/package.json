@@ -12,6 +12,7 @@
   "dependencies": {
     "@airwallex/components-sdk": "1.30.2",
     "@stripe/stripe-js": "9.0.1",
+    "fabric": "7.4.0",
     "pinia": "^3.0.3",
     "qrcode": "1.5.4",
     "vue": "^3.5.18",
