@@ -133,6 +133,7 @@ const errorCopy: Record<string, ErrorCopy> = {
   'auth.verification_code_invalid': { title: '验证码无效', message: '验证码错误或已过期。', action: '请重新获取验证码。' },
   'auth.password_reset_invalid': { title: '无法重置密码', message: '重置验证码错误或已过期。', action: '请重新获取验证码。' },
   'auth.code_rate_limited': { title: '验证码已发送', message: '请不要重复发送。', retryable: true },
+  'auth.registration_risk_limited': { title: '注册请求已受限', message: '当前网络或邮箱域名的注册次数过多。', action: '请稍后再试，或更换常用邮箱。', retryable: true },
   'auth.oauth_failed': { title: '第三方登录失败', message: '授权没有完成或登录凭据已失效。', action: '请重新发起授权。', retryable: true },
   'permission.denied': { title: '没有权限', message: '当前账户不能执行此操作。' },
   'permission.admin_required': { title: '仅管理员可用', message: '请使用管理员账户操作。' },

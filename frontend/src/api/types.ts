@@ -75,6 +75,13 @@ export interface SecurityPolicySettings {
 	audit_log_retention_days: number
 	turnstile_enabled: boolean
 	turnstile_site_key: string
+	registration_protection_enabled: boolean
+	registration_code_ip_hour_limit: number
+	registration_ip_day_limit: number
+	registration_subnet_day_limit: number
+	registration_domain_hour_limit: number
+	registration_grant_once_per_ip_days: number
+	registration_blocked_networks: string[]
 	trust_forwarded_ip: boolean
 	forwarded_ip_headers: string[]
 }

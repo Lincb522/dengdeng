@@ -168,6 +168,7 @@ func TestSystemSettingsRegistrationEmailSuffixes(t *testing.T) {
 	}
 	settings.RegistrationEmailSuffixes = []string{"Example.COM", "team.example.cn"}
 	settings.RegistrationEmailBlockedSuffixes = []string{"blocked.example.com", "Disposable.Example"}
+	settings.Security.RegistrationBlockedNetworks = []string{"198.51.100.25", "2001:db8::1/64"}
 	updated, err := svc.Update(settings)
 	if err != nil {
 		t.Fatal(err)
@@ -180,5 +181,11 @@ func TestSystemSettingsRegistrationEmailSuffixes(t *testing.T) {
 	}
 	if updated.AllowsRegistrationEmail("person@blocked.example.com") || updated.AllowsRegistrationEmail("person@sub.disposable.example") {
 		t.Fatal("blocked domain should not be allowed")
+	}
+	if updated.AllowsRegistrationIP("198.51.100.25") || updated.AllowsRegistrationIP("2001:db8::abcd") {
+		t.Fatal("blocked registration networks should not be allowed")
+	}
+	if !updated.AllowsRegistrationIP("203.0.113.10") {
+		t.Fatal("unlisted registration IP should be allowed")
 	}
 }

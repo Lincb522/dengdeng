@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net"
 	"net/url"
 	"sort"
 	"strings"
@@ -50,16 +51,23 @@ type FeatureSwitchSettings struct {
 }
 
 type SecurityPolicySettings struct {
-	EmailVerificationEnabled bool     `json:"email_verification_enabled"`
-	PasswordResetEnabled     bool     `json:"password_reset_enabled"`
-	TOTPEnabled              bool     `json:"totp_enabled"`
-	SessionBindingEnabled    bool     `json:"session_binding_enabled"`
-	StepUpEnabled            bool     `json:"step_up_enabled"`
-	AuditLogRetentionDays    int      `json:"audit_log_retention_days"`
-	TurnstileEnabled         bool     `json:"turnstile_enabled"`
-	TurnstileSiteKey         string   `json:"turnstile_site_key"`
-	TrustForwardedIP         bool     `json:"trust_forwarded_ip"`
-	ForwardedIPHeaders       []string `json:"forwarded_ip_headers"`
+	EmailVerificationEnabled       bool     `json:"email_verification_enabled"`
+	PasswordResetEnabled           bool     `json:"password_reset_enabled"`
+	TOTPEnabled                    bool     `json:"totp_enabled"`
+	SessionBindingEnabled          bool     `json:"session_binding_enabled"`
+	StepUpEnabled                  bool     `json:"step_up_enabled"`
+	AuditLogRetentionDays          int      `json:"audit_log_retention_days"`
+	TurnstileEnabled               bool     `json:"turnstile_enabled"`
+	TurnstileSiteKey               string   `json:"turnstile_site_key"`
+	RegistrationProtectionEnabled  bool     `json:"registration_protection_enabled"`
+	RegistrationCodeIPHourLimit    int      `json:"registration_code_ip_hour_limit"`
+	RegistrationIPDayLimit         int      `json:"registration_ip_day_limit"`
+	RegistrationSubnetDayLimit     int      `json:"registration_subnet_day_limit"`
+	RegistrationDomainHourLimit    int      `json:"registration_domain_hour_limit"`
+	RegistrationGrantOncePerIPDays int      `json:"registration_grant_once_per_ip_days"`
+	RegistrationBlockedNetworks    []string `json:"registration_blocked_networks"`
+	TrustForwardedIP               bool     `json:"trust_forwarded_ip"`
+	ForwardedIPHeaders             []string `json:"forwarded_ip_headers"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -159,12 +167,19 @@ func defaultExtendedSystemSettings() (SiteCustomizationSettings, FeatureSwitchSe
 		AllowUserViewErrorRequests:    true,
 	}
 	security := SecurityPolicySettings{
-		EmailVerificationEnabled: true,
-		PasswordResetEnabled:     true,
-		TOTPEnabled:              true,
-		AuditLogRetentionDays:    180,
-		TrustForwardedIP:         true,
-		ForwardedIPHeaders:       []string{"X-Forwarded-For", "X-Real-IP"},
+		EmailVerificationEnabled:       true,
+		PasswordResetEnabled:           true,
+		TOTPEnabled:                    true,
+		AuditLogRetentionDays:          180,
+		RegistrationProtectionEnabled:  true,
+		RegistrationCodeIPHourLimit:    3,
+		RegistrationIPDayLimit:         3,
+		RegistrationSubnetDayLimit:     12,
+		RegistrationDomainHourLimit:    20,
+		RegistrationGrantOncePerIPDays: 30,
+		RegistrationBlockedNetworks:    []string{},
+		TrustForwardedIP:               true,
+		ForwardedIPHeaders:             []string{"X-Forwarded-For", "X-Real-IP"},
 	}
 	users := UserDefaultSettings{
 		Concurrency:        0,
@@ -293,6 +308,38 @@ func normalizeExtendedSystemSettings(next *SystemSettings) error {
 	if security.TurnstileEnabled && security.TurnstileSiteKey == "" {
 		return errors.New("Turnstile site key is required when Turnstile is enabled")
 	}
+	if security.RegistrationProtectionEnabled {
+		if security.RegistrationCodeIPHourLimit < 1 || security.RegistrationCodeIPHourLimit > 1000 ||
+			security.RegistrationIPDayLimit < 1 || security.RegistrationIPDayLimit > 1000 ||
+			security.RegistrationSubnetDayLimit < 1 || security.RegistrationSubnetDayLimit > 10_000 ||
+			security.RegistrationDomainHourLimit < 1 || security.RegistrationDomainHourLimit > 10_000 ||
+			security.RegistrationGrantOncePerIPDays < 0 || security.RegistrationGrantOncePerIPDays > 3650 {
+			return errors.New("registration protection limits are out of range")
+		}
+	}
+	blockedNetworks := make([]string, 0, len(security.RegistrationBlockedNetworks))
+	seenNetworks := make(map[string]struct{}, len(security.RegistrationBlockedNetworks))
+	for _, raw := range security.RegistrationBlockedNetworks {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if ip := net.ParseIP(value); ip != nil {
+			value = ip.String()
+		} else if _, network, err := net.ParseCIDR(value); err == nil {
+			value = network.String()
+		} else {
+			return errors.New("registration blocked networks must be IP addresses or CIDR ranges")
+		}
+		if _, exists := seenNetworks[value]; !exists {
+			seenNetworks[value] = struct{}{}
+			blockedNetworks = append(blockedNetworks, value)
+		}
+	}
+	if len(blockedNetworks) > 256 {
+		return errors.New("at most 256 registration blocked networks are allowed")
+	}
+	security.RegistrationBlockedNetworks = blockedNetworks
 
 	users := &next.UserDefaults
 	if users.AuthSourceDefaults == nil {

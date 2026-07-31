@@ -37,6 +37,7 @@ const auditLoading = ref(false)
 const runtime = ref<Pick<SettingsPayload, 'site_public_url' | 'smtp_configured' | 'smtp_from_name' | 'smtp_from'>>({})
 const registrationSuffixesText = ref('')
 const registrationBlockedSuffixesText = ref('')
+const registrationBlockedNetworksText = ref('')
 const trustedProxiesText = ref('')
 const forwardedHeadersText = ref('')
 const pageSizeOptionsText = ref('10, 20, 50, 100')
@@ -116,6 +117,9 @@ function defaultSystemSettings(): SystemSettings {
 		security: {
 			email_verification_enabled: true, password_reset_enabled: true, totp_enabled: true, session_binding_enabled: false,
 			step_up_enabled: false, audit_log_retention_days: 180, turnstile_enabled: false, turnstile_site_key: '',
+			registration_protection_enabled: true, registration_code_ip_hour_limit: 3, registration_ip_day_limit: 3,
+			registration_subnet_day_limit: 12, registration_domain_hour_limit: 20, registration_grant_once_per_ip_days: 30,
+			registration_blocked_networks: [],
 			trust_forwarded_ip: true, forwarded_ip_headers: ['X-Forwarded-For', 'X-Real-IP'],
 		},
 		user_defaults: { balance_micro: 0, concurrency: 0, rpm_limit: 0, default_subscriptions: [], platform_quotas: {}, auth_source_defaults: {} },
@@ -242,6 +246,7 @@ async function load() {
     }
 		registrationSuffixesText.value = (data.registration_email_suffixes || []).join('\n')
 		registrationBlockedSuffixesText.value = (data.registration_email_blocked_suffixes || []).join('\n')
+		registrationBlockedNetworksText.value = (form.value.security.registration_blocked_networks || []).join('\n')
 		trustedProxiesText.value = (data.trusted_proxies || []).join('\n')
 		forwardedHeadersText.value = (data.forwarded_client_ip_headers || []).join('\n')
 		pageSizeOptionsText.value = (form.value.site_customization.table_page_size_options || []).join(', ')
@@ -310,6 +315,7 @@ async function save() {
     } else {
 			form.value.registration_email_suffixes = registrationSuffixesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.registration_email_blocked_suffixes = registrationBlockedSuffixesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
+			form.value.security.registration_blocked_networks = registrationBlockedNetworksText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.trusted_proxies = trustedProxiesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.forwarded_client_ip_headers = forwardedHeadersText.value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.site_customization.table_page_size_options = pageSizeOptionsText.value.split(/[\s,;]+/).map(Number).filter((value) => Number.isFinite(value))
@@ -563,6 +569,18 @@ onMounted(load)
 					<label class="settings-toggle-row"><span><strong>TOTP 双因素认证</strong><small>控制普通用户绑定入口；管理员始终需要验证器。</small></span><input v-model="form.security.totp_enabled" type="checkbox" role="switch" /></label>
 					<label class="settings-toggle-row"><span><strong>会话 IP / UA 绑定</strong><small>客户端指纹变化后要求重新登录。</small></span><input v-model="form.security.session_binding_enabled" type="checkbox" role="switch" /></label>
 				</div>
+			</section>
+			<section class="settings-section settings-section--quiet">
+				<header><h2>注册风控</h2><p>计数保存在数据库中，服务重启后不会清空。</p></header>
+				<label class="settings-toggle-row"><span><strong>启用持久化注册保护</strong><small>限制单 IP、同网段和同邮箱域名的批量注册。</small></span><input v-model="form.security.registration_protection_enabled" type="checkbox" role="switch" /></label>
+				<div class="settings-form-grid settings-form-grid--three settings-fields-spaced">
+					<label class="settings-field"><span>单 IP 每小时验证码</span><input v-model.number="form.security.registration_code_ip_hour_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="1000" class="input" /></label>
+					<label class="settings-field"><span>单 IP 每日注册</span><input v-model.number="form.security.registration_ip_day_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="1000" class="input" /></label>
+					<label class="settings-field"><span>同网段每日注册</span><input v-model.number="form.security.registration_subnet_day_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="10000" class="input" /></label>
+					<label class="settings-field"><span>同域名每小时注册</span><input v-model.number="form.security.registration_domain_hour_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="10000" class="input" /></label>
+					<label class="settings-field"><span>同 IP 赠送冷却（天）</span><input v-model.number="form.security.registration_grant_once_per_ip_days" :disabled="!form.security.registration_protection_enabled" type="number" min="0" max="3650" class="input" /><small>只限制赠送余额，不阻止正常注册；0 表示关闭。</small></label>
+				</div>
+				<label class="settings-field settings-fields-spaced"><span>禁止注册的 IP / 网段</span><textarea v-model="registrationBlockedNetworksText" rows="4" class="input settings-document-editor__text" placeholder="198.51.100.10&#10;2001:db8::/64"></textarea><small>一行一条，支持单个 IPv4、IPv6 和 CIDR 网段。</small></label>
 			</section>
 			<section class="settings-section settings-section--quiet">
 				<header><h2>Cloudflare Turnstile</h2><p>用于登录、注册和验证码发送的机器人防护；私密密钥单独加密保存。</p></header>

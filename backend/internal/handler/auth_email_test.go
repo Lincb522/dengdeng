@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,7 +33,7 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
 		t.Fatal(err)
 	}
 	mailer := &fakeRegistrationMailer{}
@@ -78,6 +79,10 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	if !user.EmailVerified {
 		t.Fatal("registered user should be email verified")
 	}
+	var riskEvent model.RegistrationRiskEvent
+	if err := db.Where("action = ? AND email_domain = ?", registrationActionCreate, "example.test").First(&riskEvent).Error; err != nil {
+		t.Fatal("successful registration should persist a risk event:", err)
+	}
 	var binding model.ReferralBinding
 	if err := db.Where("referred_user_id = ?", user.ID).First(&binding).Error; err != nil {
 		t.Fatal("registration should bind the referral code:", err)
@@ -87,5 +92,37 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	}
 	if w := request("/api/auth/register", body, h.Register); w.Code != http.StatusBadRequest {
 		t.Fatalf("reused code status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestRegistrationRiskLimitSurvivesHandlerRestart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:auth-registration-risk-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret"}, Site: config.SiteConfig{AllowRegister: true}}
+	mailer := &fakeRegistrationMailer{}
+	requestCode := func(h *AuthHandler, email string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/auth/register/code", bytes.NewBufferString(`{"email":"`+email+`"}`))
+		c.Request.RemoteAddr = "198.51.100.25:32100"
+		c.Request.Header.Set("Content-Type", "application/json")
+		h.SendRegistrationCode(c)
+		return w
+	}
+	first := NewAuthHandlerWithMailer(db, cfg, mailer)
+	for i := 0; i < 3; i++ {
+		if w := requestCode(first, fmt.Sprintf("risk-%d@example.test", i)); w.Code != http.StatusOK {
+			t.Fatalf("code request %d status = %d, body = %s", i+1, w.Code, w.Body.String())
+		}
+	}
+	restarted := NewAuthHandlerWithMailer(db, cfg, mailer)
+	if w := requestCode(restarted, "risk-blocked@example.test"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("persisted limit status = %d, body = %s", w.Code, w.Body.String())
 	}
 }

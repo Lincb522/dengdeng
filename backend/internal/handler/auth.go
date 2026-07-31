@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,6 +34,8 @@ const (
 	codeCooldown             = time.Minute
 	registrationCodePurpose  = "register"
 	passwordResetCodePurpose = "password_reset"
+	registrationActionCode   = "code_sent"
+	registrationActionCreate = "registered"
 )
 
 type loginAttempt struct {
@@ -187,6 +191,90 @@ func normalizedEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+func registrationEmailDomain(email string) string {
+	parts := strings.Split(normalizedEmail(email), "@")
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[1]
+}
+
+func registrationSourceNetwork(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return strings.TrimSpace(raw)
+	}
+	if v4 := ip.To4(); v4 != nil {
+		mask := net.CIDRMask(24, 32)
+		return (&net.IPNet{IP: v4.Mask(mask), Mask: mask}).String()
+	}
+	mask := net.CIDRMask(64, 128)
+	return (&net.IPNet{IP: ip.Mask(mask), Mask: mask}).String()
+}
+
+func registrationClientFingerprint(c *gin.Context) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(c.GetHeader("User-Agent")) + "\x00" + strings.TrimSpace(c.GetHeader("Accept-Language"))))
+	return hex.EncodeToString(sum[:])
+}
+
+func registrationRiskEvent(c *gin.Context, email, action string) model.RegistrationRiskEvent {
+	sourceIP := strings.TrimSpace(c.ClientIP())
+	return model.RegistrationRiskEvent{
+		SourceIP:          sourceIP,
+		SourceNetwork:     registrationSourceNetwork(sourceIP),
+		EmailDomain:       registrationEmailDomain(email),
+		ClientFingerprint: registrationClientFingerprint(c),
+		Action:            action,
+	}
+}
+
+func (h *AuthHandler) registrationRiskRemaining(settings service.SystemSettings, event model.RegistrationRiskEvent) (time.Duration, error) {
+	policy := settings.Security
+	if !policy.RegistrationProtectionEnabled {
+		return 0, nil
+	}
+	now := time.Now()
+	type counter struct {
+		field  string
+		value  string
+		since  time.Time
+		limit  int
+		window time.Duration
+	}
+	var checks []counter
+	switch event.Action {
+	case registrationActionCode:
+		checks = []counter{
+			{field: "source_ip", value: event.SourceIP, since: now.Add(-time.Hour), limit: policy.RegistrationCodeIPHourLimit, window: time.Hour},
+			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour},
+			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour},
+		}
+	case registrationActionCreate:
+		checks = []counter{
+			{field: "source_ip", value: event.SourceIP, since: now.Add(-24 * time.Hour), limit: policy.RegistrationIPDayLimit, window: 24 * time.Hour},
+			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour},
+			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour},
+		}
+	default:
+		return 0, errors.New("unknown registration risk action")
+	}
+	for _, check := range checks {
+		if check.limit <= 0 || check.value == "" {
+			continue
+		}
+		var count int64
+		if err := h.db.Model(&model.RegistrationRiskEvent{}).
+			Where("action = ? AND "+check.field+" = ? AND created_at >= ?", event.Action, check.value, check.since).
+			Count(&count).Error; err != nil {
+			return 0, err
+		}
+		if count >= int64(check.limit) {
+			return check.window, nil
+		}
+	}
+	return 0, nil
+}
+
 func (h *AuthHandler) verificationHash(email, purpose, code string) string {
 	mac := hmac.New(sha256.New, []byte(h.cfg.JWT.Secret))
 	mac.Write([]byte(normalizedEmail(email)))
@@ -231,12 +319,24 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "a valid email is required")
 		return
 	}
+	if !settings.AllowsRegistrationIP(c.ClientIP()) {
+		util.Fail(c, http.StatusForbidden, "registration is not available from this network")
+		return
+	}
 	if !h.verifyTurnstile(c, req.TurnstileToken) {
 		return
 	}
 	email := normalizedEmail(req.Email)
 	if !settings.AllowsRegistrationEmail(email) {
 		util.Fail(c, http.StatusForbidden, "this email domain is not allowed to register")
+		return
+	}
+	riskEvent := registrationRiskEvent(c, email, registrationActionCode)
+	if retryAfter, err := h.registrationRiskRemaining(settings, riskEvent); err != nil {
+		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
+		return
+	} else if retryAfter > 0 {
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.registration_risk_limited", "registration limit reached for this network or email domain", retryAfter)
 		return
 	}
 
@@ -271,6 +371,10 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 	if err := h.mailer.SendRegistrationCode(email, code); err != nil {
 		h.db.Delete(&model.EmailVerification{}, record.ID)
 		util.Fail(c, http.StatusBadGateway, "send verification email failed")
+		return
+	}
+	if err := h.db.Create(&riskEvent).Error; err != nil {
+		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
 		return
 	}
 	util.OK(c, gin.H{"expires_in": int(codeTTL.Seconds()), "resend_after": int(codeCooldown.Seconds())})
@@ -397,12 +501,24 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "email, verification code and password (>=8 chars) are required")
 		return
 	}
+	if !settings.AllowsRegistrationIP(c.ClientIP()) {
+		util.Fail(c, http.StatusForbidden, "registration is not available from this network")
+		return
+	}
 	if !h.verifyTurnstile(c, req.TurnstileToken) {
 		return
 	}
 	email := normalizedEmail(req.Email)
 	if !settings.AllowsRegistrationEmail(email) {
 		util.Fail(c, http.StatusForbidden, "this email domain is not allowed to register")
+		return
+	}
+	riskEvent := registrationRiskEvent(c, email, registrationActionCreate)
+	if retryAfter, err := h.registrationRiskRemaining(settings, riskEvent); err != nil {
+		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
+		return
+	} else if retryAfter > 0 {
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.registration_risk_limited", "registration limit reached for this network or email domain", retryAfter)
 		return
 	}
 	code := strings.TrimSpace(req.Code)
@@ -468,6 +584,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 				subscriptions = source.DefaultSubscriptions
 			}
 		}
+		if balance > 0 && settings.Security.RegistrationProtectionEnabled && settings.Security.RegistrationGrantOncePerIPDays > 0 && riskEvent.SourceIP != "" {
+			var previousGrants int64
+			if err := tx.Model(&model.RegistrationRiskEvent{}).
+				Where("action = ? AND source_ip = ? AND granted_balance_micro > 0 AND created_at >= ?", registrationActionCreate, riskEvent.SourceIP, now.AddDate(0, 0, -settings.Security.RegistrationGrantOncePerIPDays)).
+				Count(&previousGrants).Error; err != nil {
+				return err
+			}
+			if previousGrants > 0 {
+				balance = 0
+			}
+		}
 		user = model.User{
 			Email: email, EmailVerified: verifyEmail, PasswordHash: hash,
 			Role: model.RoleUser, Status: model.StatusActive,
@@ -522,6 +649,10 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			if res.RowsAffected != 1 {
 				return gorm.ErrRecordNotFound
 			}
+		}
+		riskEvent.GrantedBalanceMicro = balance
+		if err := tx.Create(&riskEvent).Error; err != nil {
+			return err
 		}
 		return nil
 	})

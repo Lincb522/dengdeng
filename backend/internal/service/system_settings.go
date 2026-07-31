@@ -604,6 +604,25 @@ func (s SystemSettings) AllowsRegistrationEmail(email string) bool {
 	return false
 }
 
+func (s SystemSettings) AllowsRegistrationIP(raw string) bool {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return false
+	}
+	for _, blocked := range s.Security.RegistrationBlockedNetworks {
+		if candidate := net.ParseIP(blocked); candidate != nil {
+			if candidate.Equal(ip) {
+				return false
+			}
+			continue
+		}
+		if _, network, err := net.ParseCIDR(blocked); err == nil && network.Contains(ip) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *SystemSettingsService) Get() (SystemSettings, error) {
 	defaults := s.defaults()
 	var record model.Setting
