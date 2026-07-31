@@ -130,8 +130,9 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		api.GET("/settings", middleware.RateLimit(120, time.Minute), authH.PublicSettings)
 		api.POST("/site-errors", middleware.RateLimit(60, time.Minute), siteErrorH.Report)
 		authGroup := api.Group("", middleware.RateLimit(20, time.Minute))
-		authGroup.POST("/auth/register/code", authH.SendRegistrationCode)
-		authGroup.POST("/auth/register", authH.Register)
+		// Registration has a tighter independent per-IP budget than login.
+		authGroup.POST("/auth/register/code", middleware.RateLimit(3, time.Hour), authH.SendRegistrationCode)
+		authGroup.POST("/auth/register", middleware.RateLimit(3, time.Hour), authH.Register)
 		authGroup.POST("/auth/login", authH.Login)
 		authGroup.POST("/auth/password-reset/code", authH.SendPasswordResetCode)
 		authGroup.POST("/auth/password-reset", authH.ResetPassword)

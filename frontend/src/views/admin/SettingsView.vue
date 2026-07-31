@@ -36,6 +36,7 @@ const saving = ref(false)
 const auditLoading = ref(false)
 const runtime = ref<Pick<SettingsPayload, 'site_public_url' | 'smtp_configured' | 'smtp_from_name' | 'smtp_from'>>({})
 const registrationSuffixesText = ref('')
+const registrationBlockedSuffixesText = ref('')
 const trustedProxiesText = ref('')
 const forwardedHeadersText = ref('')
 const pageSizeOptionsText = ref('10, 20, 50, 100')
@@ -99,6 +100,7 @@ function defaultSystemSettings(): SystemSettings {
 		allow_register: true,
 		key_multi_group_enabled: true,
 		registration_email_suffixes: [],
+		registration_email_blocked_suffixes: [],
 		trusted_proxies: [],
 		forwarded_client_ip_headers: ['X-Forwarded-For', 'X-Real-IP'],
 		init_balance_micro: 0,
@@ -201,6 +203,7 @@ async function load() {
 			...data,
 			key_multi_group_enabled: data.key_multi_group_enabled !== false,
 			registration_email_suffixes: data.registration_email_suffixes || [],
+			registration_email_blocked_suffixes: data.registration_email_blocked_suffixes || [],
 			trusted_proxies: data.trusted_proxies || [],
 			forwarded_client_ip_headers: data.forwarded_client_ip_headers || ['X-Forwarded-For', 'X-Real-IP'],
 				login_agreement: {
@@ -238,6 +241,7 @@ async function load() {
       smtp_from: data.smtp_from,
     }
 		registrationSuffixesText.value = (data.registration_email_suffixes || []).join('\n')
+		registrationBlockedSuffixesText.value = (data.registration_email_blocked_suffixes || []).join('\n')
 		trustedProxiesText.value = (data.trusted_proxies || []).join('\n')
 		forwardedHeadersText.value = (data.forwarded_client_ip_headers || []).join('\n')
 		pageSizeOptionsText.value = (form.value.site_customization.table_page_size_options || []).join(', ')
@@ -305,6 +309,7 @@ async function save() {
       }
     } else {
 			form.value.registration_email_suffixes = registrationSuffixesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
+			form.value.registration_email_blocked_suffixes = registrationBlockedSuffixesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.trusted_proxies = trustedProxiesText.value.split(/[\n,;\s]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.forwarded_client_ip_headers = forwardedHeadersText.value.split(/[\n,;]+/).map((item) => item.trim()).filter(Boolean)
 			form.value.site_customization.table_page_size_options = pageSizeOptionsText.value.split(/[\s,;]+/).map(Number).filter((value) => Number.isFinite(value))
@@ -487,6 +492,11 @@ onMounted(load)
               <span>允许的邮箱域名</span>
               <textarea v-model="registrationSuffixesText" rows="3" class="input settings-document-editor__text" placeholder="example.com&#10;company.cn"></textarea>
               <small>一行一个，也可用逗号分隔。不要填写邮箱地址；填 example.com 会同时允许 team.example.com。</small>
+            </label>
+            <label class="settings-field settings-fields-spaced">
+              <span>禁止的邮箱域名</span>
+              <textarea v-model="registrationBlockedSuffixesText" rows="4" class="input settings-document-editor__text" placeholder="temporary.example&#10;mail-drop.example"></textarea>
+              <small>命中域名及其子域名时，不发送验证码并直接拒绝注册。</small>
             </label>
           </section>
 

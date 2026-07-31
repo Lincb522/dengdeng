@@ -168,6 +168,7 @@ export interface SystemSettings {
 	allow_register: boolean
 	key_multi_group_enabled: boolean
 	registration_email_suffixes: string[]
+	registration_email_blocked_suffixes: string[]
 	init_balance_micro: number
 	trusted_proxies: string[]
 	forwarded_client_ip_headers: string[]

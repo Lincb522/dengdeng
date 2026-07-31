@@ -541,6 +541,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		util.Fail(c, http.StatusInternalServerError, "create user failed")
 		return
 	}
+	_ = h.db.Create(&model.AuditLog{
+		ActorUserID: user.ID,
+		ActorEmail:  user.Email,
+		Action:      "auth.registered",
+		TargetType:  "user",
+		TargetID:    fmt.Sprintf("%d", user.ID),
+		Detail:      "email registration completed",
+		SourceIP:    c.ClientIP(),
+	}).Error
 	h.issueToken(c, &user)
 }
 

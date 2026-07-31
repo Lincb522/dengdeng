@@ -56,18 +56,21 @@ type SystemSettings struct {
 	// RegistrationEmailSuffixes is an optional tenant-style allow-list. An
 	// empty list permits all valid email domains; a non-empty list accepts the
 	// listed domains and their subdomains only.
-	RegistrationEmailSuffixes []string                  `json:"registration_email_suffixes"`
-	InitBalanceMicro          int64                     `json:"init_balance_micro"`
-	LoginAgreement            LoginAgreementSettings    `json:"login_agreement"`
-	TrustedProxies            []string                  `json:"trusted_proxies"`
-	ForwardedClientIPHeaders  []string                  `json:"forwarded_client_ip_headers"`
-	SiteCustomization         SiteCustomizationSettings `json:"site_customization"`
-	Features                  FeatureSwitchSettings     `json:"features"`
-	Security                  SecurityPolicySettings    `json:"security"`
-	UserDefaults              UserDefaultSettings       `json:"user_defaults"`
-	Notifications             NotificationSettings      `json:"notifications"`
-	Email                     EmailRuntimeSettings      `json:"email"`
-	AuthProviders             AuthProviderSettings      `json:"auth_providers"`
+	RegistrationEmailSuffixes []string `json:"registration_email_suffixes"`
+	// RegistrationEmailBlockedSuffixes rejects abusive or disposable domains
+	// before a verification email is sent. Entries also match subdomains.
+	RegistrationEmailBlockedSuffixes []string                  `json:"registration_email_blocked_suffixes"`
+	InitBalanceMicro                 int64                     `json:"init_balance_micro"`
+	LoginAgreement                   LoginAgreementSettings    `json:"login_agreement"`
+	TrustedProxies                   []string                  `json:"trusted_proxies"`
+	ForwardedClientIPHeaders         []string                  `json:"forwarded_client_ip_headers"`
+	SiteCustomization                SiteCustomizationSettings `json:"site_customization"`
+	Features                         FeatureSwitchSettings     `json:"features"`
+	Security                         SecurityPolicySettings    `json:"security"`
+	UserDefaults                     UserDefaultSettings       `json:"user_defaults"`
+	Notifications                    NotificationSettings      `json:"notifications"`
+	Email                            EmailRuntimeSettings      `json:"email"`
+	AuthProviders                    AuthProviderSettings      `json:"auth_providers"`
 }
 
 type AdminSystemSettings struct {
@@ -461,26 +464,38 @@ func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, 
 	if next.InitBalanceMicro < 0 || next.InitBalanceMicro > 1_000_000_000_000 {
 		return SystemSettings{}, errors.New("initial balance is out of range")
 	}
-	seenSuffixes := make(map[string]struct{}, len(next.RegistrationEmailSuffixes))
-	suffixes := make([]string, 0, len(next.RegistrationEmailSuffixes))
-	for _, raw := range next.RegistrationEmailSuffixes {
-		suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "@")
-		if suffix == "" {
-			continue
+	normalizeEmailSuffixes := func(values []string, fieldName string) ([]string, error) {
+		seen := make(map[string]struct{}, len(values))
+		normalized := make([]string, 0, len(values))
+		for _, raw := range values {
+			suffix := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "@")
+			if suffix == "" {
+				continue
+			}
+			if len(suffix) > 253 || strings.ContainsAny(suffix, "@ /\\\t\r\n") || !strings.Contains(suffix, ".") {
+				return nil, fmt.Errorf("%s must contain domain names only", fieldName)
+			}
+			if _, duplicate := seen[suffix]; duplicate {
+				continue
+			}
+			seen[suffix] = struct{}{}
+			normalized = append(normalized, suffix)
 		}
-		if len(suffix) > 253 || strings.ContainsAny(suffix, "@ /\\\t\r\n") || !strings.Contains(suffix, ".") {
-			return SystemSettings{}, errors.New("registration email suffixes must be domain names")
+		if len(normalized) > 256 {
+			return nil, fmt.Errorf("%s allows at most 256 domains", fieldName)
 		}
-		if _, duplicate := seenSuffixes[suffix]; duplicate {
-			continue
-		}
-		seenSuffixes[suffix] = struct{}{}
-		suffixes = append(suffixes, suffix)
+		return normalized, nil
 	}
-	if len(suffixes) > 64 {
-		return SystemSettings{}, errors.New("at most 64 registration email suffixes are allowed")
+	suffixes, err := normalizeEmailSuffixes(next.RegistrationEmailSuffixes, "registration email allow-list")
+	if err != nil {
+		return SystemSettings{}, err
 	}
 	next.RegistrationEmailSuffixes = suffixes
+	blockedSuffixes, err := normalizeEmailSuffixes(next.RegistrationEmailBlockedSuffixes, "registration email block-list")
+	if err != nil {
+		return SystemSettings{}, err
+	}
+	next.RegistrationEmailBlockedSuffixes = blockedSuffixes
 
 	proxies := make([]string, 0, len(next.TrustedProxies))
 	proxySeen := make(map[string]struct{}, len(next.TrustedProxies))
@@ -568,14 +583,19 @@ func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, 
 }
 
 func (s SystemSettings) AllowsRegistrationEmail(email string) bool {
-	if len(s.RegistrationEmailSuffixes) == 0 {
-		return true
-	}
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(email)), "@")
 	if len(parts) != 2 || parts[1] == "" {
 		return false
 	}
 	domain := parts[1]
+	for _, suffix := range s.RegistrationEmailBlockedSuffixes {
+		if domain == suffix || strings.HasSuffix(domain, "."+suffix) {
+			return false
+		}
+	}
+	if len(s.RegistrationEmailSuffixes) == 0 {
+		return true
+	}
 	for _, suffix := range s.RegistrationEmailSuffixes {
 		if domain == suffix || strings.HasSuffix(domain, "."+suffix) {
 			return true

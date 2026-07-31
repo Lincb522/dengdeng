@@ -167,6 +167,7 @@ func TestSystemSettingsRegistrationEmailSuffixes(t *testing.T) {
 		t.Fatal(err)
 	}
 	settings.RegistrationEmailSuffixes = []string{"Example.COM", "team.example.cn"}
+	settings.RegistrationEmailBlockedSuffixes = []string{"blocked.example.com", "Disposable.Example"}
 	updated, err := svc.Update(settings)
 	if err != nil {
 		t.Fatal(err)
@@ -176,5 +177,8 @@ func TestSystemSettingsRegistrationEmailSuffixes(t *testing.T) {
 	}
 	if updated.AllowsRegistrationEmail("person@other.example") {
 		t.Fatal("unexpected domain allowance")
+	}
+	if updated.AllowsRegistrationEmail("person@blocked.example.com") || updated.AllowsRegistrationEmail("person@sub.disposable.example") {
+		t.Fatal("blocked domain should not be allowed")
 	}
 }
