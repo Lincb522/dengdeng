@@ -672,28 +672,27 @@ watch(apiKey, persistSessionKey)
 
 <template>
   <div class="image-studio image-studio--canvas">
-    <header class="studio-canvas-topbar">
-      <RouterLink to="/studio" class="studio-brand" aria-label="DengDeng 图像制作">
-        <img src="/brand/dengdeng-avatar.png" alt="" />
-        <span>图像制作</span>
-      </RouterLink>
-      <div class="studio-document-title"><strong>未命名画布</strong><span>{{ objectCount }} 个对象 · Fabric.js</span></div>
-      <div class="studio-topbar-actions"><button type="button" :disabled="!objectCount" @click="clearCanvas">清空</button><RouterLink to="/login">控制台</RouterLink></div>
-    </header>
-
     <main class="studio-canvas-shell">
-      <aside class="studio-tool-rail" aria-label="画布工具">
-        <button type="button" :class="{ 'is-active': tool === 'select' }" aria-label="选择工具" title="选择 V" @click="setTool('select')"><svg viewBox="0 0 24 24"><path d="m5 3 13.5 8.2-6.2 1.2-3.1 5.4L5 3Z" /></svg></button>
-        <button type="button" :class="{ 'is-active': tool === 'hand' }" aria-label="抓手工具" title="抓手 H" @click="setTool('hand')"><svg viewBox="0 0 24 24"><path d="M7.5 11V7.2a1.5 1.5 0 0 1 3 0V10m0-3.8a1.5 1.5 0 0 1 3 0V10m0-2.8a1.5 1.5 0 0 1 3 0v4m0-2a1.5 1.5 0 0 1 3 0v4.2c0 4.2-2.5 6.6-6.5 6.6h-1.1a6 6 0 0 1-4.3-1.8L4.8 15a1.7 1.7 0 0 1 2.4-2.4l1.3 1.1" /></svg></button>
-        <button type="button" :class="{ 'is-active': tool === 'note' }" aria-label="添加便签" title="便签 N" @click="setTool('note')"><svg viewBox="0 0 24 24"><path d="M5 4h14v12l-4 4H5V4Z" /><path d="M15 20v-4h4M8 8h8M8 12h5" /></svg></button>
-        <button type="button" aria-label="导入图片" title="导入图片" @click="fileInput?.click()"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z" /><circle cx="9" cy="10" r="1.5" /><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5" /></svg></button>
-        <span class="studio-tool-divider"></span>
-        <button type="button" aria-label="适配画布" title="适配画布 ⌘0" @click="fitCanvas"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg></button>
-        <input ref="fileInput" class="sr-only" type="file" accept="image/*" multiple @change="($event.target as HTMLInputElement).files && importFiles(($event.target as HTMLInputElement).files!)" />
-      </aside>
-
       <section ref="viewportElement" class="studio-infinite-canvas studio-fabric-canvas" aria-label="无限画布" @dragover.prevent @drop.prevent="onDrop">
         <canvas ref="canvasElement"></canvas>
+
+        <div class="studio-canvas-titlebar">
+          <RouterLink to="/" aria-label="返回首页" title="返回首页"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7" /></svg></RouterLink>
+          <div><img src="/brand/dengdeng-avatar.png" alt="" /><span><strong>未命名画布</strong><small>{{ objectCount }} 个对象</small></span></div>
+        </div>
+
+        <nav class="studio-bottom-dock" aria-label="画布工具">
+          <button type="button" :class="{ 'is-active': tool === 'select' }" aria-label="选择工具" title="选择 V" @click="setTool('select')"><svg viewBox="0 0 24 24"><path d="m5 3 13.5 8.2-6.2 1.2-3.1 5.4L5 3Z" /></svg></button>
+          <button type="button" :class="{ 'is-active': tool === 'hand' }" aria-label="抓手工具" title="抓手 H" @click="setTool('hand')"><svg viewBox="0 0 24 24"><path d="M7.5 11V7.2a1.5 1.5 0 0 1 3 0V10m0-3.8a1.5 1.5 0 0 1 3 0V10m0-2.8a1.5 1.5 0 0 1 3 0v4m0-2a1.5 1.5 0 0 1 3 0v4.2c0 4.2-2.5 6.6-6.5 6.6h-1.1a6 6 0 0 1-4.3-1.8L4.8 15a1.7 1.7 0 0 1 2.4-2.4l1.3 1.1" /></svg></button>
+          <button type="button" :class="{ 'is-active': tool === 'note' }" aria-label="添加便签" title="便签 N" @click="setTool('note')"><svg viewBox="0 0 24 24"><path d="M5 4h14v12l-4 4H5V4Z" /><path d="M15 20v-4h4M8 8h8M8 12h5" /></svg></button>
+          <button type="button" aria-label="导入图片" title="导入图片" @click="fileInput?.click()"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z" /><circle cx="9" cy="10" r="1.5" /><path d="m5 17 4.5-4 3 2.5 2.5-2 4 3.5" /></svg></button>
+          <span class="studio-tool-divider"></span>
+          <button type="button" :disabled="!canUndo" aria-label="撤销" title="撤销 ⌘Z" @click="undo"><svg viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M5 12h8a6 6 0 0 1 6 6" /></svg></button>
+          <button type="button" :disabled="!canRedo" aria-label="重做" title="重做 ⇧⌘Z" @click="redo"><svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6" /></svg></button>
+          <button type="button" :class="{ 'is-active': historyPanelOpen }" aria-label="历史记录" title="历史记录" @click="historyPanelOpen = !historyPanelOpen; assetPanelOpen = false"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6M12 8v4l3 2" /></svg></button>
+          <button type="button" aria-label="适配画布" title="适配画布 ⌘0" @click="fitCanvas"><svg viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg></button>
+        </nav>
+        <input ref="fileInput" class="sr-only" type="file" accept="image/*" multiple @change="($event.target as HTMLInputElement).files && importFiles(($event.target as HTMLInputElement).files!)" />
         <div v-if="!objectCount && !draftOpen" class="studio-canvas-empty" aria-hidden="true"><span>双击画布开始生成</span></div>
         <button type="button" class="studio-settings-trigger" :class="{ 'is-active': settingsOpen }" aria-label="工作台设置" title="工作台设置" @click="settingsOpen = !settingsOpen">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></svg>
@@ -742,12 +741,6 @@ watch(apiKey, persistSessionKey)
           </div>
           <div v-else class="studio-panel-empty">生成或导入的图片会保存在这里</div>
         </aside>
-
-        <div class="studio-history-controls" @pointerdown.stop @dblclick.stop>
-          <button type="button" :disabled="!canUndo" aria-label="撤销" title="撤销 ⌘Z" @click="undo"><svg viewBox="0 0 24 24"><path d="m9 7-5 5 5 5M5 12h8a6 6 0 0 1 6 6" /></svg></button>
-          <button type="button" :disabled="!canRedo" aria-label="重做" title="重做 ⇧⌘Z" @click="redo"><svg viewBox="0 0 24 24"><path d="m15 7 5 5-5 5M19 12h-8a6 6 0 0 0-6 6" /></svg></button>
-          <button type="button" :class="{ 'is-active': historyPanelOpen }" aria-label="历史记录" title="历史记录" @click="historyPanelOpen = !historyPanelOpen; assetPanelOpen = false"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6M12 8v4l3 2" /></svg></button>
-        </div>
 
         <aside v-if="historyPanelOpen" class="studio-history-panel" @pointerdown.stop @dblclick.stop>
           <header><div><strong>历史记录</strong><span>最多保留 40 步</span></div><button type="button" @click="historyPanelOpen = false">×</button></header>
