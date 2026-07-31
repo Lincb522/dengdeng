@@ -146,7 +146,10 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 
 		user := api.Group("/user", middleware.JWTAuth(db, cfg.JWT.Secret, systemSettings))
 		{
-			recentMFA := middleware.RequireRecentMFA()
+			// Secret recovery follows the configurable step-up policy. When the
+			// operator disables step-up, authenticated users can select their own
+			// encrypted key directly in clients such as the image workbench.
+			recentMFA := middleware.RequireStepUp(systemSettings)
 			user.GET("/me", userH.Me)
 			user.POST("/step-up", userH.StepUp)
 			user.POST("/password", userH.ChangePassword)

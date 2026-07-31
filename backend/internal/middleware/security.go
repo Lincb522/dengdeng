@@ -18,7 +18,7 @@ func SecurityHeaders() gin.HandlerFunc {
 	// creates their own authenticated order. Their official origins are kept
 	// explicit here; no wildcard script, frame, or connect source is allowed.
 	const csp = "default-src 'self'; script-src 'self' https://js.stripe.com https://checkout.airwallex.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; " +
-		"img-src 'self' data: https://*.stripe.com https://*.airwallex.com; font-src 'self' data:; " +
+		"img-src 'self' data: blob: https:; font-src 'self' data:; " +
 		"connect-src 'self' https://api.stripe.com https://*.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; " +
 		"frame-src https://js.stripe.com https://hooks.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 	return func(c *gin.Context) {
