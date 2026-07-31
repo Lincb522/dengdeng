@@ -1103,6 +1103,20 @@ type RegistrationRiskEvent struct {
 	CreatedAt           time.Time `gorm:"index:idx_registration_risk_ip_created,priority:2;index:idx_registration_risk_network_created,priority:2;index:idx_registration_risk_domain_created,priority:2;index:idx_registration_risk_action_created,priority:2" json:"created_at"`
 }
 
+// RegistrationBlock stores an automatically expiring registration ban. A
+// unique kind/value row keeps repeat-offender strike counts across restarts.
+type RegistrationBlock struct {
+	ID              int64     `gorm:"primaryKey" json:"id"`
+	Kind            string    `gorm:"size:16;uniqueIndex:idx_registration_block_kind_value;not null" json:"kind"`
+	Value           string    `gorm:"size:96;uniqueIndex:idx_registration_block_kind_value;not null" json:"value"`
+	Reason          string    `gorm:"size:255" json:"reason"`
+	StrikeCount     int       `gorm:"not null;default:1" json:"strike_count"`
+	ExpiresAt       time.Time `gorm:"index;not null" json:"expires_at"`
+	LastTriggeredAt time.Time `gorm:"index;not null" json:"last_triggered_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
 // Setting is a simple key/value store for runtime-configurable options.
 type Setting struct {
 	Key       string    `gorm:"primaryKey;size:64" json:"key"`

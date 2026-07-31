@@ -51,23 +51,26 @@ type FeatureSwitchSettings struct {
 }
 
 type SecurityPolicySettings struct {
-	EmailVerificationEnabled       bool     `json:"email_verification_enabled"`
-	PasswordResetEnabled           bool     `json:"password_reset_enabled"`
-	TOTPEnabled                    bool     `json:"totp_enabled"`
-	SessionBindingEnabled          bool     `json:"session_binding_enabled"`
-	StepUpEnabled                  bool     `json:"step_up_enabled"`
-	AuditLogRetentionDays          int      `json:"audit_log_retention_days"`
-	TurnstileEnabled               bool     `json:"turnstile_enabled"`
-	TurnstileSiteKey               string   `json:"turnstile_site_key"`
-	RegistrationProtectionEnabled  bool     `json:"registration_protection_enabled"`
-	RegistrationCodeIPHourLimit    int      `json:"registration_code_ip_hour_limit"`
-	RegistrationIPDayLimit         int      `json:"registration_ip_day_limit"`
-	RegistrationSubnetDayLimit     int      `json:"registration_subnet_day_limit"`
-	RegistrationDomainHourLimit    int      `json:"registration_domain_hour_limit"`
-	RegistrationGrantOncePerIPDays int      `json:"registration_grant_once_per_ip_days"`
-	RegistrationBlockedNetworks    []string `json:"registration_blocked_networks"`
-	TrustForwardedIP               bool     `json:"trust_forwarded_ip"`
-	ForwardedIPHeaders             []string `json:"forwarded_ip_headers"`
+	EmailVerificationEnabled        bool     `json:"email_verification_enabled"`
+	PasswordResetEnabled            bool     `json:"password_reset_enabled"`
+	TOTPEnabled                     bool     `json:"totp_enabled"`
+	SessionBindingEnabled           bool     `json:"session_binding_enabled"`
+	StepUpEnabled                   bool     `json:"step_up_enabled"`
+	AuditLogRetentionDays           int      `json:"audit_log_retention_days"`
+	TurnstileEnabled                bool     `json:"turnstile_enabled"`
+	TurnstileSiteKey                string   `json:"turnstile_site_key"`
+	RegistrationProtectionEnabled   bool     `json:"registration_protection_enabled"`
+	RegistrationCodeIPHourLimit     int      `json:"registration_code_ip_hour_limit"`
+	RegistrationIPDayLimit          int      `json:"registration_ip_day_limit"`
+	RegistrationSubnetDayLimit      int      `json:"registration_subnet_day_limit"`
+	RegistrationDomainHourLimit     int      `json:"registration_domain_hour_limit"`
+	RegistrationGrantOncePerIPDays  int      `json:"registration_grant_once_per_ip_days"`
+	RegistrationBlockedNetworks     []string `json:"registration_blocked_networks"`
+	RegistrationAutoBlockEnabled    bool     `json:"registration_auto_block_enabled"`
+	RegistrationAutoBlockMinutes    int      `json:"registration_auto_block_minutes"`
+	RegistrationAutoBlockMaxMinutes int      `json:"registration_auto_block_max_minutes"`
+	TrustForwardedIP                bool     `json:"trust_forwarded_ip"`
+	ForwardedIPHeaders              []string `json:"forwarded_ip_headers"`
 }
 
 type DefaultSubscriptionSetting struct {
@@ -167,19 +170,22 @@ func defaultExtendedSystemSettings() (SiteCustomizationSettings, FeatureSwitchSe
 		AllowUserViewErrorRequests:    true,
 	}
 	security := SecurityPolicySettings{
-		EmailVerificationEnabled:       true,
-		PasswordResetEnabled:           true,
-		TOTPEnabled:                    true,
-		AuditLogRetentionDays:          180,
-		RegistrationProtectionEnabled:  true,
-		RegistrationCodeIPHourLimit:    3,
-		RegistrationIPDayLimit:         3,
-		RegistrationSubnetDayLimit:     12,
-		RegistrationDomainHourLimit:    20,
-		RegistrationGrantOncePerIPDays: 30,
-		RegistrationBlockedNetworks:    []string{},
-		TrustForwardedIP:               true,
-		ForwardedIPHeaders:             []string{"X-Forwarded-For", "X-Real-IP"},
+		EmailVerificationEnabled:        true,
+		PasswordResetEnabled:            true,
+		TOTPEnabled:                     true,
+		AuditLogRetentionDays:           180,
+		RegistrationProtectionEnabled:   true,
+		RegistrationCodeIPHourLimit:     3,
+		RegistrationIPDayLimit:          3,
+		RegistrationSubnetDayLimit:      12,
+		RegistrationDomainHourLimit:     20,
+		RegistrationGrantOncePerIPDays:  30,
+		RegistrationBlockedNetworks:     []string{},
+		RegistrationAutoBlockEnabled:    true,
+		RegistrationAutoBlockMinutes:    1440,
+		RegistrationAutoBlockMaxMinutes: 43200,
+		TrustForwardedIP:                true,
+		ForwardedIPHeaders:              []string{"X-Forwarded-For", "X-Real-IP"},
 	}
 	users := UserDefaultSettings{
 		Concurrency:        0,
@@ -315,6 +321,11 @@ func normalizeExtendedSystemSettings(next *SystemSettings) error {
 			security.RegistrationDomainHourLimit < 1 || security.RegistrationDomainHourLimit > 10_000 ||
 			security.RegistrationGrantOncePerIPDays < 0 || security.RegistrationGrantOncePerIPDays > 3650 {
 			return errors.New("registration protection limits are out of range")
+		}
+		if security.RegistrationAutoBlockEnabled &&
+			(security.RegistrationAutoBlockMinutes < 1 || security.RegistrationAutoBlockMinutes > 525_600 ||
+				security.RegistrationAutoBlockMaxMinutes < security.RegistrationAutoBlockMinutes || security.RegistrationAutoBlockMaxMinutes > 525_600) {
+			return errors.New("registration auto-block duration is out of range")
 		}
 	}
 	blockedNetworks := make([]string, 0, len(security.RegistrationBlockedNetworks))

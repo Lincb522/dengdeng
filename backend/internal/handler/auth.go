@@ -228,6 +228,89 @@ func registrationRiskEvent(c *gin.Context, email, action string) model.Registrat
 	}
 }
 
+func (h *AuthHandler) registrationAutoBlockRemaining(event model.RegistrationRiskEvent) (time.Duration, error) {
+	if event.SourceIP == "" {
+		return 0, nil
+	}
+	var block model.RegistrationBlock
+	err := h.db.Where("kind = ? AND value = ?", "ip", event.SourceIP).First(&block).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	remaining := time.Until(block.ExpiresAt)
+	if remaining <= 0 {
+		return 0, nil
+	}
+	return remaining, nil
+}
+
+func registrationBlockDuration(policy service.SecurityPolicySettings, strike int) time.Duration {
+	minutes := policy.RegistrationAutoBlockMinutes
+	maxMinutes := policy.RegistrationAutoBlockMaxMinutes
+	if minutes <= 0 {
+		minutes = 1440
+	}
+	if maxMinutes < minutes {
+		maxMinutes = minutes
+	}
+	for i := 1; i < strike && minutes < maxMinutes; i++ {
+		if minutes > maxMinutes/2 {
+			minutes = maxMinutes
+			break
+		}
+		minutes *= 2
+	}
+	if minutes > maxMinutes {
+		minutes = maxMinutes
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (h *AuthHandler) autoBlockRegistrationSource(settings service.SystemSettings, event model.RegistrationRiskEvent, reason string) (time.Duration, error) {
+	if !settings.Security.RegistrationAutoBlockEnabled || event.SourceIP == "" {
+		return 0, nil
+	}
+	now := time.Now()
+	var duration time.Duration
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		var block model.RegistrationBlock
+		err := tx.Where("kind = ? AND value = ?", "ip", event.SourceIP).First(&block).Error
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			block = model.RegistrationBlock{Kind: "ip", Value: event.SourceIP, StrikeCount: 1, CreatedAt: now}
+		case err != nil:
+			return err
+		case block.ExpiresAt.After(now):
+			duration = time.Until(block.ExpiresAt)
+			return nil
+		default:
+			block.StrikeCount++
+		}
+		duration = registrationBlockDuration(settings.Security, block.StrikeCount)
+		block.Reason = reason
+		block.ExpiresAt = now.Add(duration)
+		block.LastTriggeredAt = now
+		if block.ID == 0 {
+			if err := tx.Create(&block).Error; err != nil {
+				return err
+			}
+		} else if err := tx.Save(&block).Error; err != nil {
+			return err
+		}
+		return tx.Create(&model.AuditLog{
+			Action:     "auth.registration_auto_blocked",
+			TargetType: "registration_ip",
+			TargetID:   event.SourceIP,
+			Detail:     fmt.Sprintf("%s; strike=%d; expires_at=%s", reason, block.StrikeCount, block.ExpiresAt.UTC().Format(time.RFC3339)),
+			SourceIP:   event.SourceIP,
+		}).Error
+	})
+	return duration, err
+}
+
 func (h *AuthHandler) registrationRiskRemaining(settings service.SystemSettings, event model.RegistrationRiskEvent) (time.Duration, error) {
 	policy := settings.Security
 	if !policy.RegistrationProtectionEnabled {
@@ -269,6 +352,10 @@ func (h *AuthHandler) registrationRiskRemaining(settings service.SystemSettings,
 			return 0, err
 		}
 		if count >= int64(check.limit) {
+			if policy.RegistrationAutoBlockEnabled {
+				reason := fmt.Sprintf("%s %s limit reached (%d/%d)", event.Action, check.field, count, check.limit)
+				return h.autoBlockRegistrationSource(settings, event, reason)
+			}
 			return check.window, nil
 		}
 	}
@@ -332,6 +419,13 @@ func (h *AuthHandler) SendRegistrationCode(c *gin.Context) {
 		return
 	}
 	riskEvent := registrationRiskEvent(c, email, registrationActionCode)
+	if retryAfter, err := h.registrationAutoBlockRemaining(riskEvent); err != nil {
+		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
+		return
+	} else if retryAfter > 0 {
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.registration_temporarily_blocked", "registration is temporarily blocked for this network", retryAfter)
+		return
+	}
 	if retryAfter, err := h.registrationRiskRemaining(settings, riskEvent); err != nil {
 		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
 		return
@@ -514,6 +608,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 	riskEvent := registrationRiskEvent(c, email, registrationActionCreate)
+	if retryAfter, err := h.registrationAutoBlockRemaining(riskEvent); err != nil {
+		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
+		return
+	} else if retryAfter > 0 {
+		util.FailRetry(c, http.StatusTooManyRequests, "auth.registration_temporarily_blocked", "registration is temporarily blocked for this network", retryAfter)
+		return
+	}
 	if retryAfter, err := h.registrationRiskRemaining(settings, riskEvent); err != nil {
 		util.Fail(c, http.StatusServiceUnavailable, "registration protection is temporarily unavailable")
 		return

@@ -82,6 +82,9 @@ export interface SecurityPolicySettings {
 	registration_domain_hour_limit: number
 	registration_grant_once_per_ip_days: number
 	registration_blocked_networks: string[]
+	registration_auto_block_enabled: boolean
+	registration_auto_block_minutes: number
+	registration_auto_block_max_minutes: number
 	trust_forwarded_ip: boolean
 	forwarded_ip_headers: string[]
 }

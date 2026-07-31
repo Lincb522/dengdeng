@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"dengdeng/internal/config"
 	"dengdeng/internal/model"
@@ -33,7 +35,7 @@ func TestEmailVerifiedRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.RegistrationBlock{}, &model.Setting{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
 		t.Fatal(err)
 	}
 	mailer := &fakeRegistrationMailer{}
@@ -101,7 +103,7 @@ func TestRegistrationRiskLimitSurvivesHandlerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.Setting{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.RegistrationBlock{}, &model.Setting{}, &model.AuditLog{}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret"}, Site: config.SiteConfig{AllowRegister: true}}
@@ -124,5 +126,19 @@ func TestRegistrationRiskLimitSurvivesHandlerRestart(t *testing.T) {
 	restarted := NewAuthHandlerWithMailer(db, cfg, mailer)
 	if w := requestCode(restarted, "risk-blocked@example.test"); w.Code != http.StatusTooManyRequests {
 		t.Fatalf("persisted limit status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var block model.RegistrationBlock
+	if err := db.Where("kind = ? AND value = ?", "ip", "198.51.100.25").First(&block).Error; err != nil {
+		t.Fatal("threshold should create a registration block:", err)
+	}
+	if block.StrikeCount != 1 || !block.ExpiresAt.After(time.Now()) {
+		t.Fatalf("unexpected registration block: %#v", block)
+	}
+	if err := db.Where("source_ip = ?", "198.51.100.25").Delete(&model.RegistrationRiskEvent{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	restartedAgain := NewAuthHandlerWithMailer(db, cfg, mailer)
+	if w := requestCode(restartedAgain, "risk-still-blocked@example.test"); w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), "auth.registration_temporarily_blocked") {
+		t.Fatalf("active block after restart status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
