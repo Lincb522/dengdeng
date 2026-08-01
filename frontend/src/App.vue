@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAuth } from './stores/auth'
 import ToastHost from './components/ToastHost.vue'
 import ContactBanner from './components/ContactBanner.vue'
@@ -7,6 +8,8 @@ import { useTheme } from './stores/theme'
 
 const auth = useAuth()
 const theme = useTheme()
+const route = useRoute()
+const showContactBanner = computed(() => route.name !== 'studio')
 onMounted(() => {
   theme.init()
   void auth.loadPublicSettings()
@@ -15,7 +18,7 @@ onMounted(() => {
 
 <template>
   <div class="app-frame">
-    <ContactBanner />
+    <ContactBanner v-if="showContactBanner" />
     <div class="app-route">
       <RouterView />
     </div>
