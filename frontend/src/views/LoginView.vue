@@ -318,27 +318,28 @@ async function submit() {
     <main class="login-frame login-frame--simple">
       <aside class="login-visual">
         <div class="login-visual-brand">
-          <BrandMark :size="54" />
-          <div><strong>{{ auth.siteName }}</strong><span>蹬蹬ai</span></div>
+          <BrandMark :size="46" />
+          <div><strong>{{ auth.siteName }}</strong></div>
         </div>
         <div class="login-visual-stage" aria-hidden="true">
+          <div class="login-visual-wordmark"><span>DENG</span><span>DENG</span></div>
           <span class="login-visual-node is-openai"><ProviderLogo platform="openai" size="sm" />OpenAI</span>
           <span class="login-visual-node is-claude"><ProviderLogo platform="anthropic" size="sm" />Claude</span>
           <span class="login-visual-node is-gemini"><ProviderLogo platform="gemini" size="sm" />Gemini</span>
           <span class="login-visual-node is-xai"><ProviderLogo platform="grok" size="sm" />Grok</span>
-          <span class="login-visual-route is-route-a"></span>
-          <span class="login-visual-route is-route-b"></span>
-          <span class="login-visual-center"><BrandMark :size="40" /></span>
         </div>
         <p class="login-visual-foot">API · CLI · IMAGE</p>
       </aside>
 
       <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-panel-tools" aria-label="界面设置">
+          <InterfaceThemeSwitcher />
+          <ThemeToggle />
+        </div>
         <div class="login-brand-lockup login-brand-lockup--mobile" :aria-label="auth.siteName">
           <BrandMark :size="42" />
           <div>
             <strong>{{ auth.siteName }}</strong>
-            <span>蹬蹬ai</span>
           </div>
         </div>
 
@@ -352,7 +353,10 @@ async function submit() {
         </div>
 
 		<div v-if="auth.oauthProviders.length && mode === 'login'" class="login-oauth-grid">
-			<button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">{{ provider.name }}</button>
+			<button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">
+              <ProviderLogo :platform="provider.id" size="sm" />
+              <span>{{ provider.name }}</span>
+            </button>
 		</div>
         <div v-if="auth.oauthProviders.length && mode === 'login'" class="login-divider"><span>或使用邮箱</span></div>
 
@@ -419,8 +423,6 @@ async function submit() {
         </form>
       </section>
     </main>
-	<ThemeToggle class="theme-toggle-float" />
-	<InterfaceThemeSwitcher class="interface-theme-switcher-float" />
 
     <Teleport to="body">
       <div
