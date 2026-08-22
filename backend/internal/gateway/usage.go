@@ -61,7 +61,7 @@ func (e *usageExtractor) feedJSON(doc []byte) {
 	switch e.platform {
 	case model.PlatformAnthropic:
 		e.feedAnthropic(doc)
-	case model.PlatformOpenAI, model.PlatformGrok:
+	case model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek:
 		// xAI returns OpenAI-shaped usage on both Chat and Responses wires.
 		e.feedOpenAI(doc)
 	case model.PlatformGemini:

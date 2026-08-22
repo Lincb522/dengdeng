@@ -92,11 +92,17 @@ type Usage struct {
 // means cache discounts and long-cache premiums cannot accidentally affect
 // normal input/output billing.
 type RatePlan struct {
-	Base         float64
-	CacheRead    float64
-	CacheWrite5m float64
-	CacheWrite1h float64
-	Image        float64
+	Base                 float64
+	CacheRead            float64
+	CacheWrite5m         float64
+	CacheWrite1h         float64
+	Image                float64
+	Fast                 float64
+	Flex                 float64
+	LongContextThreshold int64
+	LongContextInput     float64
+	LongContextOutput    float64
+	LongContextCache     float64
 }
 
 func validMultiplier(v float64) float64 {
@@ -112,7 +118,27 @@ func (r RatePlan) normalize() RatePlan {
 	r.CacheWrite5m = validMultiplier(r.CacheWrite5m)
 	r.CacheWrite1h = validMultiplier(r.CacheWrite1h)
 	r.Image = validMultiplier(r.Image)
+	if r.Fast <= 0 {
+		r.Fast = 2
+	}
+	if r.Flex <= 0 {
+		r.Flex = .5
+	}
+	r.LongContextInput = validMultiplier(r.LongContextInput)
+	r.LongContextOutput = validMultiplier(r.LongContextOutput)
+	r.LongContextCache = validMultiplier(r.LongContextCache)
 	return r
+}
+
+func (r RatePlan) serviceTierMultiplier(tier string) float64 {
+	switch strings.ToLower(strings.TrimSpace(tier)) {
+	case "fast", "priority":
+		return r.Fast
+	case "flex":
+		return r.Flex
+	default:
+		return 1
+	}
 }
 
 func cacheWritePrice(p *model.ModelPrice, ttl string) float64 {
@@ -133,21 +159,25 @@ func cacheWritePrice(p *model.ModelPrice, ttl string) float64 {
 // component amounts and TotalMicro are charged micro-USD; RawMicro is the
 // catalogue-price total before user, group, cache and effort multipliers.
 type CostBreakdown struct {
-	TotalMicro          int64
-	RawMicro            int64
-	InputMicro          int64
-	OutputMicro         int64
-	CacheReadMicro      int64
-	CacheWriteMicro     int64
-	ImageMicro          int64
-	EffectiveMultiplier float64
-	InputUnitPrice      float64
-	OutputUnitPrice     float64
-	CacheReadUnitPrice  float64
-	CacheWriteUnitPrice float64
-	CacheWrite5mPrice   float64
-	CacheWrite1hPrice   float64
-	ImageUnitPrice      float64
+	TotalMicro            int64
+	RawMicro              int64
+	InputMicro            int64
+	OutputMicro           int64
+	CacheReadMicro        int64
+	CacheWriteMicro       int64
+	ImageMicro            int64
+	EffectiveMultiplier   float64
+	InputUnitPrice        float64
+	OutputUnitPrice       float64
+	CacheReadUnitPrice    float64
+	CacheWriteUnitPrice   float64
+	CacheWrite5mPrice     float64
+	CacheWrite1hPrice     float64
+	ImageUnitPrice        float64
+	ServiceTierMultiplier float64
+	LongContextApplied    bool
+	LongContextTokens     int64
+	LongContextThreshold  int64
 }
 
 // Cost returns micro-USD for the given usage after applying its rate plan.
@@ -156,10 +186,23 @@ func (s *PricingService) Cost(modelName string, u Usage, rates RatePlan) int64 {
 	return s.Breakdown(modelName, u, rates).TotalMicro
 }
 
+// CostForTier is the tier-aware variant used by reservation and settlement.
+// Keeping Cost unchanged preserves callers that intentionally price the
+// provider's default service tier.
+func (s *PricingService) CostForTier(modelName string, u Usage, rates RatePlan, serviceTier string) int64 {
+	return s.BreakdownForTier(modelName, u, rates, serviceTier).TotalMicro
+}
+
 // Breakdown returns both the final charge and the values needed to explain it.
 // Integer component amounts are reconciled to TotalMicro so the UI always
 // displays a breakdown whose rows add up to the recorded user charge.
 func (s *PricingService) Breakdown(modelName string, u Usage, rates RatePlan) CostBreakdown {
+	return s.BreakdownForTier(modelName, u, rates, "")
+}
+
+// BreakdownForTier applies service-tier and long-context pricing to the same
+// immutable component snapshot used for ordinary usage billing.
+func (s *PricingService) BreakdownForTier(modelName string, u Usage, rates RatePlan, serviceTier string) CostBreakdown {
 	p := s.Match(modelName)
 	if p == nil {
 		return CostBreakdown{}
@@ -190,6 +233,15 @@ func (s *PricingService) Breakdown(modelName string, u Usage, rates RatePlan) Co
 			inputTokens = 0
 		}
 	}
+	contextTokens := inputTokens + u.CacheReadTokens + cacheWriteTotal
+	longContextApplied := rates.LongContextThreshold > 0 && contextTokens >= rates.LongContextThreshold
+	inputContextRate, outputContextRate, cacheContextRate := 1.0, 1.0, 1.0
+	if longContextApplied {
+		inputContextRate = rates.LongContextInput
+		outputContextRate = rates.LongContextOutput
+		cacheContextRate = rates.LongContextCache
+	}
+	tierRate := rates.serviceTierMultiplier(serviceTier)
 
 	inputRaw := float64(inputTokens) * p.InputPrice
 	outputRaw := float64(u.OutputTokens) * p.OutputPrice
@@ -197,12 +249,12 @@ func (s *PricingService) Breakdown(modelName string, u Usage, rates RatePlan) Co
 	cacheWriteRaw := float64(cacheWrite5m)*cacheWritePrice(p, "5m") +
 		float64(cacheWrite1h)*cacheWritePrice(p, "1h") +
 		float64(cacheWriteOther)*p.CacheWritePrice
-	inputCharged := inputRaw * rates.Base
-	outputCharged := outputRaw * rates.Base
-	cacheReadCharged := cacheReadRaw * rates.CacheRead
-	cacheWriteCharged := float64(cacheWrite5m)*cacheWritePrice(p, "5m")*rates.CacheWrite5m +
+	inputCharged := inputRaw * rates.Base * inputContextRate * tierRate
+	outputCharged := outputRaw * rates.Base * outputContextRate * tierRate
+	cacheReadCharged := cacheReadRaw * rates.CacheRead * cacheContextRate * tierRate
+	cacheWriteCharged := (float64(cacheWrite5m)*cacheWritePrice(p, "5m")*rates.CacheWrite5m +
 		float64(cacheWrite1h)*cacheWritePrice(p, "1h")*rates.CacheWrite1h +
-		float64(cacheWriteOther)*p.CacheWritePrice*rates.CacheWrite5m
+		float64(cacheWriteOther)*p.CacheWritePrice*rates.CacheWrite5m) * cacheContextRate * tierRate
 
 	var imageRaw, imageCharged float64
 	// A fixed per-image price is deliberately an override, rather than an
@@ -221,20 +273,24 @@ func (s *PricingService) Breakdown(modelName string, u Usage, rates RatePlan) Co
 	raw := inputRaw + outputRaw + cacheReadRaw + cacheWriteRaw + imageRaw
 	charged := inputCharged + outputCharged + cacheReadCharged + cacheWriteCharged + imageCharged
 	result := CostBreakdown{
-		TotalMicro:          int64(charged),
-		RawMicro:            int64(raw),
-		InputMicro:          int64(inputCharged),
-		OutputMicro:         int64(outputCharged),
-		CacheReadMicro:      int64(cacheReadCharged),
-		CacheWriteMicro:     int64(cacheWriteCharged),
-		ImageMicro:          int64(imageCharged),
-		InputUnitPrice:      p.InputPrice,
-		OutputUnitPrice:     p.OutputPrice,
-		CacheReadUnitPrice:  p.CacheReadPrice,
-		CacheWriteUnitPrice: p.CacheWritePrice,
-		CacheWrite5mPrice:   cacheWritePrice(p, "5m"),
-		CacheWrite1hPrice:   cacheWritePrice(p, "1h"),
-		ImageUnitPrice:      p.ImagePricePerImage,
+		TotalMicro:            int64(charged),
+		RawMicro:              int64(raw),
+		InputMicro:            int64(inputCharged),
+		OutputMicro:           int64(outputCharged),
+		CacheReadMicro:        int64(cacheReadCharged),
+		CacheWriteMicro:       int64(cacheWriteCharged),
+		ImageMicro:            int64(imageCharged),
+		InputUnitPrice:        p.InputPrice,
+		OutputUnitPrice:       p.OutputPrice,
+		CacheReadUnitPrice:    p.CacheReadPrice,
+		CacheWriteUnitPrice:   p.CacheWritePrice,
+		CacheWrite5mPrice:     cacheWritePrice(p, "5m"),
+		CacheWrite1hPrice:     cacheWritePrice(p, "1h"),
+		ImageUnitPrice:        p.ImagePricePerImage,
+		ServiceTierMultiplier: tierRate,
+		LongContextApplied:    longContextApplied,
+		LongContextTokens:     contextTokens,
+		LongContextThreshold:  rates.LongContextThreshold,
 	}
 	if raw > 0 {
 		result.EffectiveMultiplier = charged / raw

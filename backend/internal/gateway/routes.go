@@ -54,6 +54,13 @@ func (g *Gateway) Register(r *gin.Engine) {
 	r.POST("/images/generations/async", g.handleOpenAIImageGenerationAsync)
 	r.GET("/images/tasks/:task_id", g.handleOpenAIImageTask)
 	r.POST("/images/edits", g.handleOpenAIImageEdit)
+	// xAI-compatible media surfaces. These preserve the request body and
+	// content type so new Grok media models do not require a gateway release.
+	r.POST("/v1/videos/generations", g.handleGrokMedia)
+	r.GET("/v1/videos/:media_id", g.handleGrokMedia)
+	r.POST("/v1/audio/speech", g.handleGrokMedia)
+	r.POST("/v1/audio/transcriptions", g.handleGrokMedia)
+	r.POST("/v1/search", g.handleGrokMedia)
 
 	// Gemini (native v1beta path style)
 	r.POST("/v1beta/models/*action", g.handleGemini)
@@ -67,6 +74,31 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// display the key's remaining balance and configured caps.
 	r.GET("/v1/usage", g.handleUsage)
 	r.GET("/usage", g.handleUsage)
+}
+
+func (g *Gateway) handleGrokMedia(c *gin.Context) {
+	ak, ok := g.authenticate(c)
+	if !ok {
+		return
+	}
+	if !ak.selectGroup(model.PlatformGrok) {
+		util.Fail(c, http.StatusBadRequest, "this key has no Grok media group")
+		return
+	}
+	body, err := readBody(c)
+	if err != nil {
+		writeReadBodyError(c, err)
+		return
+	}
+	modelName := ""
+	if fields := peekJSON(body); fields != nil {
+		modelName = jsonString(fields["model"])
+	}
+	g.relay(c, ak, relayRequest{
+		Platform: model.PlatformGrok, Path: c.Request.URL.Path, Model: modelName,
+		Body: body, ContentType: c.GetHeader("Content-Type"), Billable: c.Request.Method != http.MethodGet,
+		Image: strings.Contains(c.Request.URL.Path, "/videos/"),
+	})
 }
 
 func (g *Gateway) handleOpenAIImageGenerationAsync(c *gin.Context) {
@@ -88,8 +120,9 @@ func (g *Gateway) handleOpenAIImageGenerationAsync(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	if !ak.selectGroup(model.PlatformOpenAI) {
-		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI image group")
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok) {
+		util.Fail(c, http.StatusBadRequest, "this key has no image-capable group")
 		return
 	}
 	task, err := g.imageStorage.CreateTask(c.Request.Context(), ak.User.ID, ak.Key.ID)
@@ -188,7 +221,7 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 		return
 	}
 	modelName := jsonString(fields["model"])
-	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok) {
+	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek, model.PlatformComposite) {
 		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with Anthropic Messages")
 		return
 	}
@@ -200,7 +233,7 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 	}
 	body = stripAnthropicUnsupportedParams(body)
 	g.relay(c, ak, relayRequest{
-		Platform: model.PlatformAnthropic,
+		Platform: ak.Group.Platform,
 		Path:     "/v1/messages",
 		Model:    modelName,
 		Stream:   jsonBool(fields["stream"]),
@@ -224,14 +257,14 @@ func (g *Gateway) handleAnthropicCountTokens(c *gin.Context) {
 	if fields != nil {
 		modelName = jsonString(fields["model"])
 	}
-	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok) {
+	if !g.selectGroupForModel(ak, modelName, model.PlatformAnthropic, model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek, model.PlatformComposite) {
 		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with Anthropic Messages")
 		return
 	}
 	// Grok has no compatible token-count endpoint, so keep its conservative
 	// local estimate. OpenAI exposes /responses/input_tokens; using it here
 	// keeps Claude Code's count in sync with the selected upstream tokenizer.
-	if ak.Group.Platform == model.PlatformGrok {
+	if ak.Group.Platform == model.PlatformGrok || ak.Group.Platform == model.PlatformComposite {
 		c.JSON(http.StatusOK, gin.H{"input_tokens": estimateBridgeTokens(body)})
 		return
 	}
@@ -265,7 +298,7 @@ func (g *Gateway) handleAnthropicCountTokens(c *gin.Context) {
 		return
 	}
 	g.relay(c, ak, relayRequest{
-		Platform: model.PlatformAnthropic,
+		Platform: ak.Group.Platform,
 		Path:     "/v1/messages/count_tokens",
 		Model:    "",
 		Body:     body,
@@ -289,7 +322,7 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 		return
 	}
 	requestedModel := jsonString(fields["model"])
-	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic, model.PlatformGemini) {
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic, model.PlatformGemini, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek, model.PlatformComposite) {
 		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with OpenAI Chat Completions")
 		return
 	}
@@ -365,7 +398,7 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 		return
 	}
 	requestedModel := jsonString(fields["model"])
-	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic) {
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok, model.PlatformAnthropic, model.PlatformDeepSeek, model.PlatformComposite) {
 		util.Fail(c, http.StatusBadRequest, "this key has no group compatible with OpenAI Responses")
 		return
 	}
@@ -523,13 +556,102 @@ func (g *Gateway) handleCodexModelsManifest(c *gin.Context) {
 // an OpenAI-shaped body forwarded to an incompatible upstream.
 func openAICompatiblePlatform(c *gin.Context, ak *authedKey) (string, bool) {
 	switch ak.Group.Platform {
-	case model.PlatformOpenAI, model.PlatformGrok:
+	case model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek, model.PlatformComposite:
 		return ak.Group.Platform, true
 	default:
 		util.Fail(c, http.StatusBadRequest,
 			fmt.Sprintf("this key belongs to a %s group and cannot call %s endpoints", ak.Group.Platform, model.PlatformOpenAI))
 		return "", false
 	}
+}
+
+// adaptCompositeRequest resolves the public wire against the concrete account
+// selected from a composite group. This keeps a composite pool honest: the
+// account retains its real provider identity for credentials, usage parsing
+// and billing, while the caller continues to use one stable endpoint.
+func (g *Gateway) adaptCompositeRequest(req relayRequest, acc *model.UpstreamAccount) (relayRequest, error) {
+	if req.Platform != model.PlatformComposite || acc == nil {
+		return req, nil
+	}
+	out := req
+	out.Platform = acc.Platform
+	switch req.Path {
+	case "/v1/chat/completions":
+		switch acc.Platform {
+		case model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek:
+			return out, nil
+		case model.PlatformAnthropic:
+			converted, modelName, stream, err := openAIChatToAnthropic(req.Body)
+			if err != nil {
+				return out, err
+			}
+			resolved, err := g.resolveModel(acc.Platform, modelName)
+			if err != nil {
+				return out, err
+			}
+			converted["model"] = resolved.UpstreamModel
+			out.Body, err = json.Marshal(converted)
+			out.Path, out.Stream, out.ResponseAdapter = "/v1/messages", stream, adapterAnthropicToOpenAIChat
+			return out, err
+		case model.PlatformGemini:
+			converted, modelName, stream, err := openAIChatToGemini(req.Body)
+			if err != nil {
+				return out, err
+			}
+			resolved, err := g.resolveModel(acc.Platform, modelName)
+			if err != nil {
+				return out, err
+			}
+			out.Body, err = json.Marshal(converted)
+			method := "generateContent"
+			if stream {
+				method = "streamGenerateContent"
+			}
+			out.Path = "/v1beta/models/" + resolved.UpstreamModel + ":" + method
+			if stream {
+				out.Path += "?alt=sse"
+			}
+			out.Stream, out.ResponseAdapter = stream, adapterGeminiToOpenAIChat
+			return out, err
+		}
+	case "/v1/messages":
+		switch acc.Platform {
+		case model.PlatformAnthropic, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek:
+			return out, nil
+		case model.PlatformOpenAI, model.PlatformGrok:
+			converted, modelName, stream, err := anthropicMessagesToOpenAIResponses(req.Body)
+			if err != nil {
+				return out, err
+			}
+			resolved, err := g.resolveModel(acc.Platform, modelName)
+			if err != nil {
+				return out, err
+			}
+			converted["model"] = resolved.UpstreamModel
+			out.Body, err = json.Marshal(converted)
+			out.Path, out.Stream, out.ResponseAdapter = "/v1/responses", stream, adapterOpenAIResponsesToAnthropic
+			return out, err
+		}
+	case "/v1/responses":
+		switch acc.Platform {
+		case model.PlatformOpenAI, model.PlatformGrok, model.PlatformDeepSeek:
+			return out, nil
+		case model.PlatformAnthropic:
+			converted, modelName, stream, err := openAIResponsesToAnthropic(req.Body)
+			if err != nil {
+				return out, err
+			}
+			resolved, err := g.resolveModel(acc.Platform, modelName)
+			if err != nil {
+				return out, err
+			}
+			converted["model"] = resolved.UpstreamModel
+			out.Body, err = json.Marshal(converted)
+			out.Path, out.Stream, out.ResponseAdapter = "/v1/messages", stream, adapterAnthropicToOpenAIResponses
+			return out, err
+		}
+	}
+	return out, fmt.Errorf("provider %s cannot serve %s in a composite group", acc.Platform, req.Path)
 }
 
 // relayAnthropicViaResponses makes an OpenAI-Responses-compatible group
@@ -647,10 +769,6 @@ func (g *Gateway) handleOpenAIImageGeneration(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if !ak.selectGroup(model.PlatformOpenAI) {
-		util.Fail(c, http.StatusBadRequest, "this key has no OpenAI image group")
-		return
-	}
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
@@ -661,11 +779,21 @@ func (g *Gateway) handleOpenAIImageGeneration(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	modelName, imageGroupID, body, ok := g.rewriteJSONModel(c, model.PlatformOpenAI, fields, body, "gpt-image-2")
+	requestedModel := jsonString(fields["model"])
+	if !g.selectGroupForModel(ak, requestedModel, model.PlatformOpenAI, model.PlatformGrok) {
+		util.Fail(c, http.StatusBadRequest, "this key has no image-capable group")
+		return
+	}
+	platform := ak.Group.Platform
+	defaultModel := "gpt-image-2"
+	if platform == model.PlatformGrok {
+		defaultModel = "grok-imagine-image"
+	}
+	modelName, imageGroupID, body, ok := g.rewriteJSONModel(c, platform, fields, body, defaultModel)
 	if !ok {
 		return
 	}
-	g.relay(c, ak, relayRequest{Platform: model.PlatformOpenAI, Path: "/v1/images/generations", Model: modelName, Body: body, Billable: true, Image: true, UpstreamGroupID: imageGroupID})
+	g.relay(c, ak, relayRequest{Platform: platform, Path: "/v1/images/generations", Model: modelName, Body: body, Billable: true, Image: true, UpstreamGroupID: imageGroupID})
 }
 
 // handleOpenAIImageEdit preserves multipart image uploads while rewriting a

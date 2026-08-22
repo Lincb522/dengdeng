@@ -123,7 +123,7 @@ onMounted(async () => {
     <section class="usage-filters card mb-4 p-3">
       <div class="usage-filter-grid">
         <input v-model="filters.model" class="input" placeholder="模型名称" @keyup.enter="search" />
-        <select v-model="filters.platform" class="input"><option value="">全部平台</option><option value="anthropic">Claude</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select>
+        <select v-model="filters.platform" class="input"><option value="">全部平台</option><option value="anthropic">Claude</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option></select>
         <select v-model="filters.group_id" class="input"><option value="">全部分组</option><option v-for="group in groups.filter((g) => !filters.platform || g.platform === filters.platform)" :key="group.id" :value="String(group.id)">{{ group.name }}</option></select>
         <select v-model="filters.status" class="input"><option value="">全部结果</option><option value="success">成功</option><option value="error">失败</option></select>
         <div class="usage-filter-actions"><button class="btn-primary" :disabled="loading" @click="search">{{ loading ? '查询中' : '查询' }}</button><button class="btn-ghost" @click="reset">重置</button></div>

@@ -24,7 +24,18 @@ const (
 	PlatformGemini    = "gemini"
 	// PlatformGrok forwards OpenAI-compatible Responses/Chat traffic to xAI.
 	// Both xAI API keys and Grok subscription OAuth accounts live here.
-	PlatformGrok = "grok"
+	PlatformGrok      = "grok"
+	PlatformKimi      = "kimi"
+	PlatformZhipu     = "zhipu"
+	PlatformDeepSeek  = "deepseek"
+	PlatformComposite = "composite"
+
+	APIProtocolChatCompletions = "chat_completions"
+	APIProtocolAnthropic       = "anthropic"
+	APIProtocolResponses       = "responses"
+	APIProtocolAdaptive        = "adaptive"
+	AccountModePayG            = "payg"
+	AccountModeCoding          = "coding"
 
 	// Upstream credential styles.
 	AuthAPIKey        = "api_key"        // static provider key sent as-is
@@ -74,7 +85,7 @@ const (
 	ReferralPayoutStatusUncertain = "STATUS_UNCERTAIN"
 )
 
-var AllPlatforms = []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformGrok}
+var AllPlatforms = []string{PlatformAnthropic, PlatformOpenAI, PlatformGemini, PlatformGrok, PlatformKimi, PlatformZhipu, PlatformDeepSeek, PlatformComposite}
 
 type User struct {
 	ID            int64  `gorm:"primaryKey" json:"id"`
@@ -187,6 +198,18 @@ type Group struct {
 	CacheReadMultiplier    float64 `gorm:"not null;default:1" json:"cache_read_multiplier"`
 	CacheWrite5mMultiplier float64 `gorm:"not null;default:1" json:"cache_write_5m_multiplier"`
 	CacheWrite1hMultiplier float64 `gorm:"not null;default:1" json:"cache_write_1h_multiplier"`
+	// Service-tier multipliers are applied after the normal token/cache rates.
+	// Priority and Anthropic fast share one operator-controlled premium; Flex
+	// has its own discount. Existing groups receive provider-compatible defaults.
+	FastRateMultiplier float64 `gorm:"not null;default:2" json:"fast_rate_multiplier"`
+	FlexRateMultiplier float64 `gorm:"not null;default:0.5" json:"flex_rate_multiplier"`
+	// Long-context pricing is disabled when the threshold is zero. Once the
+	// reconstructed prompt context reaches it, input, output and cache components
+	// can be adjusted independently without changing the catalogue model price.
+	LongContextThreshold        int64   `gorm:"not null;default:0" json:"long_context_threshold"`
+	LongContextInputMultiplier  float64 `gorm:"not null;default:1" json:"long_context_input_multiplier"`
+	LongContextOutputMultiplier float64 `gorm:"not null;default:1" json:"long_context_output_multiplier"`
+	LongContextCacheMultiplier  float64 `gorm:"not null;default:1" json:"long_context_cache_multiplier"`
 	// ImageRateIndependent lets image-token billing use its own multiplier
 	// instead of inheriting RateMultiplier, matching Sub2API's group model.
 	ImageRateIndependent bool    `gorm:"not null;default:false" json:"image_rate_independent"`
@@ -413,10 +436,15 @@ type UpstreamAccount struct {
 	// ProxyID is optional. A zero value continues to use the deployment-wide
 	// outbound route, while a non-zero value selects a separately managed
 	// proxy for this one upstream account.
-	ProxyID  int64  `gorm:"index;not null;default:0" json:"proxy_id"`
-	Name     string `gorm:"size:64;not null" json:"name"`
-	Platform string `gorm:"size:16;not null" json:"platform"`
-	BaseURL  string `gorm:"size:512" json:"base_url"`
+	ProxyID          int64  `gorm:"index;not null;default:0" json:"proxy_id"`
+	Name             string `gorm:"size:64;not null" json:"name"`
+	Platform         string `gorm:"size:16;not null" json:"platform"`
+	BaseURL          string `gorm:"size:512" json:"base_url"`
+	APIProtocol      string `gorm:"size:32;not null;default:adaptive" json:"api_protocol"`
+	AccountMode      string `gorm:"size:16;not null;default:payg" json:"account_mode"`
+	ChatBaseURL      string `gorm:"size:512" json:"chat_base_url"`
+	AnthropicBaseURL string `gorm:"size:512" json:"anthropic_base_url"`
+	ResponsesBaseURL string `gorm:"size:512" json:"responses_base_url"`
 	// QuotaURL optionally selects a non-standard third-party relay usage
 	// endpoint. It must be a path or a same-origin URL so the upstream API key
 	// can never be sent to an unrelated host.
@@ -772,6 +800,10 @@ type UsageLog struct {
 	CacheWrite1hUnitPrice float64 `gorm:"not null;default:0" json:"cache_write_1h_unit_price"`
 	ImageUnitPrice        float64 `gorm:"not null;default:0" json:"image_unit_price"`
 	ServiceTier           string  `gorm:"size:32" json:"service_tier,omitempty"`
+	ServiceTierMultiplier float64 `gorm:"not null;default:1" json:"service_tier_multiplier"`
+	LongContextApplied    bool    `gorm:"not null;default:false" json:"long_context_applied"`
+	LongContextTokens     int64   `gorm:"not null;default:0" json:"long_context_tokens"`
+	LongContextThreshold  int64   `gorm:"not null;default:0" json:"long_context_threshold"`
 	// BillingMode records the entitlement actually consumed by this request:
 	// usage (cash balance), request, day, admin, or none for failed calls.
 	BillingMode string `gorm:"size:16" json:"billing_mode,omitempty"`

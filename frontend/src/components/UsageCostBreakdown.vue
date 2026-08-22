@@ -47,7 +47,7 @@ function formatUnitPrice(price: number) {
 }
 
 function tierLabel(tier?: string) {
-	return ({ auto: 'Auto', default: 'Default', flex: 'Flex', priority: 'Priority', scale: 'Scale' } as Record<string, string>)[tier || ''] || tier || '默认'
+	return ({ auto: 'Auto', default: 'Default', fast: 'Fast', flex: 'Flex', priority: 'Priority', scale: 'Scale' } as Record<string, string>)[tier || ''] || tier || '默认'
 }
 
 </script>
@@ -114,10 +114,14 @@ function tierLabel(tier?: string) {
 				<p v-else class="usage-cost-legacy">这条历史记录只有最终扣费，没有保存费用拆分。</p>
 
 				<dl class="usage-cost-summary">
-					<div>
-						<dt>服务档位</dt>
-						<dd>{{ tierLabel(log.service_tier) }}</dd>
-					</div>
+						<div>
+							<dt>服务档位</dt>
+							<dd>{{ tierLabel(log.service_tier) }}<template v-if="log.service_tier_multiplier && log.service_tier_multiplier !== 1"> · {{ log.service_tier_multiplier.toFixed(2) }}x</template></dd>
+						</div>
+						<div v-if="log.long_context_applied">
+							<dt>长上下文</dt>
+							<dd>{{ (log.long_context_tokens || 0).toLocaleString() }} / {{ (log.long_context_threshold || 0).toLocaleString() }}</dd>
+						</div>
 					<div v-if="hasSnapshot">
 						<dt>综合倍率</dt>
 						<dd class="is-rate">{{ (log.effective_multiplier || 0).toFixed(4) }}x</dd>

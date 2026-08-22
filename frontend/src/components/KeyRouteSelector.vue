@@ -20,7 +20,7 @@ const saving = ref(false)
 const draft = ref<number[]>([])
 const { trigger, panel, open, panelStyle, togglePinned, close } = useAnchoredPopover('start')
 const popoverID = `key-route-${Math.random().toString(36).slice(2)}`
-const platformOrder = ['openai', 'anthropic', 'gemini', 'grok']
+const platformOrder = ['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite']
 
 const selectedGroups = computed(() => {
 	const values = props.apiKey.groups?.length ? props.apiKey.groups : (props.apiKey.group ? [props.apiKey.group] : [])

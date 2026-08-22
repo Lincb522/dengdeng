@@ -113,3 +113,38 @@ func TestUpdateGroupSerializesReasoningMappings(t *testing.T) {
 		t.Fatalf("unexpected reasoning policy: %#v", updated)
 	}
 }
+
+func TestUpdateGroupSavesTierAndLongContextPricing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:group-tier-pricing-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := db.AutoMigrate(&model.Group{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	group := model.Group{Name: "tier-group", Platform: model.PlatformOpenAI, Status: model.StatusActive}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	body := `{"fast_rate_multiplier":1.8,"flex_rate_multiplier":0.4,"long_context_threshold":272000,"long_context_input_multiplier":2,"long_context_output_multiplier":1.5,"long_context_cache_multiplier":2}`
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/admin/groups/"+strconv.FormatInt(group.ID, 10), strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.FormatInt(group.ID, 10)}}
+
+	(&AdminHandler{db: db}).UpdateGroup(ctx)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	var updated model.Group
+	if err := db.First(&updated, group.ID).Error; err != nil {
+		t.Fatalf("reload group: %v", err)
+	}
+	if updated.FastRateMultiplier != 1.8 || updated.FlexRateMultiplier != .4 || updated.LongContextThreshold != 272_000 ||
+		updated.LongContextInputMultiplier != 2 || updated.LongContextOutputMultiplier != 1.5 || updated.LongContextCacheMultiplier != 2 {
+		t.Fatalf("tier pricing fields = %#v", updated)
+	}
+}

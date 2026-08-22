@@ -179,15 +179,21 @@ type opsRank struct {
 // multiplier may have changed since a request was made, so it must not be
 // retroactively applied to old Token rows in the browser.
 type opsRateProfile struct {
-	ID                     int64   `json:"id"`
-	Name                   string  `json:"name"`
-	Platform               string  `json:"platform"`
-	RateMultiplier         float64 `json:"rate_multiplier"`
-	CacheReadMultiplier    float64 `json:"cache_read_multiplier"`
-	CacheWrite5mMultiplier float64 `json:"cache_write_5m_multiplier"`
-	CacheWrite1hMultiplier float64 `json:"cache_write_1h_multiplier"`
-	ImageRateIndependent   bool    `json:"image_rate_independent"`
-	ImageRateMultiplier    float64 `json:"image_rate_multiplier"`
+	ID                          int64   `json:"id"`
+	Name                        string  `json:"name"`
+	Platform                    string  `json:"platform"`
+	RateMultiplier              float64 `json:"rate_multiplier"`
+	CacheReadMultiplier         float64 `json:"cache_read_multiplier"`
+	CacheWrite5mMultiplier      float64 `json:"cache_write_5m_multiplier"`
+	CacheWrite1hMultiplier      float64 `json:"cache_write_1h_multiplier"`
+	FastRateMultiplier          float64 `json:"fast_rate_multiplier"`
+	FlexRateMultiplier          float64 `json:"flex_rate_multiplier"`
+	LongContextThreshold        int64   `json:"long_context_threshold"`
+	LongContextInputMultiplier  float64 `json:"long_context_input_multiplier"`
+	LongContextOutputMultiplier float64 `json:"long_context_output_multiplier"`
+	LongContextCacheMultiplier  float64 `json:"long_context_cache_multiplier"`
+	ImageRateIndependent        bool    `json:"image_rate_independent"`
+	ImageRateMultiplier         float64 `json:"image_rate_multiplier"`
 }
 
 type opsAccountHealth struct {
@@ -755,6 +761,9 @@ func (h *AdminHandler) loadOpsRateProfiles(filter opsFilter) ([]opsRateProfile, 
 			ID: group.ID, Name: group.Name, Platform: group.Platform,
 			RateMultiplier: group.RateMultiplier, CacheReadMultiplier: group.CacheReadMultiplier,
 			CacheWrite5mMultiplier: group.CacheWrite5mMultiplier, CacheWrite1hMultiplier: group.CacheWrite1hMultiplier,
+			FastRateMultiplier: group.FastRateMultiplier, FlexRateMultiplier: group.FlexRateMultiplier,
+			LongContextThreshold: group.LongContextThreshold, LongContextInputMultiplier: group.LongContextInputMultiplier,
+			LongContextOutputMultiplier: group.LongContextOutputMultiplier, LongContextCacheMultiplier: group.LongContextCacheMultiplier,
 			ImageRateIndependent: group.ImageRateIndependent, ImageRateMultiplier: group.ImageRateMultiplier,
 		})
 	}

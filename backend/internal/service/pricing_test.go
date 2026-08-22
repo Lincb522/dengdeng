@@ -103,3 +103,51 @@ func TestPricingCostUsesPerImagePriceInsteadOfImageTokens(t *testing.T) {
 		t.Fatalf("Cost() = %d, want %d", got, want)
 	}
 }
+
+func TestPricingAppliesConfiguredServiceTierMultipliers(t *testing.T) {
+	pricing := &PricingService{
+		cache: []model.ModelPrice{{Match: "tier-test", InputPrice: 1, OutputPrice: 2}},
+		until: time.Now().Add(time.Hour),
+	}
+	usage := Usage{InputTokens: 100, OutputTokens: 10}
+	rates := RatePlan{Base: 1, Fast: 1.8, Flex: .4}
+
+	fast := pricing.BreakdownForTier("tier-test", usage, rates, "fast")
+	if fast.TotalMicro != 216 || fast.ServiceTierMultiplier != 1.8 {
+		t.Fatalf("fast breakdown = %#v, want total 216 at 1.8x", fast)
+	}
+	priority := pricing.BreakdownForTier("tier-test", usage, rates, "priority")
+	if priority.TotalMicro != fast.TotalMicro {
+		t.Fatalf("priority total = %d, want fast total %d", priority.TotalMicro, fast.TotalMicro)
+	}
+	flex := pricing.BreakdownForTier("tier-test", usage, rates, "flex")
+	if flex.TotalMicro != 48 || flex.ServiceTierMultiplier != .4 {
+		t.Fatalf("flex breakdown = %#v, want total 48 at .4x", flex)
+	}
+}
+
+func TestPricingAppliesLongContextComponentMultipliersAtThreshold(t *testing.T) {
+	pricing := &PricingService{
+		cache: []model.ModelPrice{{Match: "long-test", InputPrice: 1, OutputPrice: 2, CacheReadPrice: .1}},
+		until: time.Now().Add(time.Hour),
+	}
+	rates := RatePlan{
+		Base: 1, CacheRead: 1,
+		LongContextThreshold: 120,
+		LongContextInput:     2, LongContextOutput: 1.5, LongContextCache: 3,
+	}
+	breakdown := pricing.Breakdown("long-test", Usage{
+		InputTokens: 100, OutputTokens: 10, CacheReadTokens: 20,
+	}, rates)
+	if !breakdown.LongContextApplied || breakdown.LongContextTokens != 120 || breakdown.LongContextThreshold != 120 {
+		t.Fatalf("long-context audit = %#v", breakdown)
+	}
+	if breakdown.TotalMicro != 236 {
+		t.Fatalf("long-context total = %d, want 236", breakdown.TotalMicro)
+	}
+
+	below := pricing.Breakdown("long-test", Usage{InputTokens: 99, CacheReadTokens: 20}, rates)
+	if below.LongContextApplied || below.TotalMicro != 101 {
+		t.Fatalf("below-threshold breakdown = %#v, want ordinary total 101", below)
+	}
+}

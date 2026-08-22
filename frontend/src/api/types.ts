@@ -12,6 +12,7 @@ export interface User {
   note?: string
 	terms_revision?: string
 	terms_accepted_at?: string | null
+	group_rates?: Record<number, number>
   created_at: string
 }
 
@@ -471,12 +472,18 @@ export interface ReferralDashboard {
 export interface Group {
   id: number
   name: string
-  platform: 'anthropic' | 'openai' | 'gemini' | 'grok'
+  platform: 'anthropic' | 'openai' | 'gemini' | 'grok' | 'kimi' | 'zhipu' | 'deepseek' | 'composite'
   description: string
   rate_multiplier: number
 	cache_read_multiplier: number
 	cache_write_5m_multiplier: number
 	cache_write_1h_multiplier: number
+	fast_rate_multiplier: number
+	flex_rate_multiplier: number
+	long_context_threshold: number
+	long_context_input_multiplier: number
+	long_context_output_multiplier: number
+	long_context_cache_multiplier: number
 	image_rate_independent: boolean
 	image_rate_multiplier: number
 	max_reasoning_effort: string
@@ -521,6 +528,11 @@ export interface UpstreamAccount {
   name: string
   platform: string
   base_url: string
+	api_protocol: 'adaptive' | 'chat_completions' | 'anthropic' | 'responses'
+	account_mode: 'payg' | 'coding'
+	chat_base_url: string
+	anthropic_base_url: string
+	responses_base_url: string
 	quota_url: string
   auth_type: 'api_key' | 'oauth' | 'agent_identity'
   expires_at: string | null
@@ -719,6 +731,10 @@ export interface UsageLog {
 	cache_write_1h_unit_price: number
 	image_unit_price: number
 	service_tier?: string
+	service_tier_multiplier: number
+	long_context_applied: boolean
+	long_context_tokens: number
+	long_context_threshold: number
 	billing_mode?: 'usage' | 'request' | 'day' | 'admin' | 'none' | string
 	first_token_ms: number
   duration_ms: number
@@ -837,6 +853,12 @@ export interface OpsRateProfile {
 	cache_read_multiplier: number
 	cache_write_5m_multiplier: number
 	cache_write_1h_multiplier: number
+	fast_rate_multiplier: number
+	flex_rate_multiplier: number
+	long_context_threshold: number
+	long_context_input_multiplier: number
+	long_context_output_multiplier: number
+	long_context_cache_multiplier: number
 	image_rate_independent: boolean
 	image_rate_multiplier: number
 }
@@ -1280,4 +1302,8 @@ export const PLATFORM_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   gemini: 'Gemini',
   grok: 'Grok',
+  kimi: 'Kimi',
+  zhipu: '智谱 GLM',
+  deepseek: 'DeepSeek',
+  composite: '组合路由',
 }

@@ -297,12 +297,29 @@ func accountProbeURL(account *model.UpstreamAccount) (string, error) {
 			base = "https://generativelanguage.googleapis.com"
 		case model.PlatformGrok:
 			base = "https://api.x.ai"
+		case model.PlatformKimi:
+			if account.AccountMode == model.AccountModeCoding {
+				base = "https://api.kimi.com/coding/v1"
+			} else {
+				base = "https://api.moonshot.cn/v1"
+			}
+		case model.PlatformZhipu:
+			if account.AccountMode == model.AccountModeCoding {
+				base = "https://open.bigmodel.cn/api/coding/paas/v4"
+			} else {
+				base = "https://open.bigmodel.cn/api/paas/v4"
+			}
+		case model.PlatformDeepSeek:
+			base = "https://api.deepseek.com"
 		default:
 			return "", fmt.Errorf("unsupported platform")
 		}
 	}
 	if account.Platform == model.PlatformGemini {
 		return util.JoinUpstreamURL(base, "/v1beta/models")
+	}
+	if account.Platform == model.PlatformZhipu {
+		return util.JoinUpstreamURL(base, "/models")
 	}
 	return util.JoinUpstreamURL(base, "/v1/models")
 }
@@ -325,7 +342,7 @@ func applyProbeCredential(req *http.Request, account *model.UpstreamAccount) {
 	case model.PlatformAnthropic:
 		req.Header.Set("x-api-key", string(account.APIKey))
 		req.Header.Set("anthropic-version", "2023-06-01")
-	case model.PlatformOpenAI, model.PlatformGrok:
+	case model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek:
 		req.Header.Set("Authorization", "Bearer "+string(account.APIKey))
 	case model.PlatformGemini:
 		req.Header.Set("x-goog-api-key", string(account.APIKey))

@@ -23,3 +23,19 @@ func TestEstimateMaximumUsesByteToTokenApproximation(t *testing.T) {
 		t.Fatalf("EstimateMaximum() = %d, want %d", got, want)
 	}
 }
+
+func TestEstimateMaximumUsesSameTierAndLongContextRulesAsSettlement(t *testing.T) {
+	pricing := &PricingService{
+		cache: []model.ModelPrice{{Match: "tier-model", InputPrice: 1}},
+		until: time.Now().Add(time.Hour),
+	}
+	billing := NewBillingService(nil, pricing)
+	rates := RatePlan{Base: 1, Fast: 2, LongContextThreshold: 100, LongContextInput: 1.5}
+
+	// 600 bytes ~= 200 input tokens. 200 * 1.5 long-context * 2 fast,
+	// followed by the normal 20% reservation safety margin.
+	got := billing.EstimateMaximum("tier-model", 600, 1, 0, rates, "fast")
+	if got != 720 {
+		t.Fatalf("tiered EstimateMaximum() = %d, want 720", got)
+	}
+}

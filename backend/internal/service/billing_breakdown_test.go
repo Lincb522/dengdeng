@@ -37,7 +37,10 @@ func TestBillingPersistsCostBreakdownSnapshot(t *testing.T) {
 			OutputTokens:    100,
 			CacheReadTokens: 200,
 		},
-		Rates:       RatePlan{Base: .5, CacheRead: .1},
+		Rates: RatePlan{
+			Base: .5, CacheRead: .1, Fast: 1.75,
+			LongContextThreshold: 1_200, LongContextInput: 1.2, LongContextOutput: 1.3, LongContextCache: 1.4,
+		},
 		StatusCode:  200,
 		SkipBalance: true,
 	})
@@ -46,7 +49,7 @@ func TestBillingPersistsCostBreakdownSnapshot(t *testing.T) {
 	if err := db.Where("request_id = ?", "req_breakdown").First(&log).Error; err != nil {
 		t.Fatal(err)
 	}
-	if log.CostMicro <= 0 || log.RawCostMicro <= log.CostMicro {
+	if log.CostMicro <= 0 || log.RawCostMicro <= 0 {
 		t.Fatalf("unexpected totals: charged=%d raw=%d", log.CostMicro, log.RawCostMicro)
 	}
 	if log.InputCostMicro+log.OutputCostMicro+log.CacheReadCostMicro != log.CostMicro {
@@ -57,5 +60,8 @@ func TestBillingPersistsCostBreakdownSnapshot(t *testing.T) {
 	}
 	if log.ServiceTier != "priority" || log.BillingMode != "request" || log.EffectiveMultiplier <= 0 {
 		t.Fatalf("billing metadata was not snapshotted: %#v", log)
+	}
+	if log.ServiceTierMultiplier != 1.75 || !log.LongContextApplied || log.LongContextTokens != 1_200 || log.LongContextThreshold != 1_200 {
+		t.Fatalf("tier/long-context metadata was not snapshotted: %#v", log)
 	}
 }

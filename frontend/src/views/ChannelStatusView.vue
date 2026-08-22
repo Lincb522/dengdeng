@@ -12,7 +12,7 @@ const ranges = [
   { value: '7d', label: '7 天' },
   { value: '15d', label: '15 天' },
 ]
-const platformOrder = ['openai', 'anthropic', 'gemini', 'grok']
+const platformOrder = ['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite']
 const selectedRange = ref('1h')
 const data = ref<ChannelStatusResponse | null>(null)
 const loading = ref(true)

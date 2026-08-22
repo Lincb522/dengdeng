@@ -85,6 +85,20 @@ func TestAccountMonitorFeatureSwitchStopsManualTrigger(t *testing.T) {
 	}
 }
 
+func TestChineseProviderProbeURLs(t *testing.T) {
+	for _, tt := range []struct{ platform, mode, want string }{
+		{model.PlatformKimi, model.AccountModePayG, "https://api.moonshot.cn/v1/models"},
+		{model.PlatformKimi, model.AccountModeCoding, "https://api.kimi.com/coding/v1/models"},
+		{model.PlatformZhipu, model.AccountModePayG, "https://open.bigmodel.cn/api/paas/v4/models"},
+		{model.PlatformDeepSeek, model.AccountModePayG, "https://api.deepseek.com/v1/models"},
+	} {
+		got, err := accountProbeURL(&model.UpstreamAccount{Platform: tt.platform, AccountMode: tt.mode, AuthType: model.AuthAPIKey})
+		if err != nil || got != tt.want {
+			t.Errorf("%s/%s probe URL = %q, want %q (err=%v)", tt.platform, tt.mode, got, tt.want, err)
+		}
+	}
+}
+
 func TestAccountMonitorExpiredOAuthDoesNotCallUpstream(t *testing.T) {
 	db := newMonitorTestDB(t)
 	called := false

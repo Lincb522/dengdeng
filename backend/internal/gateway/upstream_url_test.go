@@ -52,3 +52,55 @@ func TestForwardAcceptsSDKStyleBaseURLs(t *testing.T) {
 		})
 	}
 }
+
+func TestForwardChineseProviderProtocolURLsAndCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name, platform, path, baseField, wantHeader string
+	}{
+		{"kimi-chat", model.PlatformKimi, "/v1/chat/completions", "chat", "Authorization"},
+		{"zhipu-anthropic", model.PlatformZhipu, "/v1/messages", "anthropic", "x-api-key"},
+		{"deepseek-responses", model.PlatformDeepSeek, "/v1/responses", "responses", "Authorization"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get(tt.wantHeader); got == "" {
+					t.Errorf("missing %s", tt.wantHeader)
+				}
+				if r.URL.Path != tt.path {
+					t.Errorf("path = %q, want %q", r.URL.Path, tt.path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer upstream.Close()
+			account := &model.UpstreamAccount{Platform: tt.platform, AuthType: model.AuthAPIKey, APIKey: "provider-key", APIProtocol: model.APIProtocolAdaptive}
+			switch tt.baseField {
+			case "chat":
+				account.ChatBaseURL = upstream.URL
+			case "anthropic":
+				account.AnthropicBaseURL = upstream.URL
+			case "responses":
+				account.ResponsesBaseURL = upstream.URL
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, tt.path, nil)
+			response, err := (&Gateway{client: upstream.Client()}).forward(ctx, account, relayRequest{Platform: tt.platform, Path: tt.path, Body: []byte(`{}`)})
+			if err != nil {
+				t.Fatalf("forward() error = %v", err)
+			}
+			response.Body.Close()
+		})
+	}
+}
+
+func TestAdaptCompositeNativeProvider(t *testing.T) {
+	req := relayRequest{Platform: model.PlatformComposite, Path: "/v1/chat/completions", Body: []byte(`{"model":"moonshot-v1"}`)}
+	got, err := (&Gateway{}).adaptCompositeRequest(req, &model.UpstreamAccount{Platform: model.PlatformKimi})
+	if err != nil {
+		t.Fatalf("adaptCompositeRequest() error = %v", err)
+	}
+	if got.Platform != model.PlatformKimi || got.Path != req.Path {
+		t.Fatalf("adapted request = %#v", got)
+	}
+}

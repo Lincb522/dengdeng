@@ -356,7 +356,7 @@ onMounted(load)
           </template>
           <template v-else>
             <select v-model="platform" class="input">
-              <option value="">全部平台</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="gemini">Gemini</option><option value="grok">Grok</option>
+              <option value="">全部平台</option><option value="openai">OpenAI</option><option value="anthropic">Claude</option><option value="gemini">Gemini</option><option value="grok">Grok</option><option value="kimi">Kimi</option><option value="zhipu">智谱 GLM</option><option value="deepseek">DeepSeek</option>
             </select>
             <select v-model="errorType" class="input">
               <option value="">全部类型</option>

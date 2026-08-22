@@ -408,6 +408,20 @@ func apiKeyQuotaBase(account *model.UpstreamAccount) (string, bool, error) {
 			base = "https://generativelanguage.googleapis.com"
 		case model.PlatformGrok:
 			base = "https://api.x.ai"
+		case model.PlatformKimi:
+			if account.AccountMode == model.AccountModeCoding {
+				base = "https://api.kimi.com/coding/v1"
+			} else {
+				base = "https://api.moonshot.cn/v1"
+			}
+		case model.PlatformZhipu:
+			if account.AccountMode == model.AccountModeCoding {
+				base = "https://open.bigmodel.cn/api/coding/paas/v4"
+			} else {
+				base = "https://open.bigmodel.cn/api/paas/v4"
+			}
+		case model.PlatformDeepSeek:
+			base = "https://api.deepseek.com"
 		default:
 			return "", false, fmt.Errorf("unsupported platform")
 		}
@@ -424,7 +438,7 @@ func apiKeyQuotaBase(account *model.UpstreamAccount) (string, bool, error) {
 		return "", false, fmt.Errorf("invalid API key upstream URL")
 	}
 	host := strings.ToLower(parsed.Hostname())
-	official := host == "api.openai.com" || host == "api.anthropic.com" || host == "generativelanguage.googleapis.com" || host == "api.x.ai"
+	official := host == "api.openai.com" || host == "api.anthropic.com" || host == "generativelanguage.googleapis.com" || host == "api.x.ai" || host == "api.moonshot.cn" || host == "api.kimi.com" || host == "open.bigmodel.cn" || host == "api.deepseek.com"
 	return strings.TrimRight(base, "/"), official, nil
 }
 

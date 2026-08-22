@@ -14,6 +14,7 @@ const showForm = ref(false)
 const editing = ref<Group | null>(null)
 const saving = ref(false)
 const cacheOpen = ref(false)
+const tierOpen = ref(false)
 const advancedOpen = ref(false)
 const deletingID = ref<number | null>(null)
 const deleteGroup = ref<Group | null>(null)
@@ -59,6 +60,12 @@ const form = ref({
 	cache_read_multiplier: 1,
 	cache_write_5m_multiplier: 1,
 	cache_write_1h_multiplier: 1,
+	fast_rate_multiplier: 2,
+	flex_rate_multiplier: 0.5,
+	long_context_threshold: 0,
+	long_context_input_multiplier: 1,
+	long_context_output_multiplier: 1,
+	long_context_cache_multiplier: 1,
 	image_rate_independent: false,
 	image_rate_multiplier: 1,
 	max_reasoning_effort: 'auto',
@@ -77,11 +84,14 @@ function openCreate() {
   form.value = {
     name: '', platform: 'anthropic', description: '', rate_multiplier: 1,
     cache_read_multiplier: 1, cache_write_5m_multiplier: 1, cache_write_1h_multiplier: 1,
+		fast_rate_multiplier: 2, flex_rate_multiplier: 0.5,
+		long_context_threshold: 0, long_context_input_multiplier: 1, long_context_output_multiplier: 1, long_context_cache_multiplier: 1,
     image_rate_independent: false, image_rate_multiplier: 1,
 		max_reasoning_effort: 'auto', reasoning_effort_mappings: {} as Record<string, string>,
     is_public: true, status: 'active',
   }
   cacheOpen.value = false
+	tierOpen.value = false
   advancedOpen.value = false
   showForm.value = true
 }
@@ -96,6 +106,12 @@ function openEdit(g: Group) {
 		cache_read_multiplier: g.cache_read_multiplier || 1,
 		cache_write_5m_multiplier: g.cache_write_5m_multiplier || 1,
 		cache_write_1h_multiplier: g.cache_write_1h_multiplier || 1,
+		fast_rate_multiplier: g.fast_rate_multiplier || 2,
+		flex_rate_multiplier: g.flex_rate_multiplier || 0.5,
+		long_context_threshold: g.long_context_threshold || 0,
+		long_context_input_multiplier: g.long_context_input_multiplier || 1,
+		long_context_output_multiplier: g.long_context_output_multiplier || 1,
+		long_context_cache_multiplier: g.long_context_cache_multiplier || 1,
 		image_rate_independent: g.image_rate_independent || false,
 		image_rate_multiplier: g.image_rate_multiplier || 1,
 		max_reasoning_effort: g.max_reasoning_effort || 'auto',
@@ -105,6 +121,9 @@ function openEdit(g: Group) {
   }
   cacheOpen.value = [g.cache_read_multiplier, g.cache_write_5m_multiplier, g.cache_write_1h_multiplier]
     .some((value) => Number(value || 1) !== 1)
+	tierOpen.value = Number(g.fast_rate_multiplier || 2) !== 2
+		|| Number(g.flex_rate_multiplier || 0.5) !== 0.5
+		|| Number(g.long_context_threshold || 0) > 0
   advancedOpen.value = !!g.image_rate_independent
     || (g.max_reasoning_effort || 'auto') !== 'auto'
     || Object.keys(g.reasoning_effort_mappings || {}).length > 0
@@ -116,9 +135,10 @@ function closeForm() {
   showForm.value = false
 }
 
-function updateDisclosure(target: 'cache' | 'advanced', event: Event) {
+function updateDisclosure(target: 'cache' | 'tier' | 'advanced', event: Event) {
   const open = (event.currentTarget as HTMLDetailsElement).open
   if (target === 'cache') cacheOpen.value = open
+	else if (target === 'tier') tierOpen.value = open
   else advancedOpen.value = open
 }
 
@@ -131,6 +151,12 @@ async function save() {
     cache_read_multiplier: Number(form.value.cache_read_multiplier),
     cache_write_5m_multiplier: Number(form.value.cache_write_5m_multiplier),
     cache_write_1h_multiplier: Number(form.value.cache_write_1h_multiplier),
+		fast_rate_multiplier: Number(form.value.fast_rate_multiplier),
+		flex_rate_multiplier: Number(form.value.flex_rate_multiplier),
+		long_context_threshold: Number(form.value.long_context_threshold),
+		long_context_input_multiplier: Number(form.value.long_context_input_multiplier),
+		long_context_output_multiplier: Number(form.value.long_context_output_multiplier),
+		long_context_cache_multiplier: Number(form.value.long_context_cache_multiplier),
     image_rate_multiplier: Number(form.value.image_rate_multiplier),
 		reasoning_effort_mappings: Object.fromEntries(
 			Object.entries(form.value.reasoning_effort_mappings).filter(([source, target]) => target && source !== target),
@@ -236,6 +262,10 @@ async function togglePublic(g: Group) {
             <dt>缓存倍率</dt>
             <dd class="num">命中 {{ g.cache_read_multiplier || 1 }} · 写入 {{ g.cache_write_5m_multiplier || 1 }}/{{ g.cache_write_1h_multiplier || 1 }}</dd>
           </div>
+          <div>
+            <dt>服务档位</dt>
+            <dd class="num">Fast {{ g.fast_rate_multiplier || 2 }} · Flex {{ g.flex_rate_multiplier || 0.5 }}</dd>
+          </div>
           <div v-if="g.platform === 'openai' || g.platform === 'grok'">
             <dt>思考强度</dt>
             <dd>{{ g.max_reasoning_effort && g.max_reasoning_effort !== 'auto' ? g.max_reasoning_effort : '不限制' }}</dd>
@@ -282,6 +312,7 @@ async function togglePublic(g: Group) {
 				<td>
 					<div class="num text-sm">基础 x{{ g.rate_multiplier }}</div>
 					<div class="mt-1 text-xs text-slate-500">命中 x{{ g.cache_read_multiplier || 1 }} · 5m x{{ g.cache_write_5m_multiplier || 1 }} · 1h x{{ g.cache_write_1h_multiplier || 1 }}</div>
+					<div class="mt-1 text-xs text-slate-500">Fast x{{ g.fast_rate_multiplier || 2 }} · Flex x{{ g.flex_rate_multiplier || 0.5 }}<template v-if="g.long_context_threshold"> · 长上下文 {{ g.long_context_threshold.toLocaleString() }}</template></div>
 					<div v-if="g.image_rate_independent" class="mt-1 text-xs text-amber">图像 x{{ g.image_rate_multiplier || 1 }}</div>
 					<div v-if="g.platform === 'openai' || g.platform === 'grok'" class="mt-1 text-xs text-slate-500">思考上限 {{ g.max_reasoning_effort && g.max_reasoning_effort !== 'auto' ? g.max_reasoning_effort : '不限制' }}</div>
 				</td>
@@ -342,6 +373,22 @@ async function togglePublic(g: Group) {
             </div>
           </div>
         </details>
+
+		<details class="modal-disclosure" :open="tierOpen" @toggle="updateDisclosure('tier', $event)">
+		  <summary><span><strong>服务档位与长上下文</strong><small>Fast ×{{ form.fast_rate_multiplier }} · Flex ×{{ form.flex_rate_multiplier }}<template v-if="form.long_context_threshold"> · {{ Number(form.long_context_threshold).toLocaleString() }} Token 起</template></small></span></summary>
+		  <div class="modal-disclosure__body">
+			<div class="modal-grid modal-grid--two">
+			  <label class="modal-field"><span class="label">Fast / Priority 倍率</span><input v-model.number="form.fast_rate_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+			  <label class="modal-field"><span class="label">Flex 倍率</span><input v-model.number="form.flex_rate_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+			</div>
+			<label class="modal-field"><span class="label">长上下文起点（Token）</span><input v-model.number="form.long_context_threshold" type="number" step="1000" min="0" class="input" /><small class="modal-field__hint">0 表示关闭。达到起点后，按下面的分项倍率结算。</small></label>
+			<div class="modal-grid modal-grid--three">
+			  <label class="modal-field"><span class="label">长上下文输入</span><input v-model.number="form.long_context_input_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+			  <label class="modal-field"><span class="label">长上下文输出</span><input v-model.number="form.long_context_output_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+			  <label class="modal-field"><span class="label">长上下文缓存</span><input v-model.number="form.long_context_cache_multiplier" type="number" step="0.1" min="0.1" class="input" /></label>
+			</div>
+		  </div>
+		</details>
 
         <details class="modal-disclosure" :open="advancedOpen" @toggle="updateDisclosure('advanced', $event)">
           <summary><span><strong>高级计费策略</strong><small>{{ form.image_rate_independent ? `图像 ×${form.image_rate_multiplier}` : '图像继承基础倍率' }}{{ form.platform === 'openai' || form.platform === 'grok' ? ` · 思考上限 ${form.max_reasoning_effort === 'auto' ? '不限' : form.max_reasoning_effort}` : '' }}</small></span></summary>

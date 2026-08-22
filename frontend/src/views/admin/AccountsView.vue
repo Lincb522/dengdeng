@@ -36,10 +36,11 @@ const refreshingQuotaAccountID = ref<number | null>(null)
 type AccountView = 'table' | 'cards'
 type AccountSort = 'custom' | 'name' | 'platform' | 'group' | 'priority' | 'availability' | 'last_used'
 type AccountPlatform = Group['platform']
+const concreteAccountPlatforms: AccountPlatform[] = ['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek']
 const accountView = ref<AccountView>('table')
 const sortBy = ref<AccountSort>('custom')
 const sortDirection = ref<'asc' | 'desc'>('asc')
-const filterPlatform = ref<'all' | 'openai' | 'anthropic' | 'gemini' | 'grok'>('all')
+const filterPlatform = ref<'all' | AccountPlatform>('all')
 const filterAuthType = ref<'all' | 'api_key' | 'oauth' | 'agent_identity'>('all')
 const draggingAccountID = ref<number | null>(null)
 const accountPresentationStorageKey = 'dengdeng.admin.accounts.presentation.v1'
@@ -58,6 +59,9 @@ const form = ref({
   group_ids: [] as number[],
   name: '',
   base_url: '',
+	api_protocol: 'adaptive' as 'adaptive' | 'chat_completions' | 'anthropic' | 'responses',
+	account_mode: 'payg' as 'payg' | 'coding',
+	chat_base_url: '', anthropic_base_url: '', responses_base_url: '',
 	quota_url: '',
   auth_type: 'api_key' as 'api_key' | 'oauth' | 'agent_identity',
   api_key: '',
@@ -135,8 +139,8 @@ onMounted(() => {
   void load()
 })
 
-const groupsForSelectedPlatform = computed(() => groups.value.filter((group) => group.platform === selectedPlatform.value))
-const accountOptionsByPlatform = computed(() => (['openai', 'anthropic', 'gemini', 'grok'] as AccountPlatform[])
+const groupsForSelectedPlatform = computed(() => groups.value.filter((group) => group.platform === selectedPlatform.value || group.platform === 'composite'))
+const accountOptionsByPlatform = computed(() => (['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite'] as AccountPlatform[])
   .map((platform) => ({ platform, accounts: accountOptions.value.filter((account) => account.platform === platform) }))
   .filter((section) => section.accounts.length > 0))
 const platformOfSelectedGroup = computed<AccountPlatform>(
@@ -158,6 +162,9 @@ const baseURLPlaceholder = computed(() => ({
 	anthropic: 'https://api.anthropic.com',
 	gemini: 'https://generativelanguage.googleapis.com',
 	grok: 'https://api.x.ai',
+	kimi: 'https://api.moonshot.cn/v1',
+	zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+	deepseek: 'https://api.deepseek.com',
 }[platformOfSelectedGroup.value] || '留空使用官方地址'))
 const oauthStarting = ref(false)
 const oauthCompleting = ref(false)
@@ -182,7 +189,7 @@ function openCreate() {
   form.value = {
     group_id: initialGroup?.id ?? 0,
     group_ids: initialGroup ? [initialGroup.id] : [],
-    name: '', base_url: '', quota_url: '', auth_type: 'api_key',
+    name: '', base_url: '', api_protocol: 'adaptive', account_mode: 'payg', chat_base_url: '', anthropic_base_url: '', responses_base_url: '', quota_url: '', auth_type: 'api_key',
     api_key: '', access_token: '', refresh_token: '', account_id: '', email: '', proxy_id: 0,
 		priority: 10, concurrency: 0, status: 'active',
   }
@@ -219,7 +226,7 @@ function openEdit(a: UpstreamAccount) {
   inlineGroupName.value = ''
   selectedPlatform.value = (groups.value.find((group) => group.id === a.group_id)?.platform || a.platform) as AccountPlatform
   form.value = {
-    group_id: a.group_id, group_ids: accountGroupIDs(a), name: a.name, base_url: a.base_url, quota_url: a.quota_url || '', auth_type: a.auth_type,
+    group_id: a.group_id, group_ids: accountGroupIDs(a), name: a.name, base_url: a.base_url, api_protocol: a.api_protocol || 'adaptive', account_mode: a.account_mode || 'payg', chat_base_url: a.chat_base_url || '', anthropic_base_url: a.anthropic_base_url || '', responses_base_url: a.responses_base_url || '', quota_url: a.quota_url || '', auth_type: a.auth_type,
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
 		priority: a.priority, concurrency: a.concurrency || 0, status: a.status,
   }
@@ -411,8 +418,14 @@ async function save() {
 	}
   const body: Record<string, unknown> = {
     name: form.value.name,
+		platform: selectedPlatform.value,
     group_ids: form.value.group_ids,
     base_url: form.value.base_url,
+		api_protocol: form.value.api_protocol,
+		account_mode: form.value.account_mode,
+		chat_base_url: form.value.chat_base_url,
+		anthropic_base_url: form.value.anthropic_base_url,
+		responses_base_url: form.value.responses_base_url,
 		quota_url: form.value.auth_type === 'api_key' ? form.value.quota_url : '',
     auth_type: form.value.auth_type,
     priority: Number(form.value.priority),
@@ -986,6 +999,9 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <option value="anthropic">Claude</option>
           <option value="gemini">Gemini</option>
           <option value="grok">Grok</option>
+		  <option value="kimi">Kimi</option>
+		  <option value="zhipu">智谱 GLM</option>
+		  <option value="deepseek">DeepSeek</option>
         </select>
         <select v-model="filterAuthType" class="input accounts-toolbar-select" aria-label="凭证类型筛选" @change="updateAccountFilters">
           <option value="all">全部凭证</option>
@@ -1138,7 +1154,7 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <div v-if="editing || accountEntryMode === 'new' || selectedExistingAccountID" class="modal-grid modal-grid--two">
             <label class="modal-field">
               <span class="label">账号平台</span>
-              <ProviderSelect v-model="selectedPlatform" :disabled="!!editing || accountEntryMode === 'existing'" aria-label="账号平台" @update:model-value="changeAccountPlatform" />
+              <ProviderSelect v-model="selectedPlatform" :platforms="concreteAccountPlatforms" :disabled="!!editing || accountEntryMode === 'existing'" aria-label="账号平台" @update:model-value="changeAccountPlatform" />
             </label>
             <div class="account-group-picker-head"><span><strong>可用分组</strong><small>已选 {{ form.group_ids.length }} 个</small></span><button type="button" @click="inlineGroupOpen = !inlineGroupOpen">{{ inlineGroupOpen ? '取消创建' : '新建分组' }}</button></div>
           </div>
@@ -1211,6 +1227,11 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           <summary><span><strong>高级连接设置</strong><small>{{ form.base_url || form.proxy_id || form.quota_url ? '已配置自定义连接' : '使用平台默认连接' }}</small></span></summary>
           <div class="modal-disclosure__body">
             <label class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
+			<div v-if="['kimi', 'zhipu', 'deepseek'].includes(platformOfSelectedGroup)" class="modal-grid modal-grid--two">
+				<label class="modal-field"><span class="label">账号模式</span><select v-model="form.account_mode" class="input"><option value="payg">按量 API</option><option value="coding">Coding 套餐</option></select></label>
+				<label class="modal-field"><span class="label">API 协议</span><select v-model="form.api_protocol" class="input"><option value="adaptive">自适应</option><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option><option v-if="platformOfSelectedGroup === 'deepseek'" value="responses">Responses</option></select></label>
+			</div>
+			<details v-if="['kimi', 'zhipu', 'deepseek'].includes(platformOfSelectedGroup)" class="modal-disclosure"><summary><span><strong>分协议地址</strong><small>留空使用官方地址</small></span></summary><div class="modal-disclosure__body"><label class="modal-field"><span class="label">Chat Base URL</span><input v-model.trim="form.chat_base_url" class="input font-mono text-xs" /></label><label class="modal-field"><span class="label">Anthropic Base URL</span><input v-model.trim="form.anthropic_base_url" class="input font-mono text-xs" /></label><label v-if="platformOfSelectedGroup === 'deepseek'" class="modal-field"><span class="label">Responses Base URL</span><input v-model.trim="form.responses_base_url" class="input font-mono text-xs" /></label></div></details>
             <label class="modal-field"><span class="label">单独代理</span><select v-model.number="form.proxy_id" class="input"><option :value="0">不使用（默认出口）</option><option v-for="proxy in proxies.filter((item) => item.status === 'active' || item.id === form.proxy_id)" :key="proxy.id" :value="proxy.id">{{ proxy.name }} · {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}{{ proxy.status !== 'active' ? '（已停用）' : '' }}</option></select></label>
             <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">额度查询地址</span><input v-model.trim="form.quota_url" class="input font-mono text-xs" placeholder="留空自动识别，或填写 /v1/usage" /><small class="modal-field__hint">支持同站路径或与 Base URL 同域的完整地址。</small></label>
             <div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">优先级</span><input v-model.number="form.priority" type="number" class="input" /></label><label class="modal-field"><span class="label">并发上限</span><input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /></label></div>

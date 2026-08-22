@@ -164,8 +164,37 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	if kw := c.Query("q"); kw != "" {
 		q = q.Where("email LIKE ?", "%"+kw+"%")
 	}
-	q.Order("id DESC").Limit(500).Find(&users)
-	util.OK(c, users)
+	if err := q.Order("id DESC").Limit(500).Find(&users).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load users failed")
+		return
+	}
+	type adminUserOut struct {
+		model.User
+		GroupRates map[int64]float64 `json:"group_rates"`
+	}
+	out := make([]adminUserOut, 0, len(users))
+	userIDs := make([]int64, 0, len(users))
+	for _, user := range users {
+		userIDs = append(userIDs, user.ID)
+		out = append(out, adminUserOut{User: user, GroupRates: map[int64]float64{}})
+	}
+	if len(userIDs) > 0 {
+		var rates []model.UserGroupRate
+		if err := h.db.Where("user_id IN ?", userIDs).Find(&rates).Error; err != nil {
+			util.Fail(c, http.StatusInternalServerError, "load user group rates failed")
+			return
+		}
+		indexes := make(map[int64]int, len(out))
+		for i := range out {
+			indexes[out[i].ID] = i
+		}
+		for _, rate := range rates {
+			if i, ok := indexes[rate.UserID]; ok && rate.RateMultiplier > 0 {
+				out[i].GroupRates[rate.GroupID] = rate.RateMultiplier
+			}
+		}
+	}
+	util.OK(c, out)
 }
 
 type adminUpdateUserReq struct {
@@ -368,37 +397,49 @@ func (h *AdminHandler) ListGroups(c *gin.Context) {
 }
 
 type groupReq struct {
-	Name                    string            `json:"name" binding:"required,max=64"`
-	Platform                string            `json:"platform" binding:"required"`
-	Description             string            `json:"description"`
-	RateMultiplier          float64           `json:"rate_multiplier"`
-	CacheReadMultiplier     float64           `json:"cache_read_multiplier"`
-	CacheWrite5mMultiplier  float64           `json:"cache_write_5m_multiplier"`
-	CacheWrite1hMultiplier  float64           `json:"cache_write_1h_multiplier"`
-	ImageRateIndependent    *bool             `json:"image_rate_independent"`
-	ImageRateMultiplier     float64           `json:"image_rate_multiplier"`
-	MaxReasoningEffort      string            `json:"max_reasoning_effort"`
-	ReasoningEffortMappings map[string]string `json:"reasoning_effort_mappings"`
-	IsPublic                *bool             `json:"is_public"`
-	Status                  string            `json:"status"`
+	Name                        string            `json:"name" binding:"required,max=64"`
+	Platform                    string            `json:"platform" binding:"required"`
+	Description                 string            `json:"description"`
+	RateMultiplier              float64           `json:"rate_multiplier"`
+	CacheReadMultiplier         float64           `json:"cache_read_multiplier"`
+	CacheWrite5mMultiplier      float64           `json:"cache_write_5m_multiplier"`
+	CacheWrite1hMultiplier      float64           `json:"cache_write_1h_multiplier"`
+	FastRateMultiplier          float64           `json:"fast_rate_multiplier"`
+	FlexRateMultiplier          float64           `json:"flex_rate_multiplier"`
+	LongContextThreshold        int64             `json:"long_context_threshold"`
+	LongContextInputMultiplier  float64           `json:"long_context_input_multiplier"`
+	LongContextOutputMultiplier float64           `json:"long_context_output_multiplier"`
+	LongContextCacheMultiplier  float64           `json:"long_context_cache_multiplier"`
+	ImageRateIndependent        *bool             `json:"image_rate_independent"`
+	ImageRateMultiplier         float64           `json:"image_rate_multiplier"`
+	MaxReasoningEffort          string            `json:"max_reasoning_effort"`
+	ReasoningEffortMappings     map[string]string `json:"reasoning_effort_mappings"`
+	IsPublic                    *bool             `json:"is_public"`
+	Status                      string            `json:"status"`
 }
 
 // groupUpdateReq intentionally uses pointers throughout. A group may be made
 // private with `is_public: false`; a value-type boolean would make that change
 // indistinguishable from an omitted field in partial updates.
 type groupUpdateReq struct {
-	Name                    *string            `json:"name"`
-	Description             *string            `json:"description"`
-	RateMultiplier          *float64           `json:"rate_multiplier"`
-	CacheReadMultiplier     *float64           `json:"cache_read_multiplier"`
-	CacheWrite5mMultiplier  *float64           `json:"cache_write_5m_multiplier"`
-	CacheWrite1hMultiplier  *float64           `json:"cache_write_1h_multiplier"`
-	ImageRateIndependent    *bool              `json:"image_rate_independent"`
-	ImageRateMultiplier     *float64           `json:"image_rate_multiplier"`
-	MaxReasoningEffort      *string            `json:"max_reasoning_effort"`
-	ReasoningEffortMappings *map[string]string `json:"reasoning_effort_mappings"`
-	IsPublic                *bool              `json:"is_public"`
-	Status                  *string            `json:"status"`
+	Name                        *string            `json:"name"`
+	Description                 *string            `json:"description"`
+	RateMultiplier              *float64           `json:"rate_multiplier"`
+	CacheReadMultiplier         *float64           `json:"cache_read_multiplier"`
+	CacheWrite5mMultiplier      *float64           `json:"cache_write_5m_multiplier"`
+	CacheWrite1hMultiplier      *float64           `json:"cache_write_1h_multiplier"`
+	FastRateMultiplier          *float64           `json:"fast_rate_multiplier"`
+	FlexRateMultiplier          *float64           `json:"flex_rate_multiplier"`
+	LongContextThreshold        *int64             `json:"long_context_threshold"`
+	LongContextInputMultiplier  *float64           `json:"long_context_input_multiplier"`
+	LongContextOutputMultiplier *float64           `json:"long_context_output_multiplier"`
+	LongContextCacheMultiplier  *float64           `json:"long_context_cache_multiplier"`
+	ImageRateIndependent        *bool              `json:"image_rate_independent"`
+	ImageRateMultiplier         *float64           `json:"image_rate_multiplier"`
+	MaxReasoningEffort          *string            `json:"max_reasoning_effort"`
+	ReasoningEffortMappings     *map[string]string `json:"reasoning_effort_mappings"`
+	IsPublic                    *bool              `json:"is_public"`
+	Status                      *string            `json:"status"`
 }
 
 func validPlatform(p string) bool {
@@ -445,10 +486,17 @@ func (h *AdminHandler) CreateGroup(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, "name and a valid platform are required")
 		return
 	}
+	if req.LongContextThreshold < 0 || req.FastRateMultiplier < 0 || req.FlexRateMultiplier < 0 ||
+		req.LongContextInputMultiplier < 0 || req.LongContextOutputMultiplier < 0 || req.LongContextCacheMultiplier < 0 {
+		util.Fail(c, http.StatusBadRequest, "pricing multipliers must be positive and long-context threshold cannot be negative")
+		return
+	}
 	g := model.Group{
 		Name: req.Name, Platform: req.Platform, Description: req.Description,
 		RateMultiplier:      1,
 		CacheReadMultiplier: 1, CacheWrite5mMultiplier: 1, CacheWrite1hMultiplier: 1,
+		FastRateMultiplier: 2, FlexRateMultiplier: .5,
+		LongContextInputMultiplier: 1, LongContextOutputMultiplier: 1, LongContextCacheMultiplier: 1,
 		ImageRateMultiplier: 1, MaxReasoningEffort: "auto", IsPublic: true, Status: model.StatusActive,
 	}
 	maxEffort, mappings, err := normalizeReasoningPolicy(req.MaxReasoningEffort, req.ReasoningEffortMappings)
@@ -469,6 +517,24 @@ func (h *AdminHandler) CreateGroup(c *gin.Context) {
 	}
 	if req.CacheWrite1hMultiplier > 0 {
 		g.CacheWrite1hMultiplier = req.CacheWrite1hMultiplier
+	}
+	if req.FastRateMultiplier > 0 {
+		g.FastRateMultiplier = req.FastRateMultiplier
+	}
+	if req.FlexRateMultiplier > 0 {
+		g.FlexRateMultiplier = req.FlexRateMultiplier
+	}
+	if req.LongContextThreshold > 0 {
+		g.LongContextThreshold = req.LongContextThreshold
+	}
+	if req.LongContextInputMultiplier > 0 {
+		g.LongContextInputMultiplier = req.LongContextInputMultiplier
+	}
+	if req.LongContextOutputMultiplier > 0 {
+		g.LongContextOutputMultiplier = req.LongContextOutputMultiplier
+	}
+	if req.LongContextCacheMultiplier > 0 {
+		g.LongContextCacheMultiplier = req.LongContextCacheMultiplier
 	}
 	if req.ImageRateIndependent != nil {
 		g.ImageRateIndependent = *req.ImageRateIndependent
@@ -539,6 +605,41 @@ func (h *AdminHandler) UpdateGroup(c *gin.Context) {
 			return
 		}
 		updates["cache_write1h_multiplier"] = *req.CacheWrite1hMultiplier
+	}
+	if req.FastRateMultiplier != nil {
+		if *req.FastRateMultiplier <= 0 {
+			util.Fail(c, http.StatusBadRequest, "fast service tier multiplier must be positive")
+			return
+		}
+		updates["fast_rate_multiplier"] = *req.FastRateMultiplier
+	}
+	if req.FlexRateMultiplier != nil {
+		if *req.FlexRateMultiplier <= 0 {
+			util.Fail(c, http.StatusBadRequest, "flex service tier multiplier must be positive")
+			return
+		}
+		updates["flex_rate_multiplier"] = *req.FlexRateMultiplier
+	}
+	if req.LongContextThreshold != nil {
+		if *req.LongContextThreshold < 0 {
+			util.Fail(c, http.StatusBadRequest, "long-context threshold cannot be negative")
+			return
+		}
+		updates["long_context_threshold"] = *req.LongContextThreshold
+	}
+	for name, value := range map[string]*float64{
+		"long_context_input_multiplier":  req.LongContextInputMultiplier,
+		"long_context_output_multiplier": req.LongContextOutputMultiplier,
+		"long_context_cache_multiplier":  req.LongContextCacheMultiplier,
+	} {
+		if value == nil {
+			continue
+		}
+		if *value <= 0 {
+			util.Fail(c, http.StatusBadRequest, "long-context multipliers must be positive")
+			return
+		}
+		updates[name] = *value
 	}
 	if req.ImageRateIndependent != nil {
 		updates["image_rate_independent"] = *req.ImageRateIndependent
@@ -1348,22 +1449,52 @@ func (h *AdminHandler) reorderAccountByPlacement(c *gin.Context, req reorderAcco
 }
 
 type accountReq struct {
-	GroupID      int64      `json:"group_id"`
-	GroupIDs     *[]int64   `json:"group_ids"`
-	ProxyID      *int64     `json:"proxy_id"`
-	Name         string     `json:"name"`
-	BaseURL      *string    `json:"base_url"`
-	QuotaURL     *string    `json:"quota_url"`
-	AuthType     string     `json:"auth_type"`
-	APIKey       string     `json:"api_key"`
-	AccessToken  string     `json:"access_token"`
-	RefreshToken string     `json:"refresh_token"`
-	ExpiresAt    *time.Time `json:"expires_at"`
-	Email        string     `json:"email"`
-	AccountID    string     `json:"account_id"`
-	Priority     *int       `json:"priority"`
-	Concurrency  *int       `json:"concurrency"`
-	Status       string     `json:"status"`
+	GroupID          int64      `json:"group_id"`
+	GroupIDs         *[]int64   `json:"group_ids"`
+	ProxyID          *int64     `json:"proxy_id"`
+	Name             string     `json:"name"`
+	Platform         string     `json:"platform"`
+	BaseURL          *string    `json:"base_url"`
+	APIProtocol      string     `json:"api_protocol"`
+	AccountMode      string     `json:"account_mode"`
+	ChatBaseURL      *string    `json:"chat_base_url"`
+	AnthropicBaseURL *string    `json:"anthropic_base_url"`
+	ResponsesBaseURL *string    `json:"responses_base_url"`
+	QuotaURL         *string    `json:"quota_url"`
+	AuthType         string     `json:"auth_type"`
+	APIKey           string     `json:"api_key"`
+	AccessToken      string     `json:"access_token"`
+	RefreshToken     string     `json:"refresh_token"`
+	ExpiresAt        *time.Time `json:"expires_at"`
+	Email            string     `json:"email"`
+	AccountID        string     `json:"account_id"`
+	Priority         *int       `json:"priority"`
+	Concurrency      *int       `json:"concurrency"`
+	Status           string     `json:"status"`
+}
+
+func normalizeAccountProtocol(platform, protocol, mode string) (string, string, error) {
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if protocol == "" {
+		protocol = model.APIProtocolAdaptive
+	}
+	if mode == "" {
+		mode = model.AccountModePayG
+	}
+	if mode != model.AccountModePayG && mode != model.AccountModeCoding {
+		return "", "", fmt.Errorf("invalid account mode")
+	}
+	switch protocol {
+	case model.APIProtocolAdaptive, model.APIProtocolChatCompletions, model.APIProtocolAnthropic:
+	case model.APIProtocolResponses:
+		if platform != model.PlatformDeepSeek && platform != model.PlatformOpenAI && platform != model.PlatformGrok {
+			return "", "", fmt.Errorf("Responses protocol is not supported by this platform")
+		}
+	default:
+		return "", "", fmt.Errorf("invalid API protocol")
+	}
+	return protocol, mode, nil
 }
 
 const maxUpstreamAccountGroups = 32
@@ -1408,6 +1539,13 @@ func normalizeUpstreamAccountBaseURL(raw, authType string) (string, error) {
 	return util.NormalizeUpstreamBaseURL(raw)
 }
 
+func normalizeProtocolBaseURL(value *string) (string, error) {
+	if value == nil || strings.TrimSpace(*value) == "" {
+		return "", nil
+	}
+	return util.NormalizeUpstreamBaseURL(*value)
+}
+
 func (h *AdminHandler) resolveAccountGroups(ids []int64, platform string) ([]model.Group, error) {
 	if len(ids) == 0 || len(ids) > maxUpstreamAccountGroups {
 		return nil, fmt.Errorf("select between 1 and %d groups", maxUpstreamAccountGroups)
@@ -1426,10 +1564,10 @@ func (h *AdminHandler) resolveAccountGroups(ids []int64, platform string) ([]mod
 		if !exists {
 			return nil, fmt.Errorf("group not found")
 		}
-		if platform != "" && group.Platform != platform {
+		if platform != "" && group.Platform != platform && group.Platform != model.PlatformComposite {
 			return nil, fmt.Errorf("all account groups must use platform %s", platform)
 		}
-		if platform == "" {
+		if platform == "" && group.Platform != model.PlatformComposite {
 			platform = group.Platform
 		}
 		ordered = append(ordered, group)
@@ -1456,8 +1594,7 @@ func replaceUpstreamAccountGroups(tx *gorm.DB, account *model.UpstreamAccount, g
 		return err
 	}
 	account.GroupID = groups[0].ID
-	account.Platform = groups[0].Platform
-	return tx.Model(account).Updates(map[string]any{"group_id": account.GroupID, "platform": account.Platform}).Error
+	return tx.Model(account).Update("group_id", account.GroupID).Error
 }
 
 func appendUpstreamAccountGroups(tx *gorm.DB, accountID int64, groups []model.Group) error {
@@ -1501,9 +1638,22 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		return
 	}
 	groupIDs := normalizeAccountGroupIDs(req.GroupID, req.GroupIDs)
-	groups, err := h.resolveAccountGroups(groupIDs, "")
+	accountPlatform := strings.ToLower(strings.TrimSpace(req.Platform))
+	groups, err := h.resolveAccountGroups(groupIDs, accountPlatform)
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if accountPlatform == "" {
+		for _, group := range groups {
+			if group.Platform != model.PlatformComposite {
+				accountPlatform = group.Platform
+				break
+			}
+		}
+	}
+	if !validPlatform(accountPlatform) || accountPlatform == model.PlatformComposite {
+		util.Fail(c, http.StatusBadRequest, "a concrete account platform is required")
 		return
 	}
 	authType := req.AuthType
@@ -1539,11 +1689,33 @@ func (h *AdminHandler) CreateAccount(c *gin.Context) {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
+	protocol, accountMode, err := normalizeAccountProtocol(accountPlatform, req.APIProtocol, req.AccountMode)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	chatBaseURL, err := normalizeProtocolBaseURL(req.ChatBaseURL)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	anthropicBaseURL, err := normalizeProtocolBaseURL(req.AnthropicBaseURL)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	responsesBaseURL, err := normalizeProtocolBaseURL(req.ResponsesBaseURL)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
 	var maxDisplayOrder int
 	_ = h.db.Model(&model.UpstreamAccount{}).Select("COALESCE(MAX(display_order), 0)").Scan(&maxDisplayOrder).Error
 	acc := model.UpstreamAccount{
-		GroupID: groups[0].ID, ProxyID: proxyID, Name: req.Name, Platform: groups[0].Platform,
-		BaseURL: baseURL, QuotaURL: trimOptionalString(req.QuotaURL), AuthType: authType,
+		GroupID: groups[0].ID, ProxyID: proxyID, Name: req.Name, Platform: accountPlatform,
+		BaseURL: baseURL, APIProtocol: protocol, AccountMode: accountMode,
+		ChatBaseURL: chatBaseURL, AnthropicBaseURL: anthropicBaseURL, ResponsesBaseURL: responsesBaseURL,
+		QuotaURL: trimOptionalString(req.QuotaURL), AuthType: authType,
 		APIKey:       crypto.EncryptedString(req.APIKey),
 		AccessToken:  crypto.EncryptedString(req.AccessToken),
 		RefreshToken: crypto.EncryptedString(req.RefreshToken),
@@ -1608,6 +1780,38 @@ func (h *AdminHandler) UpdateAccount(c *gin.Context) {
 		}
 	}
 	updates := map[string]any{}
+	if req.APIProtocol != "" || req.AccountMode != "" {
+		protocol, mode, err := normalizeAccountProtocol(acc.Platform, firstNonEmpty(req.APIProtocol, acc.APIProtocol), firstNonEmpty(req.AccountMode, acc.AccountMode))
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["api_protocol"], updates["account_mode"] = protocol, mode
+	}
+	if req.ChatBaseURL != nil {
+		value, err := normalizeProtocolBaseURL(req.ChatBaseURL)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["chat_base_url"] = value
+	}
+	if req.AnthropicBaseURL != nil {
+		value, err := normalizeProtocolBaseURL(req.AnthropicBaseURL)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["anthropic_base_url"] = value
+	}
+	if req.ResponsesBaseURL != nil {
+		value, err := normalizeProtocolBaseURL(req.ResponsesBaseURL)
+		if err != nil {
+			util.Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		updates["responses_base_url"] = value
+	}
 	if req.BaseURL != nil {
 		authType := acc.AuthType
 		if req.AuthType != "" {

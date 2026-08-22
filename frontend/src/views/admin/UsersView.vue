@@ -1,14 +1,39 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { api, withToast } from '../../api/client'
-import type { Group, User, UserGroupRate } from '../../api/types'
+import type { Group, ModelPrice, User, UserGroupRate } from '../../api/types'
 import { formatMoney } from '../../api/types'
 
 const users = ref<User[]>([])
 const groups = ref<Group[]>([])
+const prices = ref<ModelPrice[]>([])
 const keyword = ref('')
 const editing = ref<User | null>(null)
 	const groupRates = ref<Record<number, number>>({})
+const selectedPriceID = ref(0)
+const selectedGroupID = ref(0)
+const selectedServiceTier = ref<'standard' | 'fast' | 'flex'>('standard')
+
+const tokenPrices = computed(() => prices.value.filter((price) =>
+	price.input_price > 0 || price.output_price > 0 || price.cache_read_price > 0,
+))
+const selectedPrice = computed(() => tokenPrices.value.find((price) => price.id === selectedPriceID.value) || null)
+const compatibleGroups = computed(() => {
+	const platform = selectedPrice.value?.platform
+	if (!platform) return groups.value
+	const matched = groups.value.filter((group) => group.platform === platform || group.platform === 'composite')
+	return matched.length ? matched : groups.value
+})
+const selectedGroup = computed(() => compatibleGroups.value.find((group) => group.id === selectedGroupID.value) || null)
+
+type TokenEstimate = {
+	input: number
+	output: number
+	longOutput: number
+	cacheRead: number
+	effectiveRate: number
+	longContext: boolean
+}
 
 const form = ref({
   status: 'active',
@@ -22,14 +47,98 @@ const form = ref({
 
 async function load() {
   const q = keyword.value ? `?q=${encodeURIComponent(keyword.value)}` : ''
-	const [nextUsers, nextGroups] = await Promise.all([
+	const [nextUsers, nextGroups, nextPrices] = await Promise.all([
 		api.get<User[]>(`/api/admin/users${q}`),
 		api.get<Group[]>('/api/admin/groups'),
+		api.get<ModelPrice[]>('/api/admin/prices'),
 	])
 	users.value = nextUsers
 	groups.value = nextGroups
+	prices.value = nextPrices
+	if (!tokenPrices.value.some((price) => price.id === selectedPriceID.value)) {
+		selectedPriceID.value = tokenPrices.value[0]?.id || 0
+	}
+	syncSelectedGroup()
 }
 onMounted(load)
+
+function syncSelectedGroup() {
+	if (!compatibleGroups.value.some((group) => group.id === selectedGroupID.value)) {
+		selectedGroupID.value = compatibleGroups.value[0]?.id || 0
+	}
+}
+
+watch(selectedPriceID, syncSelectedGroup)
+
+function positiveMultiplier(value: number | undefined, fallback = 1) {
+	return Number(value) > 0 ? Number(value) : fallback
+}
+
+function serviceTierMultiplier(group: Group) {
+	if (selectedServiceTier.value === 'fast') return positiveMultiplier(group.fast_rate_multiplier, 2)
+	if (selectedServiceTier.value === 'flex') return positiveMultiplier(group.flex_rate_multiplier, 0.5)
+	return 1
+}
+
+function tokenCapacity(balanceMicro: number, unitPrice: number, rate: number, threshold = 0, longMultiplier = 1) {
+	const ordinaryUnitCost = unitPrice * rate
+	if (balanceMicro <= 0 || ordinaryUnitCost <= 0) return 0
+	if (threshold <= 0 || longMultiplier <= 0 || longMultiplier === 1) {
+		return Math.floor(balanceMicro / ordinaryUnitCost)
+	}
+	const ordinaryCost = threshold * ordinaryUnitCost
+	if (balanceMicro <= ordinaryCost) return Math.floor(balanceMicro / ordinaryUnitCost)
+	return threshold + Math.floor((balanceMicro - ordinaryCost) / (ordinaryUnitCost * longMultiplier))
+}
+
+function estimateForUser(user: User): TokenEstimate | null {
+	const price = selectedPrice.value
+	const group = selectedGroup.value
+	if (!price || !group) return null
+	const groupRate = positiveMultiplier(user.group_rates?.[group.id], positiveMultiplier(group.rate_multiplier))
+	const effectiveRate = positiveMultiplier(user.rate_multiplier) * groupRate * serviceTierMultiplier(group)
+	const threshold = Math.max(0, Number(group.long_context_threshold) || 0)
+	const longContext = threshold > 0
+	return {
+		input: tokenCapacity(user.balance_micro, price.input_price, effectiveRate, threshold, positiveMultiplier(group.long_context_input_multiplier)),
+		output: tokenCapacity(user.balance_micro, price.output_price, effectiveRate),
+		longOutput: tokenCapacity(user.balance_micro, price.output_price, effectiveRate * positiveMultiplier(group.long_context_output_multiplier)),
+		cacheRead: tokenCapacity(
+			user.balance_micro,
+			price.cache_read_price,
+			effectiveRate * positiveMultiplier(group.cache_read_multiplier),
+			threshold,
+			positiveMultiplier(group.long_context_cache_multiplier),
+		),
+		effectiveRate,
+		longContext,
+	}
+}
+
+const tokenEstimates = computed<Record<number, TokenEstimate | null>>(() => Object.fromEntries(
+	users.value.map((user) => [user.id, estimateForUser(user)]),
+))
+
+function formatTokens(tokens: number) {
+	if (!Number.isFinite(tokens) || tokens <= 0) return '—'
+	const units: Array<[number, string]> = [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]
+	for (const [size, suffix] of units) {
+		if (tokens >= size) {
+			const value = tokens / size
+			return `${value >= 100 ? value.toFixed(0) : value >= 10 ? value.toFixed(1) : value.toFixed(2)}${suffix}`
+		}
+	}
+	return Math.floor(tokens).toLocaleString('zh-CN')
+}
+
+function estimateTitle(user: User) {
+	const estimate = tokenEstimates.value[user.id]
+	const price = selectedPrice.value
+	const group = selectedGroup.value
+	if (!estimate || !price || !group) return ''
+	const tier = selectedServiceTier.value === 'standard' ? '标准' : selectedServiceTier.value === 'fast' ? 'Fast / Priority' : 'Flex'
+	return `${price.match} · ${group.name} · ${tier} · 实际综合倍率 ${estimate.effectiveRate.toFixed(4)}x`
+}
 
 async function openEdit(u: User) {
   editing.value = u
@@ -103,6 +212,32 @@ async function save() {
       </div>
     </div>
 
+	<div class="card mb-4 p-3">
+	  <div class="grid gap-3 md:grid-cols-[minmax(180px,1.4fr)_minmax(160px,1fr)_minmax(130px,.7fr)_auto] md:items-end">
+		<label>
+		  <span class="label">Token 换算模型</span>
+		  <select v-model.number="selectedPriceID" class="input">
+			<option v-for="price in tokenPrices" :key="price.id" :value="price.id">{{ price.match }}</option>
+		  </select>
+		</label>
+		<label>
+		  <span class="label">计费分组</span>
+		  <select v-model.number="selectedGroupID" class="input">
+			<option v-for="group in compatibleGroups" :key="group.id" :value="group.id">{{ group.name }}</option>
+		  </select>
+		</label>
+		<label>
+		  <span class="label">服务档位</span>
+		  <select v-model="selectedServiceTier" class="input">
+			<option value="standard">标准</option>
+			<option value="fast">Fast / Priority</option>
+			<option value="flex">Flex</option>
+		  </select>
+		</label>
+		<div class="pb-2 text-xs text-slate-500">按用户余额和实际倍率换算</div>
+	  </div>
+	</div>
+
     <div class="card overflow-x-auto">
       <table v-responsive-table class="table-base">
         <thead>
@@ -110,7 +245,7 @@ async function save() {
             <th>邮箱</th>
             <th>角色</th>
             <th>状态</th>
-            <th class="text-right">余额</th>
+            <th class="text-right">余额 / 可用 Token</th>
             <th class="text-right">倍率</th>
 						<th class="text-right">并发</th>
             <th>备注</th>
@@ -123,8 +258,12 @@ async function save() {
             <td class="font-medium text-slate-200">{{ u.email }}</td>
             <td><span :class="u.role === 'admin' ? 'tag-amber' : 'tag-gray'">{{ u.role }}</span></td>
             <td><span :class="u.status === 'active' ? 'tag-green' : 'tag-red'">{{ u.status === 'active' ? '正常' : '封禁' }}</span></td>
-            <td class="num text-right" :class="u.balance_micro > 0 ? 'text-signal-green' : 'text-signal-red'">
-              {{ formatMoney(u.balance_micro) }}
+            <td class="num text-right" :class="u.balance_micro > 0 ? 'text-signal-green' : 'text-signal-red'" :title="estimateTitle(u)">
+              <div>{{ formatMoney(u.balance_micro) }}</div>
+			  <div v-if="tokenEstimates[u.id]" class="mt-1 whitespace-nowrap text-[10px] font-normal leading-4 text-slate-500">
+				<div>输入 {{ formatTokens(tokenEstimates[u.id]!.input) }} · 输出 {{ formatTokens(tokenEstimates[u.id]!.output) }}</div>
+				<div>缓存 {{ formatTokens(tokenEstimates[u.id]!.cacheRead) }}<template v-if="tokenEstimates[u.id]!.longContext"> · 长输出 {{ formatTokens(tokenEstimates[u.id]!.longOutput) }}</template></div>
+			  </div>
             </td>
             <td class="num text-right">x{{ u.rate_multiplier }}</td>
 						<td class="num text-right">{{ u.concurrency > 0 ? u.concurrency : '不限' }}</td>

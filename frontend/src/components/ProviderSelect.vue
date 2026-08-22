@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{
   allLabel?: string
   disabled?: boolean
 }>(), {
-  platforms: () => ['openai', 'anthropic', 'gemini', 'grok'],
+  platforms: () => ['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite'],
   includeAll: false,
   allLabel: '全部平台',
   disabled: false,

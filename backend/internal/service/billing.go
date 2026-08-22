@@ -71,9 +71,13 @@ type BillContext struct {
 // Request JSON is not tokenized yet, so approximate tokens from UTF-8 bytes.
 // Treating every byte as a token made large CLI context requests reserve 3–4x
 // their plausible cost and reject users who still had usable balance.
-func (s *BillingService) EstimateMaximum(modelName string, bodyBytes int, maxOutputTokens, imageCount int64, rates RatePlan) int64 {
+func (s *BillingService) EstimateMaximum(modelName string, bodyBytes int, maxOutputTokens, imageCount int64, rates RatePlan, serviceTier ...string) int64 {
+	tier := ""
+	if len(serviceTier) > 0 {
+		tier = serviceTier[0]
+	}
 	if imageCount > 0 {
-		estimate := s.pricing.Cost(modelName, Usage{ImageCount: imageCount}, rates)
+		estimate := s.pricing.CostForTier(modelName, Usage{ImageCount: imageCount}, rates, tier)
 		return estimate + estimate/10
 	}
 	if maxOutputTokens <= 0 {
@@ -83,10 +87,10 @@ func (s *BillingService) EstimateMaximum(modelName string, bodyBytes int, maxOut
 	if inputTokens < 1 {
 		inputTokens = 1
 	}
-	estimate := s.pricing.Cost(modelName, Usage{
+	estimate := s.pricing.CostForTier(modelName, Usage{
 		InputTokens:  inputTokens,
 		OutputTokens: maxOutputTokens,
-	}, rates)
+	}, rates, tier)
 	return estimate + estimate/5
 }
 
@@ -96,7 +100,7 @@ func (s *BillingService) Record(bc BillContext) error {
 		settings, err := s.settings.Get()
 		referralsEnabled = err == nil && settings.Features.ReferralEnabled
 	}
-	breakdown := s.pricing.Breakdown(bc.Model, bc.Usage, bc.Rates)
+	breakdown := s.pricing.BreakdownForTier(bc.Model, bc.Usage, bc.Rates, bc.ServiceTier)
 	cost := breakdown.TotalMicro
 	entry := model.UsageLog{
 		RequestID:             bc.RequestID,
@@ -134,6 +138,10 @@ func (s *BillingService) Record(bc BillContext) error {
 		CacheWrite1hUnitPrice: breakdown.CacheWrite1hPrice,
 		ImageUnitPrice:        breakdown.ImageUnitPrice,
 		ServiceTier:           bc.ServiceTier,
+		ServiceTierMultiplier: breakdown.ServiceTierMultiplier,
+		LongContextApplied:    breakdown.LongContextApplied,
+		LongContextTokens:     breakdown.LongContextTokens,
+		LongContextThreshold:  breakdown.LongContextThreshold,
 		BillingMode:           bc.BillingMode,
 		FirstTokenMs:          bc.FirstTokenMs,
 		DurationMs:            bc.DurationMs,

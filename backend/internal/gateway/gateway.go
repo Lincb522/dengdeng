@@ -40,8 +40,13 @@ const (
 	// xAI's REST surface is OpenAI-compatible. The public paths already carry
 	// the "/v1" prefix, so the base host must not include it (grokBaseURL
 	// trims a trailing /v1 to accept either form an operator enters).
-	defaultGrok      = "https://api.x.ai"
-	defaultGrokOAuth = "https://cli-chat-proxy.grok.com"
+	defaultGrok        = "https://api.x.ai"
+	defaultGrokOAuth   = "https://cli-chat-proxy.grok.com"
+	defaultKimiPayG    = "https://api.moonshot.cn/v1"
+	defaultKimiCoding  = "https://api.kimi.com/coding/v1"
+	defaultZhipuPayG   = "https://open.bigmodel.cn/api/paas/v4"
+	defaultZhipuCoding = "https://open.bigmodel.cn/api/coding/paas/v4"
+	defaultDeepSeek    = "https://api.deepseek.com"
 )
 
 var errRequestBodyTooLarge = fmt.Errorf("request body exceeds the %d MiB limit", maxBodyBytes>>20)
@@ -842,6 +847,14 @@ func maxRatePlan(current, candidate service.RatePlan) service.RatePlan {
 	current.CacheWrite5m = math.Max(current.CacheWrite5m, candidate.CacheWrite5m)
 	current.CacheWrite1h = math.Max(current.CacheWrite1h, candidate.CacheWrite1h)
 	current.Image = math.Max(current.Image, candidate.Image)
+	current.Fast = math.Max(current.Fast, candidate.Fast)
+	current.Flex = math.Max(current.Flex, candidate.Flex)
+	current.LongContextInput = math.Max(current.LongContextInput, candidate.LongContextInput)
+	current.LongContextOutput = math.Max(current.LongContextOutput, candidate.LongContextOutput)
+	current.LongContextCache = math.Max(current.LongContextCache, candidate.LongContextCache)
+	if candidate.LongContextThreshold > 0 && (current.LongContextThreshold == 0 || candidate.LongContextThreshold < current.LongContextThreshold) {
+		current.LongContextThreshold = candidate.LongContextThreshold
+	}
 	return current
 }
 
@@ -869,7 +882,7 @@ func (g *Gateway) estimateRequestBudget(ak *authedKey, req relayRequest, groups 
 			}
 		}
 	}
-	return g.billing.EstimateMaximum(req.Model, len(req.Body), maxOutput, imageCount, rates)
+	return g.billing.EstimateMaximum(req.Model, len(req.Body), maxOutput, imageCount, rates, req.ServiceTier)
 }
 
 // relay runs the account failover loop and, on success, streams the response
@@ -900,7 +913,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		}
 	}
 	if req.ServiceTier == "" {
-		req.ServiceTier = requestServiceTier(req.Body)
+		req.ServiceTier = requestServiceTier(req.Body, req.Platform, req.Model)
 	}
 	if req.Billable && ak.User.Role != model.RoleAdmin && g.db.Migrator().HasTable(&model.UserGroupSubscription{}) {
 		allowed, window, err := g.platformQuotaAllowed(ak.User.ID, req.Platform)
@@ -1117,9 +1130,15 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		trace.AttemptCount++
 		lastAttemptGroup = routeGroup
 		activeRequest.SetAccount(acc.ID)
+		attemptReq, adaptErr := g.adaptCompositeRequest(req, acc)
+		if adaptErr != nil {
+			g.scheduler.Release(acc.ID)
+			lastStatus, lastBody = http.StatusBadGateway, []byte(`{"error":{"message":"selected account does not support this protocol"}}`)
+			continue
+		}
 
 		upstreamStarted := time.Now()
-		resp, err := g.forward(c, acc, req)
+		resp, err := g.forward(c, acc, attemptReq)
 		attemptUpstreamMs := time.Since(upstreamStarted).Milliseconds()
 		trace.UpstreamMs += attemptUpstreamMs
 		if err != nil {
@@ -1177,7 +1196,11 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		originalWriter := c.Writer
 		timingWriter := &firstTokenWriter{ResponseWriter: originalWriter, started: start}
 		c.Writer = timingWriter
-		usage, streamed := g.pipeAdapted(c, resp, req.Platform, req.Image, req.ResponseAdapter, req.Model)
+		usagePlatform := attemptReq.Platform
+		if attemptReq.ResponseAdapter == adapterNone && strings.Contains(attemptReq.Path, "/messages") {
+			usagePlatform = model.PlatformAnthropic
+		}
+		usage, streamed := g.pipeAdapted(c, resp, usagePlatform, attemptReq.Image, attemptReq.ResponseAdapter, attemptReq.Model)
 		c.Writer = originalWriter
 		resp.Body.Close()
 		g.scheduler.Release(acc.ID)
@@ -1191,7 +1214,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 				AccountID:             acc.ID,
 				GroupID:               routeGroup.ID,
 				Model:                 req.Model,
-				Platform:              req.Platform,
+				Platform:              attemptReq.Platform,
 				RequestPath:           publicRequestPath(c),
 				ClientIP:              c.ClientIP(),
 				UserAgent:             truncate(c.Request.UserAgent(), 512),
@@ -1296,7 +1319,7 @@ func publicRequestPath(c *gin.Context) string {
 	return truncate(c.Request.URL.Path, 256)
 }
 
-func requestServiceTier(body []byte) string {
+func requestServiceTier(body []byte, platform, modelName string) string {
 	if len(body) == 0 || !json.Valid(body) {
 		return ""
 	}
@@ -1305,10 +1328,24 @@ func requestServiceTier(body []byte) string {
 		return ""
 	}
 	tier := strings.ToLower(jsonStringPath(payload, "service_tier"))
+	if tier == "" && platform == model.PlatformAnthropic && strings.EqualFold(jsonStringPath(payload, "speed"), "fast") && modelSupportsAnthropicFastMode(modelName) {
+		tier = "fast"
+	}
 	if len(tier) > 32 {
 		return tier[:32]
 	}
 	return tier
+}
+
+func modelSupportsAnthropicFastMode(modelName string) bool {
+	name := strings.ToLower(strings.TrimSpace(modelName))
+	if !strings.Contains(name, "opus") {
+		return false
+	}
+	if strings.Contains(name, "opus-5") || strings.Contains(name, "opus5") {
+		return true
+	}
+	return strings.Contains(name, "4.8") || strings.Contains(name, "4-8")
 }
 
 func (g *Gateway) setRelayTimingHeaders(c *gin.Context, trace relayTrace) {
@@ -1326,6 +1363,13 @@ func normalizedMultiplier(v float64) float64 {
 	return v
 }
 
+func multiplierOr(v, fallback float64) float64 {
+	if v <= 0 {
+		return fallback
+	}
+	return v
+}
+
 // billingRates converts the group configuration into a request-local pricing
 // snapshot. User-level pricing remains a top-level multiplier, while a group
 // can tune cache hit, 5m creation and 1h creation independently. This avoids
@@ -1338,11 +1382,17 @@ func billingRates(user model.User, group model.Group, groupRate float64) service
 		image = userRate * normalizedMultiplier(group.ImageRateMultiplier)
 	}
 	return service.RatePlan{
-		Base:         base,
-		CacheRead:    base * normalizedMultiplier(group.CacheReadMultiplier),
-		CacheWrite5m: base * normalizedMultiplier(group.CacheWrite5mMultiplier),
-		CacheWrite1h: base * normalizedMultiplier(group.CacheWrite1hMultiplier),
-		Image:        image,
+		Base:                 base,
+		CacheRead:            base * normalizedMultiplier(group.CacheReadMultiplier),
+		CacheWrite5m:         base * normalizedMultiplier(group.CacheWrite5mMultiplier),
+		CacheWrite1h:         base * normalizedMultiplier(group.CacheWrite1hMultiplier),
+		Image:                image,
+		Fast:                 multiplierOr(group.FastRateMultiplier, 2),
+		Flex:                 multiplierOr(group.FlexRateMultiplier, .5),
+		LongContextThreshold: group.LongContextThreshold,
+		LongContextInput:     normalizedMultiplier(group.LongContextInputMultiplier),
+		LongContextOutput:    normalizedMultiplier(group.LongContextOutputMultiplier),
+		LongContextCache:     normalizedMultiplier(group.LongContextCacheMultiplier),
 	}
 }
 
@@ -1379,7 +1429,7 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 		return g.forwardGrokOAuthChat(c, acc, req)
 	}
 
-	base := strings.TrimSuffix(acc.BaseURL, "/")
+	base := strings.TrimSuffix(accountBaseURLForRequest(acc, req.Path), "/")
 	if req.Platform == model.PlatformGrok {
 		base = grokBaseURL(base, acc.AuthType)
 	} else if base == "" {
@@ -1390,6 +1440,32 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 			base = defaultOpenAI
 		case model.PlatformGemini:
 			base = defaultGemini
+		case model.PlatformKimi:
+			if strings.Contains(req.Path, "/messages") {
+				if acc.AccountMode == model.AccountModeCoding {
+					base = "https://api.kimi.com/coding"
+				} else {
+					base = "https://api.moonshot.cn/anthropic"
+				}
+			} else if acc.AccountMode == model.AccountModeCoding {
+				base = defaultKimiCoding
+			} else {
+				base = defaultKimiPayG
+			}
+		case model.PlatformZhipu:
+			if strings.Contains(req.Path, "/messages") {
+				base = "https://open.bigmodel.cn/api/anthropic"
+			} else if acc.AccountMode == model.AccountModeCoding {
+				base = defaultZhipuCoding
+			} else {
+				base = defaultZhipuPayG
+			}
+		case model.PlatformDeepSeek:
+			if strings.Contains(req.Path, "/messages") {
+				base = "https://api.deepseek.com/anthropic"
+			} else {
+				base = defaultDeepSeek
+			}
 		}
 	}
 
@@ -1426,7 +1502,7 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 	// Copy protocol headers, never the client's credentials. Anthropic-only
 	// headers must not leak onto an OpenAI request produced by the bridge.
 	headers := []string{"Content-Type", "Accept", "x-stainless-helper"}
-	if req.Platform == model.PlatformAnthropic {
+	if req.Platform == model.PlatformAnthropic || strings.Contains(req.Path, "/messages") {
 		headers = append(headers, "anthropic-version", "anthropic-beta")
 	}
 	for _, h := range headers {
@@ -1440,7 +1516,7 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 	if req.ContentType != "" {
 		upReq.Header.Set("Content-Type", req.ContentType)
 	}
-	if req.Platform == model.PlatformAnthropic && upReq.Header.Get("anthropic-version") == "" {
+	if (req.Platform == model.PlatformAnthropic || strings.Contains(req.Path, "/messages")) && upReq.Header.Get("anthropic-version") == "" {
 		upReq.Header.Set("anthropic-version", "2023-06-01")
 	}
 
@@ -1528,15 +1604,36 @@ func (g *Gateway) applyCredential(c *gin.Context, upReq *http.Request, acc *mode
 	}
 
 	apiKey := string(acc.APIKey)
+	if strings.Contains(upReq.URL.Path, "/messages") {
+		upReq.Header.Set("x-api-key", apiKey)
+		upReq.Header.Del("Authorization")
+		return nil
+	}
 	switch platform {
 	case model.PlatformAnthropic:
 		upReq.Header.Set("x-api-key", apiKey)
-	case model.PlatformOpenAI, model.PlatformGrok:
+	case model.PlatformOpenAI, model.PlatformGrok, model.PlatformKimi, model.PlatformZhipu, model.PlatformDeepSeek:
 		upReq.Header.Set("Authorization", "Bearer "+apiKey)
 	case model.PlatformGemini:
 		upReq.Header.Set("x-goog-api-key", apiKey)
 	}
 	return nil
+}
+
+func accountBaseURLForRequest(acc *model.UpstreamAccount, path string) string {
+	if acc == nil {
+		return ""
+	}
+	if strings.Contains(path, "/messages") && strings.TrimSpace(acc.AnthropicBaseURL) != "" {
+		return acc.AnthropicBaseURL
+	}
+	if path == "/v1/responses" && strings.TrimSpace(acc.ResponsesBaseURL) != "" {
+		return acc.ResponsesBaseURL
+	}
+	if path == "/v1/chat/completions" && strings.TrimSpace(acc.ChatBaseURL) != "" {
+		return acc.ChatBaseURL
+	}
+	return acc.BaseURL
 }
 
 // grokBaseURL resolves the upstream host for a Grok account. xAI API keys hit

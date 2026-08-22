@@ -417,18 +417,20 @@ onBeforeUnmount(() => {
           <div class="ops-section-title ops-table-title"><h3>当前倍率配置</h3><RouterLink to="/admin/groups" class="ops-link">管理倍率</RouterLink></div>
           <div class="overflow-x-auto">
             <table v-responsive-table class="table-base ops-rate-table">
-              <thead><tr><th>分组</th><th>平台</th><th class="text-right">文本</th><th class="text-right">缓存读</th><th class="text-right">5m 缓存写</th><th class="text-right">1h 缓存写</th><th class="text-right">生图</th></tr></thead>
+			  <thead><tr><th>分组</th><th>平台</th><th class="text-right">文本</th><th class="text-right">缓存读</th><th class="text-right">5m 缓存写</th><th class="text-right">1h 缓存写</th><th class="text-right">服务档位</th><th class="text-right">长上下文</th><th class="text-right">生图</th></tr></thead>
               <tbody>
                 <tr v-for="profile in snapshot?.rate_profiles" :key="profile.id">
                   <td class="font-medium text-slate-200">{{ profile.name }}</td>
                   <td><span class="tag-gray provider-inline-label"><ProviderLogo :platform="profile.platform" size="sm" />{{ PLATFORM_LABELS[profile.platform] || profile.platform }}</span></td>
                   <td class="num text-right">×{{ profile.rate_multiplier }}</td>
                   <td class="num text-right">×{{ profile.cache_read_multiplier }}</td>
-                  <td class="num text-right">×{{ profile.cache_write_5m_multiplier }}</td>
-                  <td class="num text-right">×{{ profile.cache_write_1h_multiplier }}</td>
-                  <td class="num text-right">{{ profile.image_rate_independent ? `×${profile.image_rate_multiplier}` : '跟随文本' }}</td>
-                </tr>
-                <tr v-if="!snapshot?.rate_profiles.length"><td colspan="7" class="py-10 text-center text-sm text-slate-500">当前筛选下没有分组配置</td></tr>
+				  <td class="num text-right">×{{ profile.cache_write_5m_multiplier }}</td>
+				  <td class="num text-right">×{{ profile.cache_write_1h_multiplier }}</td>
+				  <td class="num text-right">Fast ×{{ profile.fast_rate_multiplier || 2 }}<small class="block text-[10px] text-slate-500">Flex ×{{ profile.flex_rate_multiplier || 0.5 }}</small></td>
+				  <td class="num text-right"><template v-if="profile.long_context_threshold">{{ profile.long_context_threshold.toLocaleString() }}<small class="block text-[10px] text-slate-500">{{ profile.long_context_input_multiplier || 1 }}/{{ profile.long_context_output_multiplier || 1 }}/{{ profile.long_context_cache_multiplier || 1 }}</small></template><template v-else>关闭</template></td>
+				  <td class="num text-right">{{ profile.image_rate_independent ? `×${profile.image_rate_multiplier}` : '跟随文本' }}</td>
+				</tr>
+				<tr v-if="!snapshot?.rate_profiles.length"><td colspan="9" class="py-10 text-center text-sm text-slate-500">当前筛选下没有分组配置</td></tr>
               </tbody>
             </table>
           </div>
