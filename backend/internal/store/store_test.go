@@ -283,6 +283,60 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 	}
 }
 
+func TestBackfillTierPricingColumnsRepairsLegacyValuesOnce(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:tier-pricing-backfill?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.Group{}, &model.UsageLog{}, &model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	group := model.Group{Name: "legacy-pricing", Platform: model.PlatformOpenAI, Status: model.StatusActive}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Group{}).Where("id = ?", group.ID).Updates(map[string]any{
+		"fast_rate_multiplier": 0, "flex_rate_multiplier": 0,
+		"long_context_threshold": -1, "long_context_input_multiplier": 0,
+		"long_context_output_multiplier": 0, "long_context_cache_multiplier": 0,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	usage := model.UsageLog{RequestID: "legacy-tier", StatusCode: 200}
+	if err := db.Create(&usage).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.UsageLog{}).Where("id = ?", usage.ID).Updates(map[string]any{
+		"service_tier_multiplier": 0, "long_context_tokens": -1, "long_context_threshold": -1,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := backfillTierPricingColumns(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&group, group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if group.FastRateMultiplier != 2 || group.FlexRateMultiplier != .5 || group.LongContextThreshold != 0 ||
+		group.LongContextInputMultiplier != 1 || group.LongContextOutputMultiplier != 1 || group.LongContextCacheMultiplier != 1 {
+		t.Fatalf("group pricing not repaired: %#v", group)
+	}
+	if err := db.First(&usage, usage.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if usage.ServiceTierMultiplier != 1 || usage.LongContextTokens != 0 || usage.LongContextThreshold != 0 {
+		t.Fatalf("usage pricing snapshot not repaired: %#v", usage)
+	}
+	var marker model.Setting
+	if err := db.Where("key = ?", tierPricingMigrationKey).First(&marker).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := backfillTierPricingColumns(db); err != nil {
+		t.Fatalf("idempotent second run failed: %v", err)
+	}
+}
+
 func openModelConfigTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})

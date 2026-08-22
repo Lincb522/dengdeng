@@ -63,6 +63,9 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if err := backfillTierPricingColumns(db); err != nil {
+		return nil, fmt.Errorf("backfill tier pricing columns: %w", err)
+	}
 	// Older SQLite schemas created an invalid FK from proxy_id=0 to proxies.id.
 	// The zero value intentionally means "default egress", so remove that
 	// legacy constraint before enforcing the remaining foreign keys.
@@ -149,6 +152,48 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("backfill ops errors: %w", err)
 	}
 	return db, nil
+}
+
+const tierPricingMigrationKey = "migration.tier_pricing_v1"
+
+// backfillTierPricingColumns deliberately rewrites every pre-migration row
+// once. SQLite can expose an ALTER TABLE default to SELECT while the physical
+// record still lacks the new NOT NULL value; PRAGMA integrity_check then
+// reports a NULL even though `WHERE column IS NULL` matches nothing. A global
+// COALESCE/CASE update materializes the columns and also keeps PostgreSQL
+// upgrades deterministic. The marker avoids revisiting a potentially large
+// usage ledger on later starts.
+func backfillTierPricingColumns(db *gorm.DB) error {
+	var marker model.Setting
+	if err := db.Where("key = ?", tierPricingMigrationKey).First(&marker).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		global := tx.Session(&gorm.Session{AllowGlobalUpdate: true})
+		if err := global.Model(&model.Group{}).Updates(map[string]any{
+			"fast_rate_multiplier":           gorm.Expr("CASE WHEN fast_rate_multiplier IS NULL OR fast_rate_multiplier <= 0 THEN 2 ELSE fast_rate_multiplier END"),
+			"flex_rate_multiplier":           gorm.Expr("CASE WHEN flex_rate_multiplier IS NULL OR flex_rate_multiplier <= 0 THEN 0.5 ELSE flex_rate_multiplier END"),
+			"long_context_threshold":         gorm.Expr("CASE WHEN long_context_threshold IS NULL OR long_context_threshold < 0 THEN 0 ELSE long_context_threshold END"),
+			"long_context_input_multiplier":  gorm.Expr("CASE WHEN long_context_input_multiplier IS NULL OR long_context_input_multiplier <= 0 THEN 1 ELSE long_context_input_multiplier END"),
+			"long_context_output_multiplier": gorm.Expr("CASE WHEN long_context_output_multiplier IS NULL OR long_context_output_multiplier <= 0 THEN 1 ELSE long_context_output_multiplier END"),
+			"long_context_cache_multiplier":  gorm.Expr("CASE WHEN long_context_cache_multiplier IS NULL OR long_context_cache_multiplier <= 0 THEN 1 ELSE long_context_cache_multiplier END"),
+		}).Error; err != nil {
+			return err
+		}
+		if err := global.Model(&model.UsageLog{}).Updates(map[string]any{
+			"service_tier_multiplier": gorm.Expr("CASE WHEN service_tier_multiplier IS NULL OR service_tier_multiplier <= 0 THEN 1 ELSE service_tier_multiplier END"),
+			"long_context_applied":    gorm.Expr("COALESCE(long_context_applied, false)"),
+			"long_context_tokens":     gorm.Expr("CASE WHEN long_context_tokens IS NULL OR long_context_tokens < 0 THEN 0 ELSE long_context_tokens END"),
+			"long_context_threshold":  gorm.Expr("CASE WHEN long_context_threshold IS NULL OR long_context_threshold < 0 THEN 0 ELSE long_context_threshold END"),
+		}).Error; err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.Setting{
+			Key: tierPricingMigrationKey, Value: time.Now().UTC().Format(time.RFC3339),
+		}).Error
+	})
 }
 
 func dropLegacySQLiteProxyConstraint(db *gorm.DB, cfg *config.Config) error {
