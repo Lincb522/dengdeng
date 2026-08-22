@@ -15,7 +15,7 @@ const form = ref({
   role: 'user',
   rate_multiplier: 1,
 	concurrency: 0,
-  add_balance_usd: 0,
+	set_balance_usd: 0,
   password: '',
   note: '',
 })
@@ -33,7 +33,7 @@ onMounted(load)
 
 async function openEdit(u: User) {
   editing.value = u
-  form.value = { status: u.status, role: u.role, rate_multiplier: u.rate_multiplier, concurrency: u.concurrency || 0, add_balance_usd: 0, password: '', note: u.note || '' }
+  form.value = { status: u.status, role: u.role, rate_multiplier: u.rate_multiplier, concurrency: u.concurrency || 0, set_balance_usd: Number((u.balance_micro / 1_000_000).toFixed(6)), password: '', note: u.note || '' }
 	groupRates.value = {}
 	try {
 		const rates = await api.get<UserGroupRate[]>(`/api/admin/users/${u.id}/group-rates`)
@@ -75,9 +75,7 @@ async function save() {
 		concurrency: Math.max(0, Math.floor(Number(form.value.concurrency) || 0)),
     note: form.value.note,
   }
-  if (form.value.add_balance_usd) {
-    body.add_balance_micro = Math.round(Number(form.value.add_balance_usd) * 1_000_000)
-  }
+  body.set_balance_micro = Math.round(Math.max(0, Number(form.value.set_balance_usd) || 0) * 1_000_000)
   if (form.value.password) body.password = form.value.password
 	const rates = Object.entries(groupRates.value)
 		.map(([groupID, rateMultiplier]) => ({ group_id: Number(groupID), rate_multiplier: Number(rateMultiplier) }))
@@ -176,8 +174,9 @@ async function save() {
                 <input v-model.number="form.rate_multiplier" type="number" step="0.1" min="0.1" class="input" />
               </div>
               <div>
-                <label class="label">调整余额 (USD, 可负)</label>
-                <input v-model.number="form.add_balance_usd" type="number" step="0.01" class="input" placeholder="+10 或 -5" />
+                <label class="label">当前余额（USD）</label>
+                <input v-model.number="form.set_balance_usd" type="number" min="0" step="0.01" class="input" />
+                <p class="mt-1 text-xs text-slate-500">保存后余额会直接设置为此金额。</p>
               </div>
             </div>
             <div>

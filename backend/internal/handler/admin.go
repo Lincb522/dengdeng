@@ -173,6 +173,7 @@ type adminUpdateUserReq struct {
 	Role           *string  `json:"role"`
 	RateMultiplier *float64 `json:"rate_multiplier"`
 	Concurrency    *int     `json:"concurrency"`
+	SetBalance     *int64   `json:"set_balance_micro"`
 	AddBalance     *int64   `json:"add_balance_micro"`
 	Password       *string  `json:"password"`
 	Note           *string  `json:"note"`
@@ -230,16 +231,28 @@ func (h *AdminHandler) UpdateUser(c *gin.Context) {
 			revoke = true
 		}
 	}
-	if req.AddBalance != nil && *req.AddBalance != 0 {
+	if req.SetBalance != nil {
+		if *req.SetBalance < 0 || *req.SetBalance > 1_000_000_000_000 {
+			util.Fail(c, http.StatusBadRequest, "user balance must be between 0 and 1000000 USD")
+			return
+		}
+		updates["balance_micro"] = *req.SetBalance
+	} else if req.AddBalance != nil && *req.AddBalance != 0 {
 		updates["balance_micro"] = gorm.Expr("balance_micro + ?", *req.AddBalance)
 	}
 	if revoke {
 		updates["token_version"] = gorm.Expr("token_version + 1")
 	}
 	if len(updates) > 0 {
-		h.db.Model(&user).Updates(updates)
+		if err := h.db.Model(&user).Updates(updates).Error; err != nil {
+			util.Fail(c, http.StatusInternalServerError, "update user failed")
+			return
+		}
 	}
-	h.db.First(&user, user.ID)
+	if err := h.db.First(&user, user.ID).Error; err != nil {
+		util.Fail(c, http.StatusInternalServerError, "reload user failed")
+		return
+	}
 	util.OK(c, user)
 }
 

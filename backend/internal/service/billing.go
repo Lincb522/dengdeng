@@ -68,17 +68,18 @@ type BillContext struct {
 }
 
 // EstimateMaximum reserves a conservative upper bound before a request starts.
-// Counting every request byte as an input token intentionally overestimates
-// UTF-8/JSON prompts; the margin also covers cache-write premiums.
+// Request JSON is not tokenized yet, so approximate tokens from UTF-8 bytes.
+// Treating every byte as a token made large CLI context requests reserve 3–4x
+// their plausible cost and reject users who still had usable balance.
 func (s *BillingService) EstimateMaximum(modelName string, bodyBytes int, maxOutputTokens, imageCount int64, rates RatePlan) int64 {
 	if imageCount > 0 {
 		estimate := s.pricing.Cost(modelName, Usage{ImageCount: imageCount}, rates)
 		return estimate + estimate/10
 	}
 	if maxOutputTokens <= 0 {
-		maxOutputTokens = 8_192
+		maxOutputTokens = 4_096
 	}
-	inputTokens := int64(bodyBytes)
+	inputTokens := int64((bodyBytes + 2) / 3)
 	if inputTokens < 1 {
 		inputTokens = 1
 	}
