@@ -227,6 +227,7 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	var selected *schedulerAccountEntry
 	busy := false
 	sessionKey := schedulerSessionKey(groupID, modelName, sessionID)
+	lineageKey := schedulerSessionLineageKey(groupID, sessionID)
 	if sessionKey != "" {
 		if binding, ok := s.sessions[sessionKey]; ok && binding.expiresAt.After(now) {
 			if entry := snapshot.accounts[binding.accountID]; s.entryRoutableLocked(entry, modelName, excluded, now) {
@@ -237,6 +238,20 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 				}
 			} else {
 				delete(s.sessions, sessionKey)
+			}
+		}
+	}
+	// Model-changing child requests (notably codex-auto-review) resolve the
+	// parent conversation through a model-independent lineage binding. A failed
+	// child attempt must not delete or overwrite the parent's binding.
+	if selected == nil && lineageKey != "" {
+		if binding, ok := s.sessions[lineageKey]; ok && binding.expiresAt.After(now) {
+			if entry := snapshot.accounts[binding.accountID]; s.entryRoutableLocked(entry, modelName, excluded, now) {
+				if s.entryHasConcurrencySlot(entry) {
+					selected = entry
+				} else {
+					busy = true
+				}
 			}
 		}
 	}
@@ -275,6 +290,9 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	account.LastUsedAt = timePointer(now)
 	if sessionKey != "" {
 		s.sessions[sessionKey] = schedulerSessionBinding{accountID: account.ID, expiresAt: now.Add(s.sessionTTL)}
+	}
+	if lineageKey != "" && !strings.EqualFold(strings.TrimSpace(modelName), "codex-auto-review") {
+		s.sessions[lineageKey] = schedulerSessionBinding{accountID: account.ID, expiresAt: now.Add(s.sessionTTL)}
 	}
 	shouldPersist := now.Sub(s.lastPersisted[account.ID]) >= s.lastPersistedInterval
 	if shouldPersist {
@@ -807,6 +825,19 @@ func schedulerSessionKey(groupID int64, modelName, sessionID string) string {
 	return strings.Join([]string{
 		strconv.FormatInt(groupID, 10),
 		strings.ToLower(strings.TrimSpace(modelName)),
+		hex.EncodeToString(sum[:16]),
+	}, ":")
+}
+
+func schedulerSessionLineageKey(groupID int64, sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if groupID <= 0 || sessionID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(sessionID))
+	return strings.Join([]string{
+		"lineage",
+		strconv.FormatInt(groupID, 10),
 		hex.EncodeToString(sum[:16]),
 	}, ":")
 }

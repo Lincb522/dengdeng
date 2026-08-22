@@ -420,6 +420,45 @@ func TestSchedulerSessionAffinityKeepsConversationOnAccount(t *testing.T) {
 	}
 }
 
+func TestSchedulerGuardianChildUsesParentLineageWithoutRebindingIt(t *testing.T) {
+	db := newSchedulerTestDB(t)
+	accounts := []model.UpstreamAccount{
+		{GroupID: 1, Name: "parent", Platform: model.PlatformOpenAI, AuthType: model.AuthOAuth, Priority: 100, Status: model.StatusActive},
+		{GroupID: 1, Name: "fallback", Platform: model.PlatformOpenAI, AuthType: model.AuthOAuth, Priority: 10, Status: model.StatusActive},
+	}
+	if err := db.Create(&accounts).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	scheduler := NewScheduler(db)
+	scheduler.now = func() time.Time { return now }
+	parent, err := scheduler.PickForSession(1, "gpt-5.6-sol", "key:parent-thread", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler.Release(parent.ID)
+	now = now.Add(time.Second)
+	child, err := scheduler.PickForSession(1, "codex-auto-review", "key:parent-thread", nil)
+	if err != nil || child.ID != parent.ID {
+		t.Fatalf("guardian child = %#v, %v; want parent account %d", child, err, parent.ID)
+	}
+	scheduler.Release(child.ID)
+
+	// Excluding the parent for this attempt may use another account, but must
+	// not destroy the parent binding for the next parent turn.
+	now = now.Add(time.Second)
+	fallback, err := scheduler.PickForSession(1, "codex-auto-review", "key:parent-thread", []int64{parent.ID})
+	if err != nil || fallback.ID == parent.ID {
+		t.Fatalf("guardian fallback = %#v, %v", fallback, err)
+	}
+	scheduler.Release(fallback.ID)
+	now = now.Add(time.Second)
+	bound, err := scheduler.PickForSession(1, "gpt-5.6-sol", "key:parent-thread", nil)
+	if err != nil || bound.ID != parent.ID {
+		t.Fatalf("parent binding changed after child fallback: %#v, %v", bound, err)
+	}
+}
+
 func TestSchedulerModelFailureDoesNotBlockOtherModels(t *testing.T) {
 	db := newSchedulerTestDB(t)
 	account := model.UpstreamAccount{GroupID: 1, Name: "one", Platform: model.PlatformOpenAI, AuthType: model.AuthAPIKey, Priority: 10, Status: model.StatusActive}

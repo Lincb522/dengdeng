@@ -51,3 +51,23 @@ func TestRelaySessionIDDoesNotDeriveFromPrompt(t *testing.T) {
 		t.Fatalf("session id = %q", got)
 	}
 }
+
+func TestRelayRoutingSessionIDUsesVerifiedGuardianParent(t *testing.T) {
+	context := relaySessionTestContext("x-codex-parent-thread-id", "parent-thread")
+	context.Request.Header.Set("x-openai-subagent", "guardian")
+	got := relayRoutingSessionID(context, 9, "codex-auto-review", []byte(`{"session_id":"child-thread"}`))
+	if got != "9:parent-thread" {
+		t.Fatalf("routing session = %q", got)
+	}
+}
+
+func TestRelayRoutingSessionIDRejectsConflictingGuardianLineage(t *testing.T) {
+	context := relaySessionTestContext("X-Session-ID", "child-thread")
+	context.Request.Header.Set("x-openai-subagent", "guardian")
+	context.Request.Header.Set("x-codex-parent-thread-id", "parent-a")
+	context.Request.Header.Set("x-codex-turn-metadata", `{"parent_thread_id":"parent-b","subagent_kind":"guardian"}`)
+	got := relayRoutingSessionID(context, 9, "codex-auto-review", nil)
+	if got != "9:child-thread" {
+		t.Fatalf("conflicting lineage did not fall back: %q", got)
+	}
+}

@@ -752,6 +752,74 @@ func relaySessionID(c *gin.Context, apiKeyID int64, body []byte) string {
 	return ""
 }
 
+// relayRoutingSessionID keeps Codex Guardian/Auto Review child requests on the
+// account already selected for their parent thread. The client only supplies a
+// parent thread identifier; it can never select an account directly. Conflicting
+// lineage metadata fails closed to the child's ordinary session routing.
+func relayRoutingSessionID(c *gin.Context, apiKeyID int64, modelName string, body []byte) string {
+	current := relaySessionID(c, apiKeyID, body)
+	if c == nil || !strings.EqualFold(strings.TrimSpace(modelName), "codex-auto-review") {
+		return current
+	}
+	metadata := strings.TrimSpace(c.GetHeader("x-codex-turn-metadata"))
+	bodyMetadata := ""
+	if payload := peekJSON(body); payload != nil {
+		var clientMetadata map[string]json.RawMessage
+		if raw := payload["client_metadata"]; len(raw) > 0 && json.Unmarshal(raw, &clientMetadata) == nil {
+			bodyMetadata = jsonString(clientMetadata["x-codex-turn-metadata"])
+		}
+	}
+	subagent := ""
+	for _, candidate := range []string{
+		c.GetHeader("x-openai-subagent"),
+		jsonMetadataString(metadata, "subagent_kind"),
+		jsonMetadataString(bodyMetadata, "subagent_kind"),
+	} {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if subagent != "" && subagent != candidate {
+			return current
+		}
+		subagent = candidate
+	}
+	if subagent != "guardian" && subagent != "review" {
+		return current
+	}
+	parentID := ""
+	for _, candidate := range []string{
+		c.GetHeader("x-codex-parent-thread-id"),
+		jsonMetadataString(metadata, "parent_thread_id"),
+		jsonMetadataString(bodyMetadata, "parent_thread_id"),
+	} {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if parentID != "" && parentID != candidate {
+			return current
+		}
+		parentID = candidate
+	}
+	if parentID == "" {
+		return current
+	}
+	return strconv.FormatInt(apiKeyID, 10) + ":" + parentID
+}
+
+func jsonMetadataString(raw, key string) string {
+	if strings.TrimSpace(raw) == "" || key == "" {
+		return ""
+	}
+	var metadata map[string]any
+	if json.Unmarshal([]byte(raw), &metadata) != nil {
+		return ""
+	}
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
+}
+
 func jsonStringPath(root map[string]any, path ...string) string {
 	var current any = root
 	for _, key := range path {
@@ -974,7 +1042,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	var lastStatus int
 	var lastBody []byte
 	lastAttemptGroup := routeGroup
-	sessionID := relaySessionID(c, ak.Key.ID, req.Body)
+	sessionID := relayRoutingSessionID(c, ak.Key.ID, req.Model, req.Body)
 	req.SessionID = sessionID
 	groupIndex := 0
 	unavailableGroups := make(map[int64]struct{}, len(routeGroups))
@@ -1067,6 +1135,20 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			}
 			continue
 		}
+		resp, err = preflightSuccessfulResponse(resp)
+		if err != nil {
+			g.scheduler.Release(acc.ID)
+			if c.Request.Context().Err() != nil {
+				return
+			}
+			log.Printf("[gateway] account %d response preflight error: %v", acc.ID, err)
+			g.scheduler.ReportFailureForModel(acc.ID, req.Model, http.StatusBadGateway, err.Error())
+			lastStatus, lastBody = http.StatusBadGateway, []byte(`{"error":{"message":"upstream response read failed"}}`)
+			if len(routeGroups) > 1 {
+				advanceGroup(false)
+			}
+			continue
+		}
 		g.observeAccountQuota(acc, resp.Header)
 
 		if resp.StatusCode >= 400 {
@@ -1074,8 +1156,13 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 			resp.Body.Close()
 			g.scheduler.Release(acc.ID)
 			lastStatus, lastBody = resp.StatusCode, body
-			if retryableUpstream(resp.StatusCode, body) {
-				g.scheduler.ReportFailureForModel(acc.ID, req.Model, resp.StatusCode, string(body))
+			decision := classifyUpstreamFailure(resp.StatusCode, body)
+			if decision.Retry {
+				if decision.Scope == failureAccount {
+					g.scheduler.ReportFailure(acc.ID, resp.StatusCode, string(body))
+				} else {
+					g.scheduler.ReportFailureForModel(acc.ID, req.Model, resp.StatusCode, string(body))
+				}
 				if len(routeGroups) > 1 {
 					advanceGroup(false)
 				}
@@ -1270,37 +1357,7 @@ func failInsufficientQuota(c *gin.Context, message string) {
 }
 
 func retryableUpstream(status int, body []byte) bool {
-	switch {
-	case status == http.StatusUnauthorized,
-		status == http.StatusPaymentRequired,
-		status == http.StatusForbidden,
-		status == http.StatusNotFound,
-		status == http.StatusMethodNotAllowed,
-		status == http.StatusRequestTimeout,
-		status == http.StatusConflict,
-		status == http.StatusRequestEntityTooLarge,
-		status == http.StatusTooEarly,
-		status == http.StatusTooManyRequests,
-		status >= http.StatusInternalServerError:
-		return true
-	case status != http.StatusBadRequest && status != http.StatusUnprocessableEntity:
-		return false
-	}
-	// A generic malformed client request should be returned immediately. Only
-	// retry 400/422 responses that identify an account/model capability mismatch.
-	message := strings.ToLower(string(body))
-	for _, marker := range []string{
-		"model_not_found", "unsupported model", "model is not supported",
-		"model not supported", "model is not available", "model unavailable",
-		"not supported when using codex", "does not support image",
-		"does not support this model", "unsupported endpoint",
-		"capability is not available", "capability not supported",
-	} {
-		if strings.Contains(message, marker) {
-			return true
-		}
-	}
-	return false
+	return classifyUpstreamFailure(status, body).Retry
 }
 
 // forward builds and executes the upstream request for one account.
