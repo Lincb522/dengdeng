@@ -240,31 +240,46 @@ func TestSeedDefaultModelConfigsBackfillsMissingLimits(t *testing.T) {
 
 func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 	expected := map[string][2]int64{
-		"gpt-5.6":                    {1_050_000, 128_000},
-		"gpt-5.6-sol":                {1_050_000, 128_000},
-		"gpt-5.6-terra":              {1_050_000, 128_000},
-		"gpt-5.6-luna":               {1_050_000, 128_000},
-		"gpt-5.5":                    {1_050_000, 128_000},
-		"gpt-5.5-pro":                {1_050_000, 128_000},
-		"gpt-image-2":                {0, 0},
-		"claude-fable-5":             {1_000_000, 128_000},
-		"claude-opus-5":              {1_000_000, 128_000},
-		"claude-opus-4-8":            {1_000_000, 128_000},
-		"claude-opus-4-7":            {1_000_000, 128_000},
-		"claude-opus-4-6":            {1_000_000, 128_000},
-		"claude-opus-4-5-20251101":   {200_000, 64_000},
-		"claude-sonnet-5":            {1_000_000, 128_000},
-		"claude-sonnet-4-6":          {1_000_000, 64_000},
-		"claude-sonnet-4-5-20250929": {200_000, 64_000},
-		"claude-haiku-4-5-20251001":  {200_000, 64_000},
-		"claude-mythos-5":            {1_000_000, 128_000},
-		"claude-mythos-preview":      {1_000_000, 128_000},
-		"gemini-2.5-flash-image":     {65_536, 32_768},
-		"gemini-3-pro-image":         {65_536, 32_768},
-		"grok-4.5":                   {500_000, 0},
-		"grok-4.3":                   {1_000_000, 0},
-		"grok-composer-2.5-fast":     {256_000, 0},
-		"grok-imagine-image":         {1_024, 0},
+		"gpt-5.6":                      {1_050_000, 128_000},
+		"gpt-5.6-sol":                  {1_050_000, 128_000},
+		"gpt-5.6-terra":                {1_050_000, 128_000},
+		"gpt-5.6-luna":                 {1_050_000, 128_000},
+		"gpt-5.5":                      {1_050_000, 128_000},
+		"gpt-5.5-pro":                  {1_050_000, 128_000},
+		"gpt-image-2":                  {0, 0},
+		"claude-fable-5":               {1_000_000, 128_000},
+		"claude-opus-5":                {1_000_000, 128_000},
+		"claude-opus-4-8":              {1_000_000, 128_000},
+		"claude-opus-4-7":              {1_000_000, 128_000},
+		"claude-opus-4-6":              {1_000_000, 128_000},
+		"claude-opus-4-5-20251101":     {200_000, 64_000},
+		"claude-sonnet-5":              {1_000_000, 128_000},
+		"claude-sonnet-4-6":            {1_000_000, 64_000},
+		"claude-sonnet-4-5-20250929":   {200_000, 64_000},
+		"claude-haiku-4-5-20251001":    {200_000, 64_000},
+		"claude-mythos-5":              {1_000_000, 128_000},
+		"claude-mythos-preview":        {1_000_000, 128_000},
+		"gemini-2.5-flash-image":       {65_536, 32_768},
+		"gemini-3-pro-image":           {65_536, 32_768},
+		"grok-4.5":                     {500_000, 0},
+		"grok-4.3":                     {1_000_000, 0},
+		"grok-composer-2.5-fast":       {256_000, 0},
+		"grok-imagine-image":           {1_024, 0},
+		"kimi-k3":                      {1_048_576, 1_048_576},
+		"kimi-k2.7-code":               {262_144, 262_144},
+		"kimi-k2.7-code-highspeed":     {262_144, 262_144},
+		"kimi-k2.6":                    {262_144, 262_144},
+		"glm-5.3":                      {1_000_000, 128_000},
+		"glm-5.2":                      {1_000_000, 128_000},
+		"glm-5-turbo":                  {200_000, 128_000},
+		"glm-4.7":                      {200_000, 128_000},
+		"glm-4.7-flashx":               {200_000, 128_000},
+		"glm-4.7-flash":                {200_000, 128_000},
+		"glm-5v-turbo":                 {200_000, 128_000},
+		"glm-image":                    {0, 0},
+		"deepseek-v4-flash":            {1_000_000, 384_000},
+		"deepseek-v4-pro":              {1_000_000, 384_000},
+		"deepseek-v4-flash-vision-exp": {1_000_000, 384_000},
 	}
 
 	configs := defaultModelConfigs()
@@ -281,6 +296,47 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 			t.Errorf("%s limits = %d/%d, want %d/%d", cfg.Name, cfg.ContextWindow, cfg.MaxOutputTokens, want[0], want[1])
 		}
 	}
+}
+
+func TestDefaultDomesticModelPricesAreCompleteAndUnique(t *testing.T) {
+	prices := defaultDomesticModelPrices()
+	wantPlatforms := map[string]int{
+		model.PlatformKimi: 4, model.PlatformZhipu: 8, model.PlatformDeepSeek: 3,
+	}
+	seen := make(map[string]bool, len(prices))
+	for _, price := range prices {
+		if price.Match == "" {
+			t.Fatal("domestic model price has an empty match")
+		}
+		if seen[price.Match] {
+			t.Fatalf("duplicate domestic model price %q", price.Match)
+		}
+		seen[price.Match] = true
+		wantPlatforms[price.Platform]--
+	}
+	for platform, remaining := range wantPlatforms {
+		if remaining != 0 {
+			t.Errorf("platform %s model price count differs by %d", platform, remaining)
+		}
+	}
+	if got := findDefaultPrice(prices, "kimi-k3"); got == nil || got.InputPrice != 3 || got.OutputPrice != 15 || got.CacheReadPrice != .3 {
+		t.Fatalf("unexpected Kimi K3 price: %#v", got)
+	}
+	if got := findDefaultPrice(prices, "glm-image"); got == nil || got.ImagePricePerImage != .015 {
+		t.Fatalf("unexpected GLM-Image price: %#v", got)
+	}
+	if got := findDefaultPrice(prices, "deepseek-v4-pro"); got == nil || got.InputPrice != 1.32 || got.OutputPrice != 3.96 || got.CacheReadPrice != .044 {
+		t.Fatalf("unexpected DeepSeek V4 Pro price: %#v", got)
+	}
+}
+
+func findDefaultPrice(prices []model.ModelPrice, match string) *model.ModelPrice {
+	for i := range prices {
+		if prices[i].Match == match {
+			return &prices[i]
+		}
+	}
+	return nil
 }
 
 func TestBackfillTierPricingColumnsRepairsLegacyValuesOnce(t *testing.T) {

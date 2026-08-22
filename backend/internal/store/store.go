@@ -487,6 +487,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 		// the Prices console.
 		{Match: "*", InputPrice: 1, OutputPrice: 3, CacheReadPrice: 0.1, CacheWritePrice: 1.25},
 	}
+	prices = append(prices, defaultDomesticModelPrices()...)
 	for _, price := range prices {
 		var existing model.ModelPrice
 		if err := db.Where("match = ?", price.Match).First(&existing).Error; err == gorm.ErrRecordNotFound {
@@ -499,6 +500,36 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 		return err
 	}
 	return nil
+}
+
+// defaultDomesticModelPrices contains the official pay-as-you-go list prices
+// for the domestic providers supported by the relay. DeepSeek publishes
+// time-of-day rates, while ModelPrice is intentionally deterministic, so the
+// bootstrap rule uses the peak rate to avoid under-billing. Operators can
+// still replace any seeded rule from the pricing console.
+func defaultDomesticModelPrices() []model.ModelPrice {
+	return []model.ModelPrice{
+		// Kimi international API, USD per MTok.
+		{Match: "kimi-k3", Platform: model.PlatformKimi, InputPrice: 3, OutputPrice: 15, CacheReadPrice: 0.3},
+		{Match: "kimi-k2.7-code-highspeed", Platform: model.PlatformKimi, InputPrice: 1.9, OutputPrice: 8, CacheReadPrice: 0.38},
+		{Match: "kimi-k2.7-code", Platform: model.PlatformKimi, InputPrice: 0.95, OutputPrice: 4, CacheReadPrice: 0.19},
+		{Match: "kimi-k2.6", Platform: model.PlatformKimi, InputPrice: 0.95, OutputPrice: 4, CacheReadPrice: 0.16},
+
+		// Z.AI international API, USD per MTok. Cache storage is currently free.
+		{Match: "glm-5.3", Platform: model.PlatformZhipu, InputPrice: 1.4, OutputPrice: 4.4, CacheReadPrice: 0.26},
+		{Match: "glm-5.2", Platform: model.PlatformZhipu, InputPrice: 1.4, OutputPrice: 4.4, CacheReadPrice: 0.26},
+		{Match: "glm-5-turbo", Platform: model.PlatformZhipu, InputPrice: 1.2, OutputPrice: 4, CacheReadPrice: 0.24},
+		{Match: "glm-4.7", Platform: model.PlatformZhipu, InputPrice: 0.6, OutputPrice: 2.2, CacheReadPrice: 0.11},
+		{Match: "glm-4.7-flashx", Platform: model.PlatformZhipu, InputPrice: 0.07, OutputPrice: 0.4, CacheReadPrice: 0.01},
+		{Match: "glm-4.7-flash", Platform: model.PlatformZhipu},
+		{Match: "glm-5v-turbo", Platform: model.PlatformZhipu, InputPrice: 1.2, OutputPrice: 4, CacheReadPrice: 0.24},
+		{Match: "glm-image", Platform: model.PlatformZhipu, ImagePricePerImage: 0.015},
+
+		// DeepSeek official peak rates, USD per MTok. Off-peak rates are lower.
+		{Match: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014},
+		{Match: "deepseek-v4-pro", Platform: model.PlatformDeepSeek, InputPrice: 1.32, OutputPrice: 3.96, CacheReadPrice: 0.044},
+		{Match: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014},
+	}
 }
 
 // defaultModelConfigs is the public catalogue shipped with DengDeng. Token
@@ -536,6 +567,28 @@ func defaultModelConfigs() []model.ModelConfig {
 		// grok-composer-2.5-fast is the public relay alias for grok-build-0.1.
 		{Name: "grok-composer-2.5-fast", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 256_000, Description: "xAI Grok 高速编码模型"},
 		{Name: "grok-imagine-image", Platform: model.PlatformGrok, Kind: "image", ContextWindow: 1_024, Description: "xAI Grok 图像生成模型"},
+
+		// Kimi current public models. The maximum completion size shares the
+		// context window, so these values are the provider-published upper bound.
+		{Name: "kimi-k3", Platform: model.PlatformKimi, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 1_048_576, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Kimi K3 旗舰长上下文模型"},
+		{Name: "kimi-k2.7-code", Platform: model.PlatformKimi, Kind: "chat", ContextWindow: 262_144, MaxOutputTokens: 262_144, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Kimi K2.7 Code 编码模型"},
+		{Name: "kimi-k2.7-code-highspeed", Platform: model.PlatformKimi, Kind: "chat", ContextWindow: 262_144, MaxOutputTokens: 262_144, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Kimi K2.7 Code 高速版"},
+		{Name: "kimi-k2.6", Platform: model.PlatformKimi, Kind: "chat", ContextWindow: 262_144, MaxOutputTokens: 262_144, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Kimi K2.6 通用多模态模型"},
+
+		// Zhipu / Z.AI current text, vision and image models.
+		{Name: "glm-5.3", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-5.3 旗舰模型"},
+		{Name: "glm-5.2", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-5.2 长上下文模型"},
+		{Name: "glm-5-turbo", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-5 Turbo 高速模型"},
+		{Name: "glm-4.7", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-4.7 通用模型"},
+		{Name: "glm-4.7-flashx", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-4.7 FlashX"},
+		{Name: "glm-4.7-flash", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-4.7 Flash 免费模型"},
+		{Name: "glm-5v-turbo", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-5V Turbo 多模态模型"},
+		{Name: "glm-image", Platform: model.PlatformZhipu, Kind: "image", Description: "智谱 GLM-Image 图像生成模型"},
+
+		// DeepSeek V4 current API models. Vision is opt-in via its dedicated ID.
+		{Name: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Flash"},
+		{Name: "deepseek-v4-pro", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Pro"},
+		{Name: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Flash Vision 实验版"},
 	}
 }
 

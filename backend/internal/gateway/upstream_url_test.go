@@ -94,6 +94,25 @@ func TestForwardChineseProviderProtocolURLsAndCredentials(t *testing.T) {
 	}
 }
 
+func TestAccountRequestPathForZhipuProviderBase(t *testing.T) {
+	tests := []struct {
+		name, base, path, want string
+	}{
+		{"china payg", "https://open.bigmodel.cn/api/paas/v4", "/v1/chat/completions", "/chat/completions"},
+		{"global payg", "https://api.z.ai/api/paas/v4", "/v1/chat/completions", "/chat/completions"},
+		{"china coding", "https://open.bigmodel.cn/api/coding/paas/v4", "/v1/chat/completions", "/chat/completions"},
+		{"anthropic", "https://api.z.ai/api/anthropic", "/v1/messages", "/v1/messages"},
+		{"relay", "https://relay.example/zhipu", "/v1/chat/completions", "/v1/chat/completions"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := accountRequestPathForBase(model.PlatformZhipu, test.base, test.path); got != test.want {
+				t.Fatalf("path=%q want=%q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAdaptCompositeNativeProvider(t *testing.T) {
 	req := relayRequest{Platform: model.PlatformComposite, Path: "/v1/chat/completions", Body: []byte(`{"model":"moonshot-v1"}`)}
 	got, err := (&Gateway{}).adaptCompositeRequest(req, &model.UpstreamAccount{Platform: model.PlatformKimi})

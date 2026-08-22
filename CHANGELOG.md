@@ -4,6 +4,16 @@
 
 ## 未发布
 
+### 国产模型默认配置
+
+- Kimi、智谱 GLM 与 DeepSeek 不再只有平台路由：启动时会增量补齐当前模型目录、上下文窗口、最大输出、视觉/工具/推理能力和官方参考价格。
+- Kimi 默认加入 K3、K2.7 Code、高速版与 K2.6；智谱加入 GLM-5.3、GLM-5.2、GLM-5 Turbo、GLM-4.7 系列、GLM-5V Turbo 与 GLM-Image；DeepSeek 加入 V4 Flash、V4 Pro 与 V4 Flash Vision。
+- 默认价格按美元统一进入现有计费链路；DeepSeek 采用官方峰值价作为保守默认值。升级仅创建缺失规则，不覆盖管理员已经调整过的模型与价格。
+- 上游账号新增 Kimi、智谱 GLM、Z.AI 与 DeepSeek 官方接入预设，覆盖国内/国际按量 API、Kimi Coding 和智谱 Coding；选择后会同时写入账号模式、协议和对应端点。
+- 国产平台的接入配置从高级设置移到凭据区，仍可单独修改 Chat、Anthropic 与 Responses 地址接入第三方中转；复合分组不再遮蔽所选账号平台的配置项。
+- Kimi 国际站与 Z.AI 国际站纳入官方上游识别，额度同步不会再误走第三方中转的通用用量接口。
+- 智谱 OpenAI 兼容请求会按其 `/api/paas/v4` 地址规范移除重复的入站 `/v1`，国内、国际与 Coding 预设不再拼出无效的 `/v4/v1/chat/completions`。
+
 ### 多平台上游与协议适配
 
 - 新增 Kimi、智谱 GLM、DeepSeek 与复合平台账号，付费 API 和 Coding 账号可分别配置；复合分组可以把同一密钥路由到不同平台的兼容账号。

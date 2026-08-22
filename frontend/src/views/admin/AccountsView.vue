@@ -143,9 +143,10 @@ const groupsForSelectedPlatform = computed(() => groups.value.filter((group) => 
 const accountOptionsByPlatform = computed(() => (['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite'] as AccountPlatform[])
   .map((platform) => ({ platform, accounts: accountOptions.value.filter((account) => account.platform === platform) }))
   .filter((section) => section.accounts.length > 0))
-const platformOfSelectedGroup = computed<AccountPlatform>(
-  () => groups.value.find((g) => g.id === form.value.group_id)?.platform ?? selectedPlatform.value,
-)
+const platformOfSelectedGroup = computed<AccountPlatform>(() => {
+  const groupPlatform = groups.value.find((group) => group.id === form.value.group_id)?.platform
+  return groupPlatform && groupPlatform !== 'composite' ? groupPlatform : selectedPlatform.value
+})
 // Only Claude and OpenAI have the built-in browser OAuth client. Gemini has no
 // OAuth flow, and Grok's browser authorize needs an operator-supplied xAI
 // client id, so Grok subscription accounts are added by JSON import instead.
@@ -166,6 +167,81 @@ const baseURLPlaceholder = computed(() => ({
 	zhipu: 'https://open.bigmodel.cn/api/paas/v4',
 	deepseek: 'https://api.deepseek.com',
 }[platformOfSelectedGroup.value] || '留空使用官方地址'))
+const apiKeyPlaceholder = computed(() => ({
+	kimi: '粘贴 Kimi API Key',
+	zhipu: '粘贴智谱 API Key',
+	deepseek: 'sk-…',
+}[platformOfSelectedGroup.value] || 'sk-…'))
+
+type DomesticAccountPreset = {
+	id: string
+	label: string
+	description: string
+	mode: 'payg' | 'coding'
+	protocol: 'adaptive' | 'chat_completions' | 'anthropic' | 'responses'
+	baseURL: string
+	chatBaseURL: string
+	anthropicBaseURL: string
+	responsesBaseURL: string
+}
+
+const domesticPlatforms: AccountPlatform[] = ['kimi', 'zhipu', 'deepseek']
+const isDomesticPlatform = computed(() => domesticPlatforms.includes(platformOfSelectedGroup.value))
+const domesticConnectionPresets = computed<DomesticAccountPreset[]>(() => {
+	switch (platformOfSelectedGroup.value) {
+		case 'kimi':
+			return [
+				{ id: 'kimi-cn', label: '国内按量 API', description: 'Moonshot 国内站', mode: 'payg', protocol: 'adaptive', baseURL: 'https://api.moonshot.cn/v1', chatBaseURL: 'https://api.moonshot.cn/v1', anthropicBaseURL: 'https://api.moonshot.cn/anthropic', responsesBaseURL: '' },
+				{ id: 'kimi-global', label: '国际按量 API', description: 'Moonshot 国际站', mode: 'payg', protocol: 'chat_completions', baseURL: 'https://api.moonshot.ai/v1', chatBaseURL: 'https://api.moonshot.ai/v1', anthropicBaseURL: '', responsesBaseURL: '' },
+				{ id: 'kimi-coding', label: 'Kimi Coding', description: 'Coding 套餐', mode: 'coding', protocol: 'adaptive', baseURL: 'https://api.kimi.com/coding/v1', chatBaseURL: 'https://api.kimi.com/coding/v1', anthropicBaseURL: 'https://api.kimi.com/coding', responsesBaseURL: '' },
+			]
+		case 'zhipu':
+			return [
+				{ id: 'zhipu-cn', label: '国内按量 API', description: '智谱开放平台', mode: 'payg', protocol: 'adaptive', baseURL: 'https://open.bigmodel.cn/api/paas/v4', chatBaseURL: 'https://open.bigmodel.cn/api/paas/v4', anthropicBaseURL: 'https://open.bigmodel.cn/api/anthropic', responsesBaseURL: '' },
+				{ id: 'zhipu-global', label: '国际按量 API', description: 'Z.AI 开放平台', mode: 'payg', protocol: 'adaptive', baseURL: 'https://api.z.ai/api/paas/v4', chatBaseURL: 'https://api.z.ai/api/paas/v4', anthropicBaseURL: 'https://api.z.ai/api/anthropic', responsesBaseURL: '' },
+				{ id: 'zhipu-coding', label: '国内 Coding', description: '智谱 Coding 套餐', mode: 'coding', protocol: 'adaptive', baseURL: 'https://open.bigmodel.cn/api/coding/paas/v4', chatBaseURL: 'https://open.bigmodel.cn/api/coding/paas/v4', anthropicBaseURL: 'https://open.bigmodel.cn/api/anthropic', responsesBaseURL: '' },
+				{ id: 'zhipu-global-coding', label: '国际 Coding', description: 'Z.AI Coding 套餐', mode: 'coding', protocol: 'adaptive', baseURL: 'https://api.z.ai/api/coding/paas/v4', chatBaseURL: 'https://api.z.ai/api/coding/paas/v4', anthropicBaseURL: 'https://api.z.ai/api/anthropic', responsesBaseURL: '' },
+			]
+		case 'deepseek':
+			return [
+				{ id: 'deepseek-official', label: '官方按量 API', description: 'DeepSeek 开放平台', mode: 'payg', protocol: 'adaptive', baseURL: 'https://api.deepseek.com', chatBaseURL: 'https://api.deepseek.com', anthropicBaseURL: 'https://api.deepseek.com/anthropic', responsesBaseURL: 'https://api.deepseek.com' },
+			]
+		default:
+			return []
+	}
+})
+const activeDomesticPresetID = computed(() => domesticConnectionPresets.value.find((preset) => (
+	preset.mode === form.value.account_mode
+	&& preset.protocol === form.value.api_protocol
+	&& preset.baseURL === form.value.base_url
+	&& preset.chatBaseURL === form.value.chat_base_url
+	&& preset.anthropicBaseURL === form.value.anthropic_base_url
+	&& preset.responsesBaseURL === form.value.responses_base_url
+))?.id || '')
+
+function applyDomesticPreset(preset: DomesticAccountPreset) {
+	form.value.account_mode = preset.mode
+	form.value.api_protocol = preset.protocol
+	form.value.base_url = preset.baseURL
+	form.value.chat_base_url = preset.chatBaseURL
+	form.value.anthropic_base_url = preset.anthropicBaseURL
+	form.value.responses_base_url = preset.responsesBaseURL
+}
+
+function resetConnectionSettings() {
+	form.value.base_url = ''
+	form.value.api_protocol = 'adaptive'
+	form.value.account_mode = 'payg'
+	form.value.chat_base_url = ''
+	form.value.anthropic_base_url = ''
+	form.value.responses_base_url = ''
+	form.value.quota_url = ''
+}
+
+function applyDefaultDomesticPreset() {
+	const preset = domesticConnectionPresets.value[0]
+	if (preset) applyDomesticPreset(preset)
+}
 const oauthStarting = ref(false)
 const oauthCompleting = ref(false)
 const oauthAwaitingCode = ref(false)
@@ -179,13 +255,14 @@ function resetOAuthCompletion() {
 }
 
 function openCreate() {
-  const initialGroup = groups.value[0]
+  const concreteGroup = groups.value.find((group) => group.platform !== 'composite')
+  const initialGroup = concreteGroup || groups.value.find((group) => group.platform === 'composite')
   editing.value = null
   accountEntryMode.value = 'new'
   selectedExistingAccountID.value = 0
   inlineGroupOpen.value = false
   inlineGroupName.value = ''
-  selectedPlatform.value = initialGroup?.platform ?? 'openai'
+  selectedPlatform.value = concreteGroup?.platform ?? 'openai'
   form.value = {
     group_id: initialGroup?.id ?? 0,
     group_ids: initialGroup ? [initialGroup.id] : [],
@@ -197,6 +274,7 @@ function openCreate() {
   manualOAuthOpen.value = false
   advancedConnectionOpen.value = false
   resetOAuthCompletion()
+  applyDefaultDomesticPreset()
   showForm.value = true
 }
 
@@ -211,11 +289,13 @@ function openOAuthLogin() {
 
 function changeAccountPlatform() {
   if (editing.value) return
+  resetConnectionSettings()
   const firstGroup = groupsForSelectedPlatform.value[0]
   form.value.group_id = firstGroup?.id ?? 0
   form.value.group_ids = firstGroup ? [firstGroup.id] : []
   if (!oauthAvailable.value && form.value.auth_type === 'oauth') form.value.auth_type = 'api_key'
   if (!agentIdentityAvailable.value && form.value.auth_type === 'agent_identity') form.value.auth_type = 'api_key'
+  applyDefaultDomesticPreset()
   resetOAuthCompletion()
 }
 
@@ -224,7 +304,9 @@ function openEdit(a: UpstreamAccount) {
   accountEntryMode.value = 'new'
   inlineGroupOpen.value = false
   inlineGroupName.value = ''
-  selectedPlatform.value = (groups.value.find((group) => group.id === a.group_id)?.platform || a.platform) as AccountPlatform
+  selectedPlatform.value = (a.platform !== 'composite'
+    ? a.platform
+    : (groups.value.find((group) => group.id === a.group_id && group.platform !== 'composite')?.platform || 'openai')) as AccountPlatform
   form.value = {
     group_id: a.group_id, group_ids: accountGroupIDs(a), name: a.name, base_url: a.base_url, api_protocol: a.api_protocol || 'adaptive', account_mode: a.account_mode || 'payg', chat_base_url: a.chat_base_url || '', anthropic_base_url: a.anthropic_base_url || '', responses_base_url: a.responses_base_url || '', quota_url: a.quota_url || '', auth_type: a.auth_type,
     api_key: '', access_token: '', refresh_token: '', account_id: a.account_id, email: a.email, proxy_id: a.proxy_id || 0,
@@ -1182,7 +1264,33 @@ async function refreshAccountQuota(account: UpstreamAccount) {
           </div>
           <small v-if="!oauthAvailable" class="modal-field__hint">当前平台不支持浏览器 OAuth；可使用 API Key 或从导入入口添加订阅凭据。</small>
 
-          <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">API Key {{ editing ? '（留空保持不变）' : '' }}</span><input v-model="form.api_key" class="input font-mono" autocomplete="off" placeholder="sk-..." /></label>
+          <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">API Key {{ editing ? '（留空保持不变）' : '' }}</span><input v-model="form.api_key" class="input font-mono" autocomplete="off" :placeholder="apiKeyPlaceholder" /></label>
+
+          <div v-if="form.auth_type === 'api_key' && isDomesticPlatform" class="domestic-account-setup">
+            <div class="domestic-account-setup__head">
+              <span><ProviderLogo :platform="platformOfSelectedGroup" size="md" /><strong>上游接入</strong></span>
+              <small>{{ activeDomesticPresetID ? '已套用官方配置' : '自定义配置' }}</small>
+            </div>
+            <div class="domestic-preset-list" role="group" :aria-label="`${oauthProviderLabel} 接入方式`">
+              <button v-for="preset in domesticConnectionPresets" :key="preset.id" type="button" :class="{ 'is-active': activeDomesticPresetID === preset.id }" @click="applyDomesticPreset(preset)">
+                <span><strong>{{ preset.label }}</strong><small>{{ preset.description }}</small></span>
+                <span class="domestic-preset-list__mark" aria-hidden="true">{{ activeDomesticPresetID === preset.id ? '✓' : '→' }}</span>
+              </button>
+            </div>
+            <div class="modal-grid modal-grid--two">
+              <label class="modal-field"><span class="label">账号模式</span><select v-model="form.account_mode" class="input"><option value="payg">按量 API</option><option v-if="platformOfSelectedGroup !== 'deepseek'" value="coding">Coding 套餐</option></select></label>
+              <label class="modal-field"><span class="label">API 协议</span><select v-model="form.api_protocol" class="input"><option value="adaptive">自适应</option><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option><option v-if="platformOfSelectedGroup === 'deepseek'" value="responses">Responses</option></select></label>
+            </div>
+            <label class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
+            <details class="modal-disclosure domestic-endpoint-disclosure">
+              <summary><span><strong>分协议地址</strong><small>需要接第三方中转时再修改</small></span></summary>
+              <div class="modal-disclosure__body">
+                <label class="modal-field"><span class="label">Chat Base URL</span><input v-model.trim="form.chat_base_url" class="input font-mono text-xs" /></label>
+                <label class="modal-field"><span class="label">Anthropic Base URL</span><input v-model.trim="form.anthropic_base_url" class="input font-mono text-xs" /></label>
+                <label v-if="platformOfSelectedGroup === 'deepseek'" class="modal-field"><span class="label">Responses Base URL</span><input v-model.trim="form.responses_base_url" class="input font-mono text-xs" /></label>
+              </div>
+            </details>
+          </div>
 
           <template v-else-if="form.auth_type === 'oauth'">
             <div v-if="!editing" class="oauth-primary-path">
@@ -1224,14 +1332,9 @@ async function refreshAccountQuota(account: UpstreamAccount) {
         </section>
 
         <details v-if="editing || accountEntryMode === 'new'" class="modal-disclosure" :open="advancedConnectionOpen" @toggle="advancedConnectionOpen = ($event.currentTarget as HTMLDetailsElement).open">
-          <summary><span><strong>高级连接设置</strong><small>{{ form.base_url || form.proxy_id || form.quota_url ? '已配置自定义连接' : '使用平台默认连接' }}</small></span></summary>
+          <summary><span><strong>高级连接设置</strong><small>{{ form.proxy_id || form.quota_url || (!isDomesticPlatform && form.base_url) ? '已配置代理或自定义连接' : '使用默认连接参数' }}</small></span></summary>
           <div class="modal-disclosure__body">
-            <label class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
-			<div v-if="['kimi', 'zhipu', 'deepseek'].includes(platformOfSelectedGroup)" class="modal-grid modal-grid--two">
-				<label class="modal-field"><span class="label">账号模式</span><select v-model="form.account_mode" class="input"><option value="payg">按量 API</option><option value="coding">Coding 套餐</option></select></label>
-				<label class="modal-field"><span class="label">API 协议</span><select v-model="form.api_protocol" class="input"><option value="adaptive">自适应</option><option value="chat_completions">Chat Completions</option><option value="anthropic">Anthropic Messages</option><option v-if="platformOfSelectedGroup === 'deepseek'" value="responses">Responses</option></select></label>
-			</div>
-			<details v-if="['kimi', 'zhipu', 'deepseek'].includes(platformOfSelectedGroup)" class="modal-disclosure"><summary><span><strong>分协议地址</strong><small>留空使用官方地址</small></span></summary><div class="modal-disclosure__body"><label class="modal-field"><span class="label">Chat Base URL</span><input v-model.trim="form.chat_base_url" class="input font-mono text-xs" /></label><label class="modal-field"><span class="label">Anthropic Base URL</span><input v-model.trim="form.anthropic_base_url" class="input font-mono text-xs" /></label><label v-if="platformOfSelectedGroup === 'deepseek'" class="modal-field"><span class="label">Responses Base URL</span><input v-model.trim="form.responses_base_url" class="input font-mono text-xs" /></label></div></details>
+            <label v-if="!isDomesticPlatform" class="modal-field"><span class="label">Base URL</span><input v-model.trim="form.base_url" class="input font-mono text-xs" :placeholder="baseURLPlaceholder" /></label>
             <label class="modal-field"><span class="label">单独代理</span><select v-model.number="form.proxy_id" class="input"><option :value="0">不使用（默认出口）</option><option v-for="proxy in proxies.filter((item) => item.status === 'active' || item.id === form.proxy_id)" :key="proxy.id" :value="proxy.id">{{ proxy.name }} · {{ proxy.protocol }}://{{ proxy.host }}:{{ proxy.port }}{{ proxy.status !== 'active' ? '（已停用）' : '' }}</option></select></label>
             <label v-if="form.auth_type === 'api_key'" class="modal-field"><span class="label">额度查询地址</span><input v-model.trim="form.quota_url" class="input font-mono text-xs" placeholder="留空自动识别，或填写 /v1/usage" /><small class="modal-field__hint">支持同站路径或与 Base URL 同域的完整地址。</small></label>
             <div class="modal-grid modal-grid--two"><label class="modal-field"><span class="label">优先级</span><input v-model.number="form.priority" type="number" class="input" /></label><label class="modal-field"><span class="label">并发上限</span><input v-model.number="form.concurrency" type="number" min="0" max="10000" step="1" class="input" placeholder="0 = 不限制" /></label></div>

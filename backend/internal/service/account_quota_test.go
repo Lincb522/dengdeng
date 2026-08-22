@@ -394,6 +394,28 @@ func TestResolveAPIKeyQuotaURLRequiresSameOrigin(t *testing.T) {
 	}
 }
 
+func TestAPIKeyQuotaBaseRecognizesDomesticOfficialHosts(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		baseURL  string
+		wantBase string
+	}{
+		{name: "kimi global", platform: model.PlatformKimi, baseURL: "https://api.moonshot.ai/v1", wantBase: "https://api.moonshot.ai"},
+		{name: "zhipu global", platform: model.PlatformZhipu, baseURL: "https://api.z.ai/api/paas/v4", wantBase: "https://api.z.ai/api/paas/v4"},
+		{name: "kimi coding", platform: model.PlatformKimi, baseURL: "https://api.kimi.com/coding/v1", wantBase: "https://api.kimi.com/coding"},
+		{name: "deepseek", platform: model.PlatformDeepSeek, baseURL: "https://api.deepseek.com", wantBase: "https://api.deepseek.com"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base, official, err := apiKeyQuotaBase(&model.UpstreamAccount{Platform: test.platform, BaseURL: test.baseURL})
+			if err != nil || !official || base != test.wantBase {
+				t.Fatalf("base=%q official=%v err=%v", base, official, err)
+			}
+		})
+	}
+}
+
 func TestAccountQuotaAPIKeySupportsOneAPIDashboardBilling(t *testing.T) {
 	db := newAccountQuotaTestDB(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

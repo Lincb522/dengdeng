@@ -12,6 +12,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -1490,7 +1491,7 @@ func (g *Gateway) forward(c *gin.Context, acc *model.UpstreamAccount, req relayR
 		}
 	}
 
-	target, err := util.JoinUpstreamURL(base, req.Path)
+	target, err := util.JoinUpstreamURL(base, accountRequestPathForBase(req.Platform, base, req.Path))
 	if err != nil {
 		return nil, err
 	}
@@ -1634,6 +1635,25 @@ func accountBaseURLForRequest(acc *model.UpstreamAccount, path string) string {
 		return acc.ChatBaseURL
 	}
 	return acc.BaseURL
+}
+
+// Zhipu's OpenAI-compatible endpoint already carries its own /api/paas/v4
+// version prefix. The public gateway path starts with /v1, which must not be
+// appended to that provider-specific prefix. Anthropic endpoints are left
+// untouched because their SDK base intentionally receives /v1/messages.
+func accountRequestPathForBase(platform, base, path string) string {
+	if platform != model.PlatformZhipu || !strings.HasPrefix(path, "/v1/") {
+		return path
+	}
+	parsed, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return path
+	}
+	basePath := strings.TrimRight(strings.ToLower(parsed.Path), "/")
+	if strings.HasSuffix(basePath, "/api/paas/v4") || strings.HasSuffix(basePath, "/api/coding/paas/v4") {
+		return strings.TrimPrefix(path, "/v1")
+	}
+	return path
 }
 
 // grokBaseURL resolves the upstream host for a Grok account. xAI API keys hit
