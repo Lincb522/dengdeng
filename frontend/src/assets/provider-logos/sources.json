@@ -1,0 +1,9 @@
+{
+  "fetched_at": "2026-08-22",
+  "assets": {
+    "kimi-on-light.png": "https://platform.moonshot.cn/favicon-dark.ico?v=3",
+    "kimi-on-dark.png": "https://platform.moonshot.cn/favicon-light.ico?v=3",
+    "deepseek.png": "https://www.deepseek.com/favicon.ico",
+    "glm.svg": "https://github.com/zai-org/GLM-5/blob/main/resources/logo.svg"
+  }
+}

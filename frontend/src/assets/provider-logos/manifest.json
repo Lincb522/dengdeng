@@ -1,0 +1,32 @@
+{
+  "icons": [
+    {
+      "name": "kimi",
+      "label": "Kimi",
+      "file": "official/kimi-on-light.png",
+      "dark_file": "official/kimi-on-dark.png",
+      "source": "https://platform.moonshot.cn/favicon-dark.ico?v=3",
+      "variant": "official"
+    },
+    {
+      "name": "deepseek",
+      "label": "DeepSeek",
+      "file": "official/deepseek.png",
+      "source": "https://www.deepseek.com/favicon.ico",
+      "variant": "official"
+    },
+    {
+      "name": "zhipu",
+      "label": "智谱 GLM",
+      "file": "official/glm.svg",
+      "source": "https://github.com/zai-org/GLM-5/blob/main/resources/logo.svg",
+      "variant": "official"
+    },
+    {
+      "name": "composite",
+      "label": "组合路由",
+      "file": "source/composite.svg",
+      "variant": "product-owned"
+    }
+  ]
+}

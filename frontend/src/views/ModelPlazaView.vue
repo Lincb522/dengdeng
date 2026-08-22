@@ -32,6 +32,9 @@ const counts = computed(() => ({
   anthropic: models.value.filter((model) => model.platform === 'anthropic').length,
   gemini: models.value.filter((model) => model.platform === 'gemini').length,
   grok: models.value.filter((model) => model.platform === 'grok').length,
+  kimi: models.value.filter((model) => model.platform === 'kimi').length,
+  zhipu: models.value.filter((model) => model.platform === 'zhipu').length,
+  deepseek: models.value.filter((model) => model.platform === 'deepseek').length,
 }))
 
 function pricing(value: number | undefined) {
@@ -112,6 +115,9 @@ onMounted(load)
           <button type="button" :class="{ 'is-active': platform === 'anthropic' }" @click="platform = 'anthropic'"><ProviderLogo platform="anthropic" size="sm" />Claude <b>{{ counts.anthropic }}</b></button>
           <button type="button" :class="{ 'is-active': platform === 'gemini' }" @click="platform = 'gemini'"><ProviderLogo platform="gemini" size="sm" />Gemini <b>{{ counts.gemini }}</b></button>
           <button v-if="counts.grok" type="button" :class="{ 'is-active': platform === 'grok' }" @click="platform = 'grok'"><ProviderLogo platform="grok" size="sm" />Grok <b>{{ counts.grok }}</b></button>
+          <button v-if="counts.kimi" type="button" :class="{ 'is-active': platform === 'kimi' }" @click="platform = 'kimi'"><ProviderLogo platform="kimi" size="sm" />Kimi <b>{{ counts.kimi }}</b></button>
+          <button v-if="counts.zhipu" type="button" :class="{ 'is-active': platform === 'zhipu' }" @click="platform = 'zhipu'"><ProviderLogo platform="zhipu" size="sm" />智谱 GLM <b>{{ counts.zhipu }}</b></button>
+          <button v-if="counts.deepseek" type="button" :class="{ 'is-active': platform === 'deepseek' }" @click="platform = 'deepseek'"><ProviderLogo platform="deepseek" size="sm" />DeepSeek <b>{{ counts.deepseek }}</b></button>
         </div>
         <div class="model-plaza-fields">
           <select v-model="kind" class="input model-kind-select"><option value="all">全部类型</option><option value="chat">对话模型</option><option value="image">图像模型</option></select>

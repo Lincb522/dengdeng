@@ -1,0 +1,20 @@
+{
+  "canvas": "official assets retain their original canvas; product mark uses 0 0 24 24",
+  "target_sizes": [
+    16,
+    20,
+    24,
+    48
+  ],
+  "safe_zone": "supplied by official assets",
+  "style": "official provider marks plus one filled product routing mark",
+  "motion": "static",
+  "theme_variants": {
+    "kimi": [
+      "on-light",
+      "on-dark"
+    ],
+    "deepseek": "single transparent mark",
+    "zhipu": "single official GLM mark"
+  }
+}

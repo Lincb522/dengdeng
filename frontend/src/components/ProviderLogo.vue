@@ -1,5 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import deepSeekLogo from '../assets/provider-logos/official/deepseek.png'
+import glmLogo from '../assets/provider-logos/official/glm.svg'
+import kimiOnDarkLogo from '../assets/provider-logos/official/kimi-on-dark.png'
+import kimiOnLightLogo from '../assets/provider-logos/official/kimi-on-light.png'
+import { providerBrandPaths } from './providerBrandPaths'
 
 const props = withDefaults(defineProps<{
   platform?: string
@@ -16,11 +21,18 @@ const paths: Record<string, string> = {
   anthropic: claudePath,
   claude: claudePath,
   gemini: 'M11.04 19.32Q12 21.51 12 24q0-2.49.93-4.68.96-2.19 2.58-3.81t3.81-2.55Q21.51 12 24 12q-2.49 0-4.68-.93a12.3 12.3 0 0 1-3.81-2.58 12.3 12.3 0 0 1-2.58-3.81Q12 2.49 12 0q0 2.49-.96 4.68-.93 2.19-2.55 3.81a12.3 12.3 0 0 1-3.81 2.58Q2.49 12 0 12q2.49 0 4.68.96 2.19.93 3.81 2.55t2.55 3.81',
+  ...providerBrandPaths,
 }
 
 const normalizedPlatform = computed(() => props.platform.trim().toLowerCase())
 const path = computed(() => paths[normalizedPlatform.value] || '')
 const isXAI = computed(() => normalizedPlatform.value === 'grok' || normalizedPlatform.value === 'xai')
+const officialLogos: Record<string, { light: string; dark?: string }> = {
+  kimi: { light: kimiOnLightLogo, dark: kimiOnDarkLogo },
+  zhipu: { light: glmLogo },
+  deepseek: { light: deepSeekLogo },
+}
+const officialLogo = computed(() => officialLogos[normalizedPlatform.value])
 </script>
 
 <template>
@@ -29,8 +41,12 @@ const isXAI = computed(() => normalizedPlatform.value === 'grok' || normalizedPl
     :class="[`is-${normalizedPlatform || 'unknown'}`, `is-${size}`]"
     aria-hidden="true"
   >
-    <svg v-if="path" viewBox="0 0 24 24" focusable="false">
-      <path :d="path" />
+    <template v-if="officialLogo">
+      <img :src="officialLogo.light" alt="" class="provider-logo__brand-image is-light-asset" />
+      <img v-if="officialLogo.dark" :src="officialLogo.dark" alt="" class="provider-logo__brand-image is-dark-asset" />
+    </template>
+    <svg v-else-if="path" viewBox="0 0 24 24" focusable="false">
+      <path :d="path" fill-rule="evenodd" />
     </svg>
     <span v-else-if="isXAI" class="provider-logo__xai">xAI</span>
     <span v-else class="provider-logo__fallback">{{ normalizedPlatform.slice(0, 1).toUpperCase() || '?' }}</span>

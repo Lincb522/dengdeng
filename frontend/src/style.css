@@ -4363,10 +4363,19 @@ body.has-app-modal { overflow: hidden; }
 .provider-logo.is-sm { --provider-logo-size: 1.22rem; border-radius: .36rem; }
 .provider-logo.is-lg { --provider-logo-size: 2rem; border-radius: .52rem; }
 .provider-logo svg { width: 58%; height: 58%; fill: currentColor; }
+.provider-logo__brand-image { display: block; width: 68%; height: 68%; object-fit: contain; }
+.provider-logo__brand-image.is-dark-asset { display: none; }
+.provider-logo.is-kimi .provider-logo__brand-image { width: 72%; height: 72%; border-radius: .16rem; }
+.provider-logo.is-deepseek .provider-logo__brand-image { width: 72%; height: 72%; }
+.provider-logo.is-zhipu .provider-logo__brand-image { width: 70%; height: 70%; border-radius: .18rem; }
 .provider-logo.is-openai { color: var(--ink); }
 .provider-logo.is-anthropic,
 .provider-logo.is-claude { color: #d97757; }
 .provider-logo.is-gemini { color: #6257c8; }
+.provider-logo.is-kimi { color: #171717; }
+.provider-logo.is-zhipu { color: #526ef6; }
+.provider-logo.is-deepseek { color: #5786fe; }
+.provider-logo.is-composite { color: #7657d8; }
 .provider-logo.is-grok,
 .provider-logo.is-xai { color: var(--ink); }
 .provider-logo__xai {
@@ -4439,6 +4448,12 @@ body.has-app-modal { overflow: hidden; }
 :root[data-theme='dark'] .provider-logo.is-anthropic,
 :root[data-theme='dark'] .provider-logo.is-claude { color: #f09a7f; }
 :root[data-theme='dark'] .provider-logo.is-gemini { color: #afa7ff; }
+:root[data-theme='dark'] .provider-logo.is-kimi { color: #f3f1ec; }
+:root[data-theme='dark'] .provider-logo.is-zhipu { color: #879cff; }
+:root[data-theme='dark'] .provider-logo.is-deepseek { color: #82a2ff; }
+:root[data-theme='dark'] .provider-logo.is-composite { color: #ad96ff; }
+:root[data-theme='dark'] .provider-logo.is-kimi .provider-logo__brand-image.is-light-asset { display: none; }
+:root[data-theme='dark'] .provider-logo__brand-image.is-dark-asset { display: block; }
 
 @media (max-width: 900px) {
 	.app-shell.is-product-route .dashboard-main-grid,
