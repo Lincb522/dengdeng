@@ -315,56 +315,52 @@ async function submit() {
 
 <template>
   <div class="login-shell">
-    <main class="login-frame login-frame--simple">
-      <aside class="login-visual">
-        <div class="login-visual-brand">
-          <BrandMark :size="46" />
-          <div><strong>{{ auth.siteName }}</strong></div>
+    <header class="login-topbar">
+      <div class="login-visual-brand">
+        <BrandMark :size="40" />
+        <div>
+          <strong>{{ auth.siteName }}</strong>
+          <span>蹬蹬ai</span>
         </div>
-        <div class="login-visual-stage" aria-hidden="true">
-          <div class="login-visual-wordmark"><span>DENG</span><span>DENG</span></div>
-          <span class="login-visual-node is-openai"><ProviderLogo platform="openai" size="sm" />OpenAI</span>
-          <span class="login-visual-node is-claude"><ProviderLogo platform="anthropic" size="sm" />Claude</span>
-          <span class="login-visual-node is-gemini"><ProviderLogo platform="gemini" size="sm" />Gemini</span>
-          <span class="login-visual-node is-xai"><ProviderLogo platform="grok" size="sm" />Grok</span>
-        </div>
-        <p class="login-visual-foot">API · CLI · IMAGE</p>
-      </aside>
-
-      <section class="login-panel" aria-labelledby="login-title">
-        <div class="login-panel-tools" aria-label="界面设置">
+      </div>
+      <div class="login-panel-tools" aria-label="界面设置">
           <InterfaceThemeSwitcher />
           <ThemeToggle />
+      </div>
+    </header>
+
+    <main class="login-frame login-frame--simple">
+      <section class="login-panel" aria-labelledby="login-title">
+        <div class="login-model-strip" aria-label="支持的模型平台">
+          <span class="is-openai"><ProviderLogo platform="openai" size="sm" /><strong>OpenAI</strong></span>
+          <span class="is-claude"><ProviderLogo platform="anthropic" size="sm" /><strong>Claude</strong></span>
+          <span class="is-gemini"><ProviderLogo platform="gemini" size="sm" /><strong>Gemini</strong></span>
+          <span class="is-xai"><ProviderLogo platform="grok" size="sm" /><strong>Grok</strong></span>
         </div>
-        <div class="login-brand-lockup login-brand-lockup--mobile" :aria-label="auth.siteName">
-          <BrandMark :size="42" />
-          <div>
-            <strong>{{ auth.siteName }}</strong>
+        <div class="login-panel-body">
+          <header class="login-panel-header">
+            <p>{{ mode === 'login' ? '账户登录' : mode === 'register' ? '新用户注册' : '找回账户' }}</p>
+            <h1 id="login-title">{{ mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码' }}</h1>
+          </header>
+
+          <div class="login-tabs" :class="{ 'login-tabs--single': !auth.allowRegister }" role="tablist" aria-label="账户操作">
+            <button type="button" role="tab" :aria-selected="mode === 'login' || mode === 'reset'" :class="{ 'is-active': mode === 'login' || mode === 'reset' }" @click="mode = 'login'">登录</button>
+            <button v-if="auth.allowRegister" type="button" role="tab" :aria-selected="mode === 'register'" :class="{ 'is-active': mode === 'register' }" @click="mode = 'register'">注册</button>
           </div>
-        </div>
 
-        <header class="login-panel-header">
-          <h1 id="login-title">{{ mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建账户' : '重置密码' }}</h1>
-        </header>
-
-        <div class="login-tabs" :class="{ 'login-tabs--single': !auth.allowRegister }" role="tablist" aria-label="账户操作">
-          <button type="button" role="tab" :aria-selected="mode === 'login' || mode === 'reset'" :class="{ 'is-active': mode === 'login' || mode === 'reset' }" @click="mode = 'login'">登录</button>
-          <button v-if="auth.allowRegister" type="button" role="tab" :aria-selected="mode === 'register'" :class="{ 'is-active': mode === 'register' }" @click="mode = 'register'">注册</button>
-        </div>
-
-		<div v-if="auth.oauthProviders.length && mode === 'login'" class="login-oauth-grid">
-			<button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">
+          <div v-if="auth.oauthProviders.length && mode === 'login'" class="login-oauth-grid">
+			  <button v-for="provider in auth.oauthProviders" :key="provider.id" type="button" :disabled="busy || !canContinue || !turnstileReady" @click="startOAuth(provider.id)">
               <ProviderLogo :platform="provider.id" size="sm" />
               <span>{{ provider.name }}</span>
             </button>
-		</div>
-        <div v-if="auth.oauthProviders.length && mode === 'login'" class="login-divider"><span>或使用邮箱</span></div>
+		  </div>
+          <div v-if="auth.oauthProviders.length && mode === 'login'" class="login-divider"><span>或使用邮箱</span></div>
 
-        <form class="login-form" @submit.prevent="submit">
-          <div class="login-field">
-            <label for="login-email">邮箱</label>
-            <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" />
-          </div>
+          <form class="login-form" @submit.prevent="submit">
+            <div class="login-field">
+              <label for="login-email">邮箱</label>
+              <input id="login-email" v-model="email" type="email" placeholder="you@example.com" autocomplete="email" />
+            </div>
 
 			<div v-if="(mode === 'register' && auth.registrationVerification) || mode === 'reset'" class="login-field">
             <label for="verification-code">邮箱验证码</label>
@@ -419,8 +415,9 @@ async function submit() {
               </template>
             </label>
           </div>
-			<button v-else-if="mode !== 'reset' && agreementRequired" type="button" class="login-agreement-open" @click="agreementVisible = true">查看并同意服务协议</button>
-        </form>
+			  <button v-else-if="mode !== 'reset' && agreementRequired" type="button" class="login-agreement-open" @click="agreementVisible = true">查看并同意服务协议</button>
+          </form>
+        </div>
       </section>
     </main>
 
