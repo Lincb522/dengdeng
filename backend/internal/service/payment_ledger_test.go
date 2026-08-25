@@ -90,3 +90,23 @@ func TestListLedgerReturnsFilteredStatsAndUser(t *testing.T) {
 		t.Fatalf("unexpected ledger counts/trend: summary=%+v trend=%+v", result.Summary, result.Trend)
 	}
 }
+
+func TestListLedgerDefaultsToAllTime(t *testing.T) {
+	svc, db := paymentTestService(t)
+	now := time.Now().UTC()
+	entries := []model.PaymentLedgerEntry{
+		{EventKey: "default-all:old", OrderID: 1, UserID: 1, Kind: model.PaymentLedgerIncome, Currency: "TST", AmountMinor: 60000, CreditMicro: 600_000_000, OccurredAt: now.AddDate(0, 0, -45)},
+		{EventKey: "default-all:new", OrderID: 2, UserID: 1, Kind: model.PaymentLedgerIncome, Currency: "TST", AmountMinor: 8200, CreditMicro: 82_000_000, OccurredAt: now},
+	}
+	if err := db.Create(&entries).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ListLedger(PaymentLedgerFilter{Page: 1, Size: 10, Currency: "TST"})
+	if err != nil {
+		t.Fatalf("list ledger: %v", err)
+	}
+	if result.Period != "all" || result.Summary.IncomeMinor != 68200 || result.Summary.NetMinor != 68200 {
+		t.Fatalf("default ledger should be cumulative: period=%q summary=%+v", result.Period, result.Summary)
+	}
+}

@@ -73,7 +73,10 @@ func (s *PaymentService) ListLedger(filter PaymentLedgerFilter) (PaymentLedgerPa
 	filter.Page, filter.Size = normalizeLedgerPage(filter.Page, filter.Size)
 	filter.Period = strings.ToLower(strings.TrimSpace(filter.Period))
 	if filter.Period == "" {
-		filter.Period = "30d"
+		// A cash ledger is cumulative by default. A rolling window can make the
+		// displayed balance decrease merely because an older income crossed the
+		// cutoff, even though no refund or payout happened.
+		filter.Period = "all"
 	}
 	if _, ok := ledgerPeriodStart(filter.Period); !ok {
 		return PaymentLedgerPage{}, errors.New("unknown ledger period")

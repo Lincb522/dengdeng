@@ -26,7 +26,7 @@ const emptyLedger: PaymentLedgerPage = {
   total: 0,
   page: 1,
   size: 20,
-  period: '30d',
+  period: 'all',
   summary: { currency: 'CNY', income_minor: 0, expense_minor: 0, net_minor: 0, income_credit_micro: 0, expense_credit_micro: 0, income_count: 0, expense_count: 0 },
   trend: [],
   currencies: [],
@@ -38,7 +38,7 @@ const config = ref<PaymentConfig>({ ...defaults })
 const providers = ref<PaymentProvider[]>([])
 const orders = ref<PaymentOrder[]>([])
 const ledger = ref<PaymentLedgerPage>({ ...emptyLedger, summary: { ...emptyLedger.summary } })
-const ledgerFilters = ref({ period: '30d', kind: '', currency: 'CNY', provider: '', user: '', page: 1, size: 20 })
+const ledgerFilters = ref({ period: 'all', kind: '', currency: 'CNY', provider: '', user: '', page: 1, size: 20 })
 const configBusy = ref(false)
 const ledgerBusy = ref(false)
 const formOpen = ref(false)
@@ -55,6 +55,7 @@ const providerGuide = computed(() => ({
 } as Record<string, string>)[providerForm.value.provider_key] || '')
 
 const periodLabel = computed(() => ({ '7d': '近 7 天', '30d': '近 30 天', '90d': '近 90 天', all: '全部时间' } as Record<string, string>)[ledgerFilters.value.period])
+const netLabel = computed(() => ledgerFilters.value.period === 'all' ? '累计净收入' : `${periodLabel.value}净收入（滚动）`)
 const trendRows = computed(() => ledger.value.trend.slice(-14))
 const trendMax = computed(() => Math.max(1, ...trendRows.value.flatMap(item => [item.income_minor, item.expense_minor])))
 
@@ -204,7 +205,7 @@ onMounted(load)
     <template v-if="activeTab === 'overview'">
       <section class="payment-cashflow">
         <div class="payment-net">
-          <span>{{ periodLabel }}净收入</span>
+          <span>{{ netLabel }}</span>
           <strong>{{ money(ledger.summary.net_minor, ledger.summary.currency) }}</strong>
           <small>{{ ledger.summary.income_count }} 笔收入 · {{ ledger.summary.expense_count }} 笔支出</small>
         </div>
@@ -220,7 +221,7 @@ onMounted(load)
         <div class="payment-section-head">
           <div><h3>每日收支</h3><p>仅展示最近 14 个有流水的日期，金额为实际支付币种。</p></div>
           <div class="payment-period">
-            <button v-for="item in [['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天'], ['all', '全部']]" :key="item[0]" :class="{ 'is-active': ledgerFilters.period === item[0] }" @click="ledgerFilters.period = item[0]; applyLedgerFilters()">{{ item[1] }}</button>
+            <button v-for="item in [['all', '累计'], ['7d', '7 天'], ['30d', '30 天'], ['90d', '90 天']]" :key="item[0]" :class="{ 'is-active': ledgerFilters.period === item[0] }" @click="ledgerFilters.period = item[0]; applyLedgerFilters()">{{ item[1] }}</button>
           </div>
         </div>
         <div v-if="trendRows.length" class="payment-trend-list">
@@ -261,10 +262,10 @@ onMounted(load)
     <section v-else-if="activeTab === 'ledger'" class="card payment-ledger">
       <div class="payment-section-head">
         <div><h3>记账本</h3><p>每次真实资金收入和支出都会生成不可重复的流水。</p></div>
-        <span class="payment-ledger-balance">净收入 {{ money(ledger.summary.net_minor, ledger.summary.currency) }}</span>
+        <span class="payment-ledger-balance">{{ netLabel }} {{ money(ledger.summary.net_minor, ledger.summary.currency) }}</span>
       </div>
       <div class="payment-ledger-filters">
-        <select v-model="ledgerFilters.period" class="input" @change="applyLedgerFilters"><option value="7d">近 7 天</option><option value="30d">近 30 天</option><option value="90d">近 90 天</option><option value="all">全部时间</option></select>
+        <select v-model="ledgerFilters.period" class="input" @change="applyLedgerFilters"><option value="all">全部时间（累计）</option><option value="7d">近 7 天（滚动）</option><option value="30d">近 30 天（滚动）</option><option value="90d">近 90 天（滚动）</option></select>
         <select v-model="ledgerFilters.currency" class="input" @change="applyLedgerFilters"><option v-for="currency in (ledger.currencies.length ? ledger.currencies : [config.currency])" :key="currency">{{ currency }}</option></select>
         <select v-model="ledgerFilters.kind" class="input" @change="applyLedgerFilters"><option value="">全部收支</option><option value="income">仅收入</option><option value="expense">仅支出</option></select>
         <select v-model="ledgerFilters.provider" class="input" @change="applyLedgerFilters"><option value="">全部渠道</option><option v-for="provider in ledger.providers" :key="provider" :value="provider">{{ provider }}</option></select>
