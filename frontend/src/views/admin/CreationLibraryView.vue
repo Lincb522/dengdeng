@@ -11,7 +11,7 @@ const saving = ref(false)
 const activeTab = ref<LibraryTab>('skills')
 const search = ref('')
 const selectedEntry = ref<CreationLibraryEntry | null>(null)
-const library = ref<CreationLibrarySettings>({ enabled: true, catalog_version: 6, capabilities: { ...defaultCapabilities }, prompts: [], rules: [], skills: [] })
+const library = ref<CreationLibrarySettings>({ enabled: true, catalog_version: 7, capabilities: { ...defaultCapabilities }, prompts: [], rules: [], skills: [] })
 const tabs: Array<{ id: LibraryTab; label: string; singular: string }> = [
 	{ id: 'skills', label: '技能', singular: 'skill' },
 	{ id: 'rules', label: '规则', singular: 'rule' },

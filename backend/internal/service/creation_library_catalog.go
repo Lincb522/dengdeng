@@ -27,7 +27,7 @@ func creationSkill(id, name, description, content, scope, category string, tags 
 }
 
 func defaultCreationSkills() []CreationLibraryEntry {
-	builtin := creationSkillSource{author: "DengDeng AI", sourceType: creationSourceBuiltin}
+	builtin := creationSkillSource{author: "DengDeng AI", sourceType: creationSourceBuiltin, license: "LGPL-3.0-only"}
 	openAI := func(path string) creationSkillSource {
 		return creationSkillSource{author: "OpenAI", sourceType: creationSourceOfficial, url: "https://github.com/openai/plugins/tree/main/" + path}
 	}
@@ -69,20 +69,20 @@ func defaultCreationSkills() []CreationLibraryEntry {
 	}
 
 	skills := []CreationLibraryEntry{
-		creationSkill("code-reviewer", "代码审查", "定位缺陷、回归与安全边界", "以高级代码审查者身份工作。按严重程度列出可复现问题，给出准确位置、影响和最小修复；把已验证缺陷与个人偏好分开。", CreationScopeChat, "开发", []string{"代码", "审查", "安全"}, builtin),
-		creationSkill("debugger", "故障诊断", "从日志和现象定位根因", "先建立时间线和已知事实，再列出相互竞争的根因假设。为每个假设设计最小、单变量验证；修复后给出能覆盖原故障的回归检查。", CreationScopeChat, "开发", []string{"排障", "日志"}, builtin),
-		creationSkill("backend-engineer", "后端工程", "接口、数据与并发", "以可观察的服务端行为为准，检查接口契约、数据一致性、并发边界、事务、重试幂等和失败恢复。修改应落在拥有该行为的边界。", CreationScopeChat, "开发", []string{"API", "数据库", "并发"}, builtin),
-		creationSkill("frontend-engineer", "前端工程", "交互、响应式与可访问性", "以真实渲染和交互为准实现前端。覆盖加载、空态、错误、键盘与移动端；避免横向溢出、裁切和仅靠颜色表达状态。", CreationScopeChat, "开发", []string{"前端", "响应式", "无障碍"}, builtin),
-		creationSkill("api-designer", "API 设计", "请求契约与兼容性", "设计或审查 API 时明确鉴权、输入、输出、错误、分页、幂等和版本边界。给出可直接调用的请求示例，并说明破坏性变更。", CreationScopeChat, "开发", []string{"API", "契约"}, builtin),
-		creationSkill("data-analyst", "数据分析", "指标、异常与可复现结论", "先确认指标口径、时间范围和样本边界，再处理缺失与异常值。展示计算方法，区分描述事实、相关性和因果推断。", CreationScopeChat, "分析", []string{"数据", "指标"}, builtin),
-		creationSkill("research-synthesizer", "资料研究", "归纳来源与分歧", "围绕明确问题整理资料。优先一手来源，记录发布日期和适用范围，比较冲突说法，并把来源事实与推断分开。", CreationScopeChat, "分析", []string{"研究", "来源"}, builtin),
-		creationSkill("technical-writer", "技术写作", "文档、说明与发布记录", "面向实际读者编写技术内容。保留准确名称、前置条件、输入输出、限制和示例；删除重复说明、套话和未经验证的宣传。", CreationScopeChat, "写作", []string{"文档", "说明"}, builtin),
-		creationSkill("translator", "专业翻译", "保留术语、语气和结构", "保持原意、语气、格式、专有名词和代码标识。优先目标语言的自然表达，不自行增加事实或删减约束；歧义处给出简短说明。", CreationScopeChat, "写作", []string{"翻译", "本地化"}, builtin),
-		creationSkill("product-planner", "产品规划", "需求、边界与验收标准", "把产品目标整理为用户行为、业务规则、状态、异常和可观察验收标准。区分必须项与备选项，不用口号替代具体行为。", CreationScopeChat, "产品", []string{"需求", "验收"}, builtin),
-		creationSkill("visual-director", "视觉导演", "构图、光线与材质", "控制主体层级、构图、光线、色彩和材质一致性。先锁定视觉重点，再移除抢占注意力且不服务主题的元素。", CreationScopeImage, "视觉", []string{"构图", "光线"}, builtin),
-		creationSkill("layout-designer", "版式设计", "网格、层级与文字可读性", "建立明确网格、对齐、层级和留白；指定文字必须完整可读，主要信息优先，装饰不得遮挡内容。", CreationScopeImage, "视觉", []string{"版式", "文字"}, builtin),
-		creationSkill("storyboard", "分镜导演", "镜头与连续性", "按镜头组织画面，明确景别、机位、运动、时长和转场，并保持角色、场景、道具与光线连续。", CreationScopeVideo, "视频", []string{"镜头", "连续性"}, builtin),
-		creationSkill("audio-director", "音频导演", "语气、节奏与声音层次", "明确发音、语气、速度、停顿和情绪变化；多层声音区分主体、环境和音乐，不让背景掩盖主要内容。", CreationScopeAudio, "音频", []string{"配音", "声音"}, builtin),
+		creationSkill("code-reviewer", "代码审查", "定位缺陷、回归与安全边界", "读取仓库约定、完整变更、调用方、数据契约和相关测试。沿入口追踪到持久化、外部副作用与错误恢复，按正确性、权限、并发、兼容性和资源生命周期检查。每项发现必须包含严重程度、准确位置、触发条件、实际影响、证据、最小修复和回归验证；区分已验证缺陷、假设与个人偏好，没有发现时说明未覆盖范围。", CreationScopeChat, "开发", []string{"代码", "审查", "安全"}, builtin),
+		creationSkill("debugger", "故障诊断", "从日志和现象定位根因", "固定环境、版本、前置状态、最短复现、预期与实际结果，建立从入口到故障点的时间线。把事实、竞争假设和未知信息分开，沿数据流寻找首次偏离，为假设执行单变量验证。根因成立后修复拥有行为的源头，删除中间兜底，并复测原路径、相邻边界和失败恢复；证据不足时只给下一条能缩小范围的观测。", CreationScopeChat, "开发", []string{"排障", "日志"}, builtin),
+		creationSkill("backend-engineer", "后端工程", "接口、数据与并发", "先从调用方、领域模型、迁移、配置和测试写出输入、身份、状态前提、输出、副作用、失败与重试契约。让业务规则和状态转换只有一个所有者，关键写入与账务保持原子；外部副作用使用幂等键、有限超时和对账。传播取消并释放资源，错误在边界稳定映射且保留根因，修改后覆盖成功、失败、并发或升级数据中的相关分区。", CreationScopeChat, "开发", []string{"API", "数据库", "并发"}, builtin),
+		creationSkill("frontend-engineer", "前端工程", "交互、响应式与可访问性", "检查现有框架、路由、状态、API 类型、设计令牌和组件，从最窄支持宽度建立用户任务和内容层级。覆盖加载、空态、错误、重试、禁用、异步取消、键盘、触控、长文本与深色模式；不得出现意外横向溢出、关键内容裁切或仅靠颜色表达状态。必须在真实页面核对关键交互、控制台、网络、桌面和移动端。", CreationScopeChat, "开发", []string{"前端", "响应式", "无障碍"}, builtin),
+		creationSkill("api-designer", "API 设计", "请求契约与兼容性", "从真实客户端任务和现有协议定义调用者、身份、资源所有权与操作。完整说明方法、路径、请求头、参数、请求体、成功与空结果、稳定错误码、分页排序、限流、缓存、幂等及流式结束；提供可直接执行的正向、边界和失败示例。检查旧客户端、默认值、未知字段和枚举扩展，明确破坏性变更、迁移期与可验证兼容行为。", CreationScopeChat, "开发", []string{"API", "契约"}, builtin),
+		creationSkill("data-analyst", "数据分析", "指标、异常与可复现结论", "先确认问题、决策用途、数据来源、粒度、主键、字段、单位、时间范围、时区、样本和缺口。检查缺失、重复、异常范围、类别基数和数据延迟，再明确指标分子、分母、去重、窗口和舍入。先做描述统计与分层比较，异常先排查口径和结构变化；交付可复现查询或脚本、样本量、不确定性与限制，区分事实、相关性、因果和假设。", CreationScopeChat, "分析", []string{"数据", "指标"}, builtin),
+		creationSkill("research-synthesizer", "资料研究", "归纳来源与分歧", "把请求整理为带地区、时间、版本和对象的明确问题，优先官方文档、法规、论文、数据集、仓库与直接公告。记录来源日期、适用范围、直接支持的主张和限制，关键事实交叉核对；比较冲突时检查版本、定义、样本和时间。按问题综合而非逐篇摘要，引用紧邻主张，并把来源事实、合理推断、分歧和未知信息分开。", CreationScopeChat, "分析", []string{"研究", "来源"}, builtin),
+		creationSkill("technical-writer", "技术写作", "文档、说明与发布记录", "明确读者、任务、载体和必须回答的问题，从当前源码、配置、接口、命令、测试与运行结果提取事实。按执行顺序写清前置条件、输入、输出、副作用、限制、失败恢复和可运行示例，逐项核对名称、版本、命令、链接和字段。删除重复、过程旁白和未经验证的宣传；危险操作说明影响与恢复，未验证内容明确标记。", CreationScopeChat, "写作", []string{"文档", "说明"}, builtin),
+		creationSkill("translator", "专业翻译", "保留术语、语气和结构", "确认源语言、目标地区、受众、文本类型、语气和术语表，识别不得改变的代码、键名、命令、URL、占位符、品牌、数字与法律限定。按完整语义单元自然翻译，保持标题、列表、表格、Markdown、HTML 和资源结构；复核否定、条件、单位、日期、链接、术语和占位符。不增删事实，影响结果的歧义单独说明。", CreationScopeChat, "写作", []string{"翻译", "本地化"}, builtin),
+		creationSkill("product-planner", "产品规划", "需求、边界与验收标准", "从用户原话、使用数据、支持记录和当前产品确认问题，写出目标用户、触发场景、当前替代、期望结果和成功指标。明确范围、非目标、依赖与不变行为，按主路径、状态、权限、数据、重复操作、失败和恢复定义规则。把要求转成可观察验收标准，覆盖正常、边界、异常和多角色差异；按影响、证据、成本、风险与依赖排序。", CreationScopeChat, "产品", []string{"需求", "验收"}, builtin),
+		creationSkill("visual-director", "视觉导演", "构图、光线与材质", "明确载体、尺寸、画幅、受众、主体、必须与不得出现的元素，用一句话锁定第一视觉重点。定义景别、视角、镜头感、前中后景、留白和动线，再指定主光方向、软硬、色温、有限色板与材质响应。系列图固定角色、产品、镜头和色彩锚点；验收主体结构、文字、边缘、反射、阴影和背景干扰。", CreationScopeImage, "视觉", []string{"构图", "光线"}, builtin),
+		creationSkill("layout-designer", "版式设计", "网格、层级与文字可读性", "收集最终文字、图片、标志、尺寸、观看距离、输出格式和平台安全区，先标记主、次、辅助信息并删除重复内容。建立列、边距、基线、对齐与有限间距级差，定义字体角色、字号、行高、字重和混排规则。针对长标题、多语言、窄宽和导出裁切重排而非整体缩小，确保指定文字完整可读且装饰不遮挡内容。", CreationScopeImage, "视觉", []string{"版式", "文字"}, builtin),
+		creationSkill("storyboard", "分镜导演", "镜头与连续性", "明确成片用途、平台、画幅、总时长、受众和核心信息，把脚本拆成单一动作、信息或情绪变化的叙事节拍。每镜写明目的、景别、机位、镜头、构图、主体与环境动作、运动、时长、声音和转场；建立角色、服装、产品、道具、空间方向与光线连续性表。检查总时长、跳轴、动作衔接、重复功能和生成难度。", CreationScopeVideo, "视频", []string{"镜头", "连续性"}, builtin),
+		creationSkill("audio-director", "音频导演", "语气、节奏与声音层次", "明确用途、平台、目标时长、受众、语言地区、播放环境和格式，标注人名、品牌、缩写、数字与术语发音。定义音色、距离、语气、速度、停顿、重音和情绪曲线，并按时间规划语音、环境、音效和音乐的进入、退出与响度层级。验收可懂度、削波、噪声、齿音、剪辑、单声道兼容、响度和交付规格。", CreationScopeAudio, "音频", []string{"配音", "声音"}, builtin),
 
 		creationSkill("frontend-app-builder", "前端应用构建", "从结构到真实页面的完整实现", "先锁定目标、信息架构、现有设计约束和关键状态，再建立少量可复用的布局与组件。实现加载、空态、错误、交互和响应式；如具备浏览器工具，必须按真实页面逐项核对并修正。", CreationScopeChat, "前端", []string{"界面", "组件", "验证"}, openAI("plugins/build-web-apps/skills/frontend-app-builder")),
 		creationSkill("frontend-testing", "前端测试与调试", "用真实交互复现并定位界面问题", "先写出可重复的操作步骤、预期结果和实际结果，再检查控制台、网络请求、DOM 与样式。每次只改变一个变量；修复后复测原路径、边界状态和移动端。", CreationScopeChat, "测试", []string{"浏览器", "调试", "回归"}, openAI("plugins/build-web-apps/skills/frontend-testing-debugging")),

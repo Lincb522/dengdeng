@@ -31,6 +31,9 @@ func TestCreationLibraryDefaultsAndPublicView(t *testing.T) {
 		if !strings.Contains(skill.InstallCommand, skill.SourceURL) {
 			t.Fatalf("skill install command does not use its source URL: %#v", skill)
 		}
+		if skill.SourceType == "builtin" && skill.License != "LGPL-3.0-only" {
+			t.Fatalf("built-in skill lacks repository license: %#v", skill)
+		}
 	}
 	for _, kind := range []string{"builtin", "official", "community"} {
 		if !sources[kind] {
@@ -109,6 +112,30 @@ func TestCreationLibraryUpgradeAddsInstallationMetadata(t *testing.T) {
 	}
 	if library.CatalogVersion != creationCatalogVersion || library.Skills[0].SourceURL == "" || library.Skills[0].InstallCommand == "" {
 		t.Fatalf("installation metadata was not restored: %#v", library.Skills[0])
+	}
+}
+
+func TestCreationLibraryUpgradeExpandsUnchangedBuiltInSkill(t *testing.T) {
+	library := defaultCreationLibrarySettings()
+	library.CatalogVersion = 6
+	library.Skills[0].Content = creationSkillContentV6[library.Skills[0].ID]
+	library.Skills[0].ContentEN = creationSkillContentENV6[library.Skills[0].ID]
+	if err := normalizeCreationLibrarySettings(&library); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if library.Skills[0].Content == creationSkillContentV6[library.Skills[0].ID] || library.Skills[0].ContentEN == creationSkillContentENV6[library.Skills[0].ID] {
+		t.Fatalf("built-in skill content was not expanded: %#v", library.Skills[0])
+	}
+
+	custom := defaultCreationLibrarySettings()
+	custom.CatalogVersion = 6
+	custom.Skills[0].Content = creationSkillContentV6[custom.Skills[0].ID]
+	custom.Skills[0].ContentEN = "site-specific English content"
+	if err := normalizeCreationLibrarySettings(&custom); err != nil {
+		t.Fatalf("custom upgrade: %v", err)
+	}
+	if custom.Skills[0].Content == creationSkillContentV6[custom.Skills[0].ID] || custom.Skills[0].ContentEN != "site-specific English content" {
+		t.Fatalf("custom skill content was overwritten: %#v", custom.Skills[0])
 	}
 }
 

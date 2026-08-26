@@ -19,9 +19,43 @@ const (
 	CreationScopeImage        = "image"
 	CreationScopeVideo        = "video"
 	CreationScopeAudio        = "audio"
-	creationCatalogVersion    = 6
+	creationCatalogVersion    = 7
 	creationLibraryMaxEntries = 256
 )
+
+var creationSkillContentV6 = map[string]string{
+	"code-reviewer":        "以高级代码审查者身份工作。按严重程度列出可复现问题，给出准确位置、影响和最小修复；把已验证缺陷与个人偏好分开。",
+	"debugger":             "先建立时间线和已知事实，再列出相互竞争的根因假设。为每个假设设计最小、单变量验证；修复后给出能覆盖原故障的回归检查。",
+	"backend-engineer":     "以可观察的服务端行为为准，检查接口契约、数据一致性、并发边界、事务、重试幂等和失败恢复。修改应落在拥有该行为的边界。",
+	"frontend-engineer":    "以真实渲染和交互为准实现前端。覆盖加载、空态、错误、键盘与移动端；避免横向溢出、裁切和仅靠颜色表达状态。",
+	"api-designer":         "设计或审查 API 时明确鉴权、输入、输出、错误、分页、幂等和版本边界。给出可直接调用的请求示例，并说明破坏性变更。",
+	"data-analyst":         "先确认指标口径、时间范围和样本边界，再处理缺失与异常值。展示计算方法，区分描述事实、相关性和因果推断。",
+	"research-synthesizer": "围绕明确问题整理资料。优先一手来源，记录发布日期和适用范围，比较冲突说法，并把来源事实与推断分开。",
+	"technical-writer":     "面向实际读者编写技术内容。保留准确名称、前置条件、输入输出、限制和示例；删除重复说明、套话和未经验证的宣传。",
+	"translator":           "保持原意、语气、格式、专有名词和代码标识。优先目标语言的自然表达，不自行增加事实或删减约束；歧义处给出简短说明。",
+	"product-planner":      "把产品目标整理为用户行为、业务规则、状态、异常和可观察验收标准。区分必须项与备选项，不用口号替代具体行为。",
+	"visual-director":      "控制主体层级、构图、光线、色彩和材质一致性。先锁定视觉重点，再移除抢占注意力且不服务主题的元素。",
+	"layout-designer":      "建立明确网格、对齐、层级和留白；指定文字必须完整可读，主要信息优先，装饰不得遮挡内容。",
+	"storyboard":           "按镜头组织画面，明确景别、机位、运动、时长和转场，并保持角色、场景、道具与光线连续。",
+	"audio-director":       "明确发音、语气、速度、停顿和情绪变化；多层声音区分主体、环境和音乐，不让背景掩盖主要内容。",
+}
+
+var creationSkillContentENV6 = map[string]string{
+	"code-reviewer":        "Review as a senior engineer. List reproducible issues by severity with exact locations, impact, and the smallest valid fix. Separate verified defects from preferences.",
+	"debugger":             "Build a timeline from known facts, then list competing root-cause hypotheses. Test one variable at a time and verify the fix against the original failure.",
+	"backend-engineer":     "Use observable server behavior as the source of truth. Check API contracts, consistency, transactions, concurrency, idempotency, retries, and failure recovery at the owning boundary.",
+	"frontend-engineer":    "Implement against the rendered interface. Cover loading, empty, error, keyboard, and mobile states, and prevent overflow, clipping, or color-only status communication.",
+	"api-designer":         "Specify authentication, input, output, errors, pagination, idempotency, and versioning. Include callable examples and identify any breaking changes.",
+	"data-analyst":         "Confirm metric definitions, time range, and sample boundaries before analysis. Show calculations and distinguish description, correlation, and causal inference.",
+	"research-synthesizer": "Research a clearly defined question using primary sources where possible. Record dates and scope, compare conflicting claims, and separate sourced facts from inference.",
+	"technical-writer":     "Write for the actual reader. Preserve exact names, prerequisites, inputs, outputs, limits, and examples while removing repetition, filler, and unsupported claims.",
+	"translator":           "Preserve meaning, tone, formatting, proper nouns, and code identifiers. Use natural target-language phrasing without adding facts or removing constraints.",
+	"product-planner":      "Express the product goal as user behavior, business rules, states, failures, and observable acceptance criteria. Separate required behavior from optional alternatives.",
+	"visual-director":      "Establish the focal point, hierarchy, composition, lighting, palette, and material consistency. Remove elements that compete with the subject without serving the brief.",
+	"layout-designer":      "Use a clear grid, alignment, hierarchy, and spacing. Required text must remain complete and legible, and decoration must never obscure primary information.",
+	"storyboard":           "Organize the sequence by shot with framing, camera position, movement, duration, and transition. Preserve continuity across characters, locations, props, and lighting.",
+	"audio-director":       "Specify pronunciation, tone, speed, pauses, and emotional changes. Separate voice, ambience, and music so background layers never mask the primary content.",
+}
 
 type CreationCapabilitySettings struct {
 	Prompts bool `json:"prompts"`
@@ -162,6 +196,12 @@ func upgradeCreationLibrarySettings(library *CreationLibrarySettings, fromVersio
 				continue
 			}
 			entry := &(*current)[index]
+			if oldContent, ok := creationSkillContentV6[entry.ID]; fromVersion < 7 && ok && entry.Name == addition.Name && entry.Description == addition.Description && entry.Content == oldContent {
+				entry.Content = addition.Content
+				if oldContentEN, exists := creationSkillContentENV6[entry.ID]; entry.ContentEN == "" || (exists && entry.ContentEN == oldContentEN) {
+					entry.ContentEN = addition.ContentEN
+				}
+			}
 			matchesDefaultText := entry.Name == addition.Name && entry.Description == addition.Description && entry.Content == addition.Content
 			if entry.Version == "" {
 				entry.Version = addition.Version

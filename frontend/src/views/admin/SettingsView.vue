@@ -139,7 +139,7 @@ function defaultSystemSettings(): SystemSettings {
 		},
 		creation_library: {
 			enabled: true,
-			catalog_version: 6,
+			catalog_version: 7,
 			capabilities: { prompts: true, rules: true, skills: true, chat: true, image: true, video: true, audio: true },
 			prompts: [], rules: [], skills: [],
 		},
