@@ -19,7 +19,7 @@ const (
 	CreationScopeImage        = "image"
 	CreationScopeVideo        = "video"
 	CreationScopeAudio        = "audio"
-	creationCatalogVersion    = 5
+	creationCatalogVersion    = 6
 	creationLibraryMaxEntries = 256
 )
 

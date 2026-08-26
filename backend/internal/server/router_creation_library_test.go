@@ -61,7 +61,7 @@ func TestCreationLibraryAdminAndUserEndpoints(t *testing.T) {
 
 	next := service.CreationLibrarySettings{
 		Enabled:        true,
-		CatalogVersion: 5,
+		CatalogVersion: 6,
 		Capabilities: service.CreationCapabilitySettings{
 			Prompts: true, Rules: true, Skills: true, Chat: true, Image: true, Video: true, Audio: true,
 		},

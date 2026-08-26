@@ -14,11 +14,15 @@ type creationSkillSource struct {
 }
 
 func creationSkill(id, name, description, content, scope, category string, tags []string, source creationSkillSource) CreationLibraryEntry {
+	sourceURL := source.url
+	if sourceURL == "" && source.sourceType == creationSourceBuiltin {
+		sourceURL = "https://github.com/Lincb522/dengdeng/tree/main/skills/" + id
+	}
 	return CreationLibraryEntry{
 		ID: id, Name: name, Description: description, Content: content,
 		Scope: scope, Enabled: true, Version: "1.0.0", Author: source.author,
 		Category: category, Tags: tags, SourceType: source.sourceType,
-		SourceURL: source.url, License: source.license,
+		SourceURL: sourceURL, InstallCommand: "npx skills add " + sourceURL + " -g -y", License: source.license,
 	}
 }
 

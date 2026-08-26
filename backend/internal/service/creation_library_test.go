@@ -25,10 +25,11 @@ func TestCreationLibraryDefaultsAndPublicView(t *testing.T) {
 		if skill.NameEN == "" || skill.DescriptionEN == "" || skill.ContentEN == "" {
 			t.Fatalf("skill lacks English text: %#v", skill)
 		}
-		if skill.SourceType == "official" || skill.SourceType == "community" {
-			if skill.SourceURL == "" || skill.Author == "" {
-				t.Fatalf("sourced skill lacks attribution: %#v", skill)
-			}
+		if skill.SourceURL == "" || skill.InstallCommand == "" || skill.Author == "" {
+			t.Fatalf("published skill lacks installation metadata: %#v", skill)
+		}
+		if !strings.Contains(skill.InstallCommand, skill.SourceURL) {
+			t.Fatalf("skill install command does not use its source URL: %#v", skill)
 		}
 	}
 	for _, kind := range []string{"builtin", "official", "community"} {
@@ -95,6 +96,19 @@ func TestCreationLibraryUpgradeAddsEnglishToUnchangedBuiltInSkill(t *testing.T) 
 	}
 	if library.Skills[0].NameEN == "" || library.Skills[0].DescriptionEN == "" || library.Skills[0].ContentEN == "" {
 		t.Fatalf("English text was not restored: %#v", library.Skills[0])
+	}
+}
+
+func TestCreationLibraryUpgradeAddsInstallationMetadata(t *testing.T) {
+	library := defaultCreationLibrarySettings()
+	library.CatalogVersion = 5
+	library.Skills[0].SourceURL = ""
+	library.Skills[0].InstallCommand = ""
+	if err := normalizeCreationLibrarySettings(&library); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if library.CatalogVersion != creationCatalogVersion || library.Skills[0].SourceURL == "" || library.Skills[0].InstallCommand == "" {
+		t.Fatalf("installation metadata was not restored: %#v", library.Skills[0])
 	}
 }
 
