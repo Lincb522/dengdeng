@@ -12,7 +12,6 @@ const ranges = [
   { value: '7d', label: '7 天' },
   { value: '15d', label: '15 天' },
 ]
-const platformOrder = ['openai', 'anthropic', 'gemini', 'grok', 'kimi', 'zhipu', 'deepseek', 'composite']
 const selectedRange = ref('1h')
 const data = ref<ChannelStatusResponse | null>(null)
 const loading = ref(true)
@@ -21,18 +20,6 @@ const error = ref('')
 let refreshTimer: ReturnType<typeof window.setInterval> | null = null
 
 const groups = computed(() => Array.isArray(data.value?.groups) ? data.value.groups : [])
-const groupedChannels = computed(() => {
-  const result = new Map<string, ChannelGroupStatus[]>()
-  for (const group of groups.value) {
-    if (!result.has(group.platform)) result.set(group.platform, [])
-    result.get(group.platform)!.push(group)
-  }
-  return [...result.entries()].sort(([left], [right]) => {
-    const leftIndex = platformOrder.indexOf(left)
-    const rightIndex = platformOrder.indexOf(right)
-    return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex) || left.localeCompare(right)
-  })
-})
 const stateCounts = computed(() => groups.value.reduce((counts, group) => {
   const key = group.state === 'expired' ? 'down' : group.state
   counts[key] = (counts[key] || 0) + 1
@@ -47,14 +34,8 @@ const overallState = computed(() => {
   if (active.some((group) => group.state === 'unknown')) return 'degraded'
   return 'healthy'
 })
-const selectedRangeLabel = computed(() => ranges.find((item) => item.value === selectedRange.value)?.label || selectedRange.value)
-
 function platformLabel(value: string) {
   return PLATFORM_LABELS[value] || value
-}
-
-function platformFamily(value: string) {
-  return ({ openai: 'GPT 系列', anthropic: 'Claude 系列', gemini: 'Gemini 系列', grok: 'Grok 系列' } as Record<string, string>)[value] || `${platformLabel(value)} 系列`
 }
 
 function stateLabel(value: string) {
@@ -187,57 +168,60 @@ onBeforeUnmount(() => {
       <span v-for="item in 5" :key="item"></span>
     </div>
 
-    <template v-else-if="groupedChannels.length">
-      <section v-for="[platform, items] in groupedChannels" :key="platform" class="channel-platform-section">
-        <header>
-          <div><ProviderLogo :platform="platform" size="sm" /><h2>{{ platformFamily(platform) }}</h2></div>
-          <span>{{ items.length }} 个分组</span>
-        </header>
-        <div class="channel-card-grid">
-          <div class="channel-list-head" aria-hidden="true">
-            <span>渠道</span><span>当前状态</span><span>{{ selectedRangeLabel }}请求</span><span>账号巡检</span><span>首字耗时</span><span>巡检记录</span>
-          </div>
-          <article v-for="group in items" :key="group.id" class="channel-card" :class="`is-${group.state}`">
-            <header class="channel-card-head">
-              <ProviderLogo class="channel-platform-mark" :platform="group.platform" size="md" />
-              <div>
-                <div><h3 :title="group.name">{{ group.name }}</h3><span v-if="data?.admin_view && !group.is_public" class="channel-private-tag">私有</span></div>
-                <p><code :title="group.top_model">{{ group.top_model || '暂无请求模型' }}</code><span v-if="group.last_request_at" :title="formatDate(group.last_request_at)">请求于 {{ formatRelative(group.last_request_at) }}</span></p>
+    <div v-else-if="groups.length" class="channel-status-board">
+      <article v-for="group in groups" :key="group.id" class="channel-status-card" :class="`is-${group.state}`">
+            <header class="channel-status-card-head">
+              <div class="channel-status-identity">
+                <ProviderLogo class="channel-platform-mark" :platform="group.platform" size="md" />
+                <div>
+                  <h3 :title="group.name">{{ group.name }}</h3>
+                  <p>
+                    <span>{{ platformLabel(group.platform) }}</span>
+                    <code :title="group.top_model">{{ group.top_model || '暂无请求模型' }}</code>
+                  </p>
+                </div>
+              </div>
+              <div class="channel-status-card-badges">
+                <span v-if="data?.admin_view && !group.is_public" class="channel-private-tag">私有</span>
+                <span class="channel-state-tag" :class="`is-${group.state}`"><i></i>{{ stateLabel(group.state) }}</span>
               </div>
             </header>
 
-            <div class="channel-current-state">
-              <span class="channel-state-tag" :class="`is-${group.state}`"><i></i>{{ stateLabel(group.state) }}</span>
-              <small>{{ stateSourceLabel(group.state_source) }} · {{ currentEvidence(group) }}</small>
+            <div class="channel-status-evidence">
+              <span>{{ stateSourceLabel(group.state_source) }}</span>
+              <strong :title="currentEvidence(group)">{{ currentEvidence(group) }}</strong>
             </div>
 
-            <div class="channel-request-rate">
-              <strong :class="rateClass(group.request_success_rate, group.request_total)">{{ formatRate(group.request_success_rate, group.request_total) }}</strong>
-              <span v-if="group.request_total">{{ group.request_successes }} / {{ group.request_total }} 次成功</span>
-              <span v-else>区间内暂无有效请求</span>
-            </div>
+            <dl class="channel-status-metrics">
+              <div>
+                <dt>请求成功</dt>
+                <dd :class="rateClass(group.request_success_rate, group.request_total)">{{ formatRate(group.request_success_rate, group.request_total) }}</dd>
+                <small>{{ group.request_total ? `${group.request_successes}/${group.request_total} 次` : '暂无请求' }}</small>
+              </div>
+              <div>
+                <dt>可用账号</dt>
+                <dd>{{ accountValue(group) }}</dd>
+                <small :title="accountDetail(group)">{{ accountDetail(group) }}</small>
+              </div>
+              <div>
+                <dt>首字耗时</dt>
+                <dd>{{ formatLatency(group.average_ttft_ms) }}</dd>
+                <small>巡检 {{ formatLatency(group.average_probe_latency_ms) }}</small>
+              </div>
+            </dl>
 
-            <div class="channel-account-state">
-              <strong>{{ accountValue(group) }}</strong>
-              <span>{{ accountDetail(group) }}</span>
-            </div>
-
-            <div class="channel-latency-state">
-              <strong>{{ formatLatency(group.average_ttft_ms) }}</strong>
-              <span>首字耗时 · 巡检 {{ formatLatency(group.average_probe_latency_ms) }}</span>
-            </div>
-
-            <div class="channel-timeline" :aria-label="`${group.name} ${data?.range || ''} 巡检记录`">
-              <div><span>过去</span><span :title="formatDate(group.last_probe_at)">最近 {{ formatRelative(group.last_probe_at) }}</span></div>
+            <footer class="channel-status-history" :aria-label="`${group.name} ${data?.range || ''} 巡检记录`">
+              <div class="channel-status-history-head">
+                <span>巡检 {{ formatRate(group.probe_success_rate, group.probe_total) }}</span>
+                <span :title="formatDate(group.last_probe_at)">最近 {{ formatRelative(group.last_probe_at) }}</span>
+              </div>
               <div class="channel-timeline-bars" aria-hidden="true">
                 <i v-for="(bucket, index) in group.timeline" :key="`${bucket.at}-${index}`" :class="`is-${bucket.state}`" :title="`${formatDate(bucket.at)} ${stateLabel(bucket.state)}`"></i>
               </div>
-              <small>{{ formatRate(group.probe_success_rate, group.probe_total) }} · {{ group.probe_successes }}/{{ group.probe_total }} 次巡检成功</small>
-            </div>
-          </article>
-        </div>
-      </section>
-    </template>
+              <small>{{ group.probe_successes }}/{{ group.probe_total }} 次巡检成功</small>
+            </footer>
+      </article>
+    </div>
 
     <div v-else-if="!error" class="channel-empty-state">暂无可见分组</div>
   </div>
@@ -276,75 +260,55 @@ onBeforeUnmount(() => {
 .channel-state-tag.is-degraded { background: var(--accent-soft); color: rgb(var(--dd-amber-dim)); }
 .channel-state-tag.is-down,
 .channel-state-tag.is-expired { background: color-mix(in srgb, var(--surface) 86%, rgb(var(--dd-signal-red))); color: rgb(var(--dd-signal-red)); }
-.channel-platform-section { display: grid; gap: .45rem; }
-.channel-platform-section > header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .15rem .2rem; }
-.channel-platform-section > header > div { display: flex; align-items: center; gap: .45rem; }
-.channel-platform-section > header h2 { font-size: .78rem; font-weight: 850; }
-.channel-platform-section > header > span { color: var(--ink-soft); font-size: .59rem; }
-.channel-card-grid { overflow: hidden; border: 1px solid var(--line); border-radius: .66rem; background: var(--surface); }
-.channel-list-head,
-.channel-card { display: grid; min-width: 0; grid-template-columns: minmax(13rem, 1.3fr) minmax(8rem, .72fr) minmax(8.5rem, .8fr) minmax(7rem, .62fr) minmax(8rem, .68fr) minmax(10rem, 1.05fr); gap: .72rem; }
-.channel-list-head { align-items: center; padding: .5rem .75rem; border-bottom: 1px solid var(--line); background: var(--surface-muted); color: var(--ink-soft); font-size: .54rem; font-weight: 760; }
-.channel-card { align-items: center; padding: .68rem .75rem; border-bottom: 1px solid var(--line); background: var(--surface); }
-.channel-card:last-child { border-bottom: 0; }
-.channel-card:hover { background: color-mix(in srgb, var(--surface-muted) 52%, var(--surface)); }
-.channel-card-head { display: flex; min-width: 0; align-items: center; gap: .55rem; }
+.channel-status-board { display: grid; min-width: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .65rem; }
+.channel-status-card { display: grid; min-width: 0; align-content: start; gap: .7rem; padding: .8rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface); transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.channel-status-card:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); background: color-mix(in srgb, var(--surface) 96%, var(--accent-soft)); }
+.channel-status-card.is-healthy { border-color: color-mix(in srgb, rgb(var(--dd-signal-green)) 24%, var(--line)); }
+.channel-status-card.is-degraded { border-color: color-mix(in srgb, rgb(var(--dd-amber-dim)) 32%, var(--line)); }
+.channel-status-card:is(.is-down, .is-expired) { border-color: color-mix(in srgb, rgb(var(--dd-signal-red)) 30%, var(--line)); }
+.channel-status-card-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: .65rem; }
+.channel-status-identity { display: flex; min-width: 0; align-items: center; gap: .58rem; }
 .channel-platform-mark { flex: 0 0 auto; }
-.channel-card-head > div { display: grid; min-width: 0; flex: 1; gap: .25rem; }
-.channel-card-head > div > div { display: flex; min-width: 0; align-items: center; gap: .4rem; }
-.channel-card-head h3 { overflow: hidden; font-size: .71rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-.channel-private-tag { padding: .13rem .3rem; border-radius: .3rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .52rem; font-weight: 780; }
-.channel-card-head p { display: flex; min-width: 0; align-items: center; gap: .4rem; color: var(--ink-soft); font-size: .54rem; }
-.channel-card-head code { max-width: 9rem; overflow: hidden; font-size: .55rem; text-overflow: ellipsis; white-space: nowrap; }
-.channel-card-head p span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.channel-current-state,
-.channel-request-rate,
-.channel-account-state,
-.channel-latency-state { display: grid; min-width: 0; align-content: center; justify-items: start; gap: .2rem; }
-.channel-current-state small,
-.channel-request-rate span,
-.channel-account-state span,
-.channel-latency-state span { overflow: hidden; max-width: 100%; color: var(--ink-soft); font-size: .53rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
-.channel-request-rate strong,
-.channel-account-state strong,
-.channel-latency-state strong { font-size: .71rem; font-weight: 830; letter-spacing: -.01em; }
-.channel-request-rate strong.is-good { color: rgb(var(--dd-signal-green)); }
-.channel-request-rate strong.is-warning { color: rgb(var(--dd-amber-dim)); }
-.channel-request-rate strong.is-bad { color: rgb(var(--dd-signal-red)); }
-.channel-request-rate strong.is-unknown { color: var(--ink-soft); }
-.channel-timeline { display: grid; min-width: 0; gap: .22rem; }
-.channel-timeline > div:first-child { display: flex; justify-content: space-between; color: var(--ink-soft); font-size: .5rem; }
-.channel-timeline-bars { display: grid; grid-template-columns: repeat(60, minmax(0, 1fr)); gap: 1px; height: .72rem; }
-.channel-timeline-bars i { min-width: 0; border-radius: .08rem; background: var(--line); }
+.channel-status-identity > div { display: grid; min-width: 0; gap: .22rem; }
+.channel-status-identity h3 { overflow: hidden; font-size: .78rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-identity p { display: flex; min-width: 0; align-items: center; gap: .42rem; color: var(--ink-soft); font-size: .58rem; }
+.channel-status-identity code { overflow: hidden; max-width: 9.5rem; font-size: .59rem; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-identity p span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-card-badges { display: flex; flex: 0 0 auto; align-items: center; gap: .3rem; }
+.channel-private-tag { padding: .2rem .34rem; border-radius: .3rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .54rem; font-weight: 780; }
+.channel-status-evidence { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .5rem; padding: .42rem .5rem; border-radius: .42rem; background: var(--surface-muted); font-size: .59rem; }
+.channel-status-evidence span { flex: 0 0 auto; color: var(--ink-soft); }
+.channel-status-evidence strong { overflow: hidden; min-width: 0; color: var(--ink); font-weight: 730; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-metrics { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
+.channel-status-metrics > div { display: grid; min-width: 0; gap: .2rem; padding: .58rem .5rem; }
+.channel-status-metrics > div + div { border-left: 1px solid var(--line); }
+.channel-status-metrics dt { color: var(--ink-soft); font-size: .57rem; white-space: nowrap; }
+.channel-status-metrics dd { overflow: hidden; font-size: .84rem; font-weight: 850; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-metrics dd.is-good { color: rgb(var(--dd-signal-green)); }
+.channel-status-metrics dd.is-warning { color: rgb(var(--dd-amber-dim)); }
+.channel-status-metrics dd.is-bad { color: rgb(var(--dd-signal-red)); }
+.channel-status-metrics dd.is-unknown { color: var(--ink-soft); }
+.channel-status-metrics small { overflow: hidden; color: var(--ink-soft); font-size: .53rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-history { display: grid; min-width: 0; gap: .3rem; }
+.channel-status-history-head { display: flex; justify-content: space-between; gap: .5rem; color: var(--ink-soft); font-size: .54rem; }
+.channel-timeline-bars { display: grid; grid-template-columns: repeat(60, minmax(0, 1fr)); gap: 2px; height: .58rem; }
+.channel-timeline-bars i { min-width: 0; border-radius: 999px; background: var(--line); }
 .channel-timeline-bars i.is-healthy { background: rgb(var(--dd-signal-green)); }
 .channel-timeline-bars i.is-degraded { background: rgb(var(--dd-amber-dim)); }
 .channel-timeline-bars i.is-down,
 .channel-timeline-bars i.is-expired { background: rgb(var(--dd-signal-red)); }
-.channel-timeline small { overflow: hidden; color: var(--ink-soft); font-size: .5rem; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-history > small { overflow: hidden; color: var(--ink-soft); font-size: .53rem; text-overflow: ellipsis; white-space: nowrap; }
 .channel-error-state,
 .channel-empty-state { display: flex; min-height: 9rem; align-items: center; justify-content: center; gap: .7rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface); color: var(--ink-soft); font-size: .67rem; }
-.channel-loading-grid { display: grid; gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: .66rem; background: var(--line); }
-.channel-loading-grid span { min-height: 4.2rem; background: var(--surface-muted); animation: channel-skeleton 1.1s ease-in-out infinite alternate; }
+.channel-loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .65rem; }
+.channel-loading-grid span { min-height: 11rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface-muted); animation: channel-skeleton 1.1s ease-in-out infinite alternate; }
 .channel-status-page :is(button, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes channel-skeleton { from { opacity: .55; } to { opacity: 1; } }
 
-@media (max-width: 1240px) {
-  .channel-list-head { display: none; }
-  .channel-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--line); }
-  .channel-card { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem .8rem; border: 0; }
-  .channel-card-head { grid-column: 1 / 3; }
-  .channel-current-state { align-items: end; justify-items: end; text-align: right; }
-  .channel-request-rate,
-  .channel-account-state,
-  .channel-latency-state { padding-top: .5rem; border-top: 1px solid var(--line); }
-  .channel-timeline { grid-column: 1 / -1; }
-}
-
 @media (max-width: 860px) {
   .channel-status-toolbar { align-items: stretch; flex-direction: column; }
   .channel-range-tabs { align-self: flex-start; }
-  .channel-card-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {
@@ -353,17 +317,15 @@ onBeforeUnmount(() => {
   .channel-overall-state { align-items: flex-start; flex-direction: column; }
   .channel-status-summary dl { display: grid; grid-template-columns: 1fr 1fr; }
   .channel-range-tabs { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .channel-card { grid-template-columns: 1fr 1fr; padding: .7rem; }
-  .channel-card-head { grid-column: 1 / -1; }
-  .channel-current-state { align-items: start; justify-items: start; padding-top: .5rem; border-top: 1px solid var(--line); text-align: left; }
-  .channel-request-rate { align-items: end; justify-items: end; text-align: right; }
-  .channel-account-state,
-  .channel-latency-state { padding-top: .45rem; }
-  .channel-timeline { padding-top: .15rem; }
-  .channel-timeline-bars { height: .82rem; }
+  .channel-status-card { padding: .72rem; }
+  .channel-status-evidence { align-items: flex-start; flex-direction: column; gap: .2rem; }
+  .channel-status-evidence strong { width: 100%; }
+  .channel-status-metrics > div { padding-inline: .36rem; }
+  .channel-timeline-bars { gap: 1px; height: .68rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .channel-status-card { transition: none; }
   .channel-loading-grid span { animation: none; }
 }
 </style>
