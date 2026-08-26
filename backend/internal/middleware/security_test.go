@@ -55,4 +55,8 @@ func TestSecurityHeadersKeepScriptPolicyFreeOfUnsafeInline(t *testing.T) {
 	if !strings.Contains(scriptDirective, "'self'") {
 		t.Fatalf("script-src must permit same-origin assets: %s", scriptDirective)
 	}
+	connectDirective := strings.Split(strings.Split(csp, "connect-src ")[1], ";")[0]
+	if !strings.Contains(connectDirective, "https://raw.githubusercontent.com") {
+		t.Fatalf("connect-src must permit the curated prompt registry: %s", connectDirective)
+	}
 }

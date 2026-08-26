@@ -15,11 +15,11 @@ import (
 // and blocks framing to prevent clickjacking of the console.
 func SecurityHeaders() gin.HandlerFunc {
 	// Stripe Elements and Airwallex Checkout are loaded only after a user
-	// creates their own authenticated order. Their official origins are kept
-	// explicit here; no wildcard script, frame, or connect source is allowed.
+	// creates their own authenticated order. The image workbench reads its
+	// curated prompt registry from raw.githubusercontent.com.
 	const csp = "default-src 'self'; script-src 'self' https://js.stripe.com https://checkout.airwallex.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; " +
 		"img-src 'self' data: blob: https:; font-src 'self' data:; " +
-		"connect-src 'self' https://api.stripe.com https://*.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; " +
+		"connect-src 'self' https://api.stripe.com https://*.stripe.com https://*.airwallex.com https://challenges.cloudflare.com https://raw.githubusercontent.com; " +
 		"frame-src https://js.stripe.com https://hooks.stripe.com https://*.airwallex.com https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 	return func(c *gin.Context) {
 		h := c.Writer.Header()
