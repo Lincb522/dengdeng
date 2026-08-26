@@ -170,56 +170,56 @@ onBeforeUnmount(() => {
 
     <div v-else-if="groups.length" class="channel-status-board">
       <article v-for="group in groups" :key="group.id" class="channel-status-card" :class="`is-${group.state}`">
-            <header class="channel-status-card-head">
-              <div class="channel-status-identity">
-                <ProviderLogo class="channel-platform-mark" :platform="group.platform" size="md" />
-                <div>
-                  <h3 :title="group.name">{{ group.name }}</h3>
-                  <p>
-                    <span>{{ platformLabel(group.platform) }}</span>
-                    <code :title="group.top_model">{{ group.top_model || '暂无请求模型' }}</code>
-                  </p>
-                </div>
-              </div>
-              <div class="channel-status-card-badges">
-                <span v-if="data?.admin_view && !group.is_public" class="channel-private-tag">私有</span>
-                <span class="channel-state-tag" :class="`is-${group.state}`"><i></i>{{ stateLabel(group.state) }}</span>
-              </div>
-            </header>
-
-            <div class="channel-status-evidence">
-              <span>{{ stateSourceLabel(group.state_source) }}</span>
-              <strong :title="currentEvidence(group)">{{ currentEvidence(group) }}</strong>
+        <header class="channel-status-card-head">
+          <div class="channel-status-identity">
+            <ProviderLogo class="channel-platform-mark" :platform="group.platform" size="md" />
+            <div>
+              <h3 :title="group.name">{{ group.name }}</h3>
+              <p>
+                <span>{{ platformLabel(group.platform) }}</span>
+                <code :title="group.top_model">{{ group.top_model || '暂无请求模型' }}</code>
+              </p>
             </div>
+          </div>
+          <div class="channel-status-card-badges">
+            <span v-if="data?.admin_view && !group.is_public" class="channel-private-tag">私有</span>
+            <span class="channel-state-tag" :class="`is-${group.state}`"><i></i>{{ stateLabel(group.state) }}</span>
+          </div>
+        </header>
 
-            <dl class="channel-status-metrics">
-              <div>
-                <dt>请求成功</dt>
-                <dd :class="rateClass(group.request_success_rate, group.request_total)">{{ formatRate(group.request_success_rate, group.request_total) }}</dd>
-                <small>{{ group.request_total ? `${group.request_successes}/${group.request_total} 次` : '暂无请求' }}</small>
-              </div>
-              <div>
-                <dt>可用账号</dt>
-                <dd>{{ accountValue(group) }}</dd>
-                <small :title="accountDetail(group)">{{ accountDetail(group) }}</small>
-              </div>
-              <div>
-                <dt>首字耗时</dt>
-                <dd>{{ formatLatency(group.average_ttft_ms) }}</dd>
-                <small>巡检 {{ formatLatency(group.average_probe_latency_ms) }}</small>
-              </div>
-            </dl>
+        <div class="channel-status-evidence">
+          <span>{{ stateSourceLabel(group.state_source) }}</span>
+          <strong :title="currentEvidence(group)">{{ currentEvidence(group) }}</strong>
+        </div>
 
-            <footer class="channel-status-history" :aria-label="`${group.name} ${data?.range || ''} 巡检记录`">
-              <div class="channel-status-history-head">
-                <span>巡检 {{ formatRate(group.probe_success_rate, group.probe_total) }}</span>
-                <span :title="formatDate(group.last_probe_at)">最近 {{ formatRelative(group.last_probe_at) }}</span>
-              </div>
-              <div class="channel-timeline-bars" aria-hidden="true">
-                <i v-for="(bucket, index) in group.timeline" :key="`${bucket.at}-${index}`" :class="`is-${bucket.state}`" :title="`${formatDate(bucket.at)} ${stateLabel(bucket.state)}`"></i>
-              </div>
-              <small>{{ group.probe_successes }}/{{ group.probe_total }} 次巡检成功</small>
-            </footer>
+        <dl class="channel-status-metrics">
+          <div>
+            <dt>请求成功</dt>
+            <dd :class="rateClass(group.request_success_rate, group.request_total)">{{ formatRate(group.request_success_rate, group.request_total) }}</dd>
+            <small>{{ group.request_total ? `${group.request_successes}/${group.request_total} 次` : '暂无请求' }}</small>
+          </div>
+          <div>
+            <dt>可用账号</dt>
+            <dd>{{ accountValue(group) }}</dd>
+            <small :title="accountDetail(group)">{{ accountDetail(group) }}</small>
+          </div>
+          <div>
+            <dt>首字耗时</dt>
+            <dd>{{ formatLatency(group.average_ttft_ms) }}</dd>
+            <small>巡检 {{ formatLatency(group.average_probe_latency_ms) }}</small>
+          </div>
+        </dl>
+
+        <footer class="channel-status-history" :aria-label="`${group.name} ${data?.range || ''} 巡检记录`">
+          <div class="channel-status-history-head">
+            <span>巡检 {{ formatRate(group.probe_success_rate, group.probe_total) }}</span>
+            <span :title="formatDate(group.last_probe_at)">最近 {{ formatRelative(group.last_probe_at) }}</span>
+          </div>
+          <div class="channel-timeline-bars" aria-hidden="true">
+            <i v-for="(bucket, index) in group.timeline" :key="`${bucket.at}-${index}`" :class="`is-${bucket.state}`" :title="`${formatDate(bucket.at)} ${stateLabel(bucket.state)}`"></i>
+          </div>
+          <small>{{ group.probe_successes }}/{{ group.probe_total }} 次巡检成功</small>
+        </footer>
       </article>
     </div>
 
@@ -228,80 +228,80 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.channel-status-page { display: grid; width: 100%; gap: 1rem; color: var(--ink); }
-.channel-page-head { display: flex; min-height: 3.5rem; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: .85rem; border-bottom: 1px solid var(--line); }
-.channel-page-head h1 { font-size: 1.08rem; font-weight: 880; letter-spacing: -.02em; }
-.channel-page-head p { max-width: 34rem; margin-top: .22rem; color: var(--ink-soft); font-size: .65rem; line-height: 1.5; }
+.channel-status-page { display: grid; width: 100%; gap: 1.25rem; color: var(--ink); }
+.channel-page-head { display: flex; min-height: 4rem; align-items: flex-start; justify-content: space-between; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.channel-page-head h1 { font-size: 1.32rem; font-weight: 880; letter-spacing: -.02em; }
+.channel-page-head p { max-width: 36rem; margin-top: .32rem; color: var(--ink-soft); font-size: .76rem; line-height: 1.5; }
 .channel-page-head > button,
-.channel-error-state button { min-height: 2.3rem; padding: 0 .82rem; border: 1px solid var(--line); border-radius: .48rem; background: var(--surface); color: var(--ink); font-size: .68rem; font-weight: 780; }
+.channel-error-state button { min-height: 2.5rem; padding: 0 1rem; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); color: var(--ink); font-size: .76rem; font-weight: 780; }
 .channel-page-head > button:hover,
 .channel-error-state button:hover { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); }
 .channel-page-head > button:disabled { opacity: .5; }
-.channel-status-toolbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 1rem; padding: .78rem .9rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface); }
-.channel-status-summary { display: grid; min-width: 0; gap: .52rem; }
-.channel-overall-state { display: flex; min-width: 0; align-items: center; gap: .75rem; }
-.channel-overall-state ul { display: flex; flex-wrap: wrap; gap: .35rem .75rem; color: var(--ink-soft); font-size: .61rem; }
+.channel-status-toolbar { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 1.25rem; padding: 1rem 1.1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
+.channel-status-summary { display: grid; min-width: 0; gap: .7rem; }
+.channel-overall-state { display: flex; min-width: 0; align-items: center; gap: 1rem; }
+.channel-overall-state ul { display: flex; flex-wrap: wrap; gap: .45rem 1rem; color: var(--ink-soft); font-size: .7rem; }
 .channel-overall-state li { display: inline-flex; align-items: center; gap: .28rem; white-space: nowrap; }
-.channel-overall-state li i { width: .38rem; height: .38rem; border-radius: 50%; background: var(--line-strong); }
+.channel-overall-state li i { width: .44rem; height: .44rem; border-radius: 50%; background: var(--line-strong); }
 .channel-overall-state li i.is-healthy { background: rgb(var(--dd-signal-green)); }
 .channel-overall-state li i.is-degraded { background: rgb(var(--dd-amber-dim)); }
 .channel-overall-state li i.is-down { background: rgb(var(--dd-signal-red)); }
-.channel-status-summary dl { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
-.channel-status-summary dl div { display: flex; align-items: center; gap: .3rem; color: var(--ink-soft); font-size: .59rem; }
+.channel-status-summary dl { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; }
+.channel-status-summary dl div { display: flex; align-items: center; gap: .34rem; color: var(--ink-soft); font-size: .68rem; }
 .channel-status-summary dt::after { content: ':'; }
 .channel-status-summary dd { color: var(--ink); }
 .channel-range-tabs { display: flex; flex: 0 0 auto; gap: .25rem; padding: .18rem; border: 1px solid var(--line); border-radius: .52rem; background: var(--surface-muted); }
-.channel-range-tabs button { min-height: 1.8rem; padding: 0 .62rem; border: 0; border-radius: .36rem; background: transparent; color: var(--ink-soft); font-size: .62rem; font-weight: 760; }
+.channel-range-tabs button { min-height: 2.15rem; padding: 0 .78rem; border: 0; border-radius: .4rem; background: transparent; color: var(--ink-soft); font-size: .7rem; font-weight: 760; }
 .channel-range-tabs button:hover { color: var(--ink); }
 .channel-range-tabs button.is-active { background: var(--surface); box-shadow: 0 1px 3px var(--shadow); color: var(--ink); }
-.channel-state-tag { display: inline-flex; min-height: 1.52rem; align-items: center; justify-content: center; gap: .34rem; padding: 0 .5rem; border-radius: 999px; background: var(--surface-muted); color: var(--ink-soft); font-size: .59rem; font-weight: 820; white-space: nowrap; }
-.channel-state-tag > i { width: .36rem; height: .36rem; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 14%, transparent); }
+.channel-state-tag { display: inline-flex; min-height: 1.8rem; align-items: center; justify-content: center; gap: .4rem; padding: 0 .64rem; border-radius: 999px; background: var(--surface-muted); color: var(--ink-soft); font-size: .68rem; font-weight: 820; white-space: nowrap; }
+.channel-state-tag > i { width: .42rem; height: .42rem; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 14%, transparent); }
 .channel-state-tag.is-healthy { background: color-mix(in srgb, var(--surface) 84%, rgb(var(--dd-signal-green))); color: rgb(var(--dd-signal-green)); }
 .channel-state-tag.is-degraded { background: var(--accent-soft); color: rgb(var(--dd-amber-dim)); }
 .channel-state-tag.is-down,
 .channel-state-tag.is-expired { background: color-mix(in srgb, var(--surface) 86%, rgb(var(--dd-signal-red))); color: rgb(var(--dd-signal-red)); }
-.channel-status-board { display: grid; min-width: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .65rem; }
-.channel-status-card { display: grid; min-width: 0; align-content: start; gap: .7rem; padding: .8rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface); transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease; }
+.channel-status-board { display: grid; min-width: 0; grid-template-columns: repeat(auto-fit, minmax(min(100%, 27rem), 1fr)); gap: 1rem; }
+.channel-status-card { display: grid; min-width: 0; align-content: start; gap: .9rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); transition: border-color 160ms ease, background-color 160ms ease; }
 .channel-status-card:hover { border-color: color-mix(in srgb, var(--accent) 38%, var(--line)); background: color-mix(in srgb, var(--surface) 96%, var(--accent-soft)); }
 .channel-status-card.is-healthy { border-color: color-mix(in srgb, rgb(var(--dd-signal-green)) 24%, var(--line)); }
 .channel-status-card.is-degraded { border-color: color-mix(in srgb, rgb(var(--dd-amber-dim)) 32%, var(--line)); }
 .channel-status-card:is(.is-down, .is-expired) { border-color: color-mix(in srgb, rgb(var(--dd-signal-red)) 30%, var(--line)); }
-.channel-status-card-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: .65rem; }
-.channel-status-identity { display: flex; min-width: 0; align-items: center; gap: .58rem; }
+.channel-status-card-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: .9rem; }
+.channel-status-identity { display: flex; min-width: 0; align-items: center; gap: .7rem; }
 .channel-platform-mark { flex: 0 0 auto; }
-.channel-status-identity > div { display: grid; min-width: 0; gap: .22rem; }
-.channel-status-identity h3 { overflow: hidden; font-size: .78rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
-.channel-status-identity p { display: flex; min-width: 0; align-items: center; gap: .42rem; color: var(--ink-soft); font-size: .58rem; }
-.channel-status-identity code { overflow: hidden; max-width: 9.5rem; font-size: .59rem; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-identity > div { display: grid; min-width: 0; gap: .28rem; }
+.channel-status-identity h3 { overflow: hidden; font-size: .96rem; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-identity p { display: flex; min-width: 0; align-items: center; gap: .5rem; color: var(--ink-soft); font-size: .7rem; }
+.channel-status-identity code { overflow: hidden; max-width: 13rem; font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
 .channel-status-identity p span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .channel-status-card-badges { display: flex; flex: 0 0 auto; align-items: center; gap: .3rem; }
-.channel-private-tag { padding: .2rem .34rem; border-radius: .3rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .54rem; font-weight: 780; }
-.channel-status-evidence { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .5rem; padding: .42rem .5rem; border-radius: .42rem; background: var(--surface-muted); font-size: .59rem; }
+.channel-private-tag { padding: .25rem .42rem; border-radius: .32rem; background: var(--surface-muted); color: var(--ink-soft); font-size: .64rem; font-weight: 780; }
+.channel-status-evidence { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: .7rem; padding: .62rem .7rem; border-radius: .5rem; background: var(--surface-muted); font-size: .7rem; }
 .channel-status-evidence span { flex: 0 0 auto; color: var(--ink-soft); }
 .channel-status-evidence strong { overflow: hidden; min-width: 0; color: var(--ink); font-weight: 730; text-overflow: ellipsis; white-space: nowrap; }
 .channel-status-metrics { display: grid; min-width: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line); }
-.channel-status-metrics > div { display: grid; min-width: 0; gap: .2rem; padding: .58rem .5rem; }
+.channel-status-metrics > div { display: grid; min-width: 0; gap: .28rem; padding: .78rem .72rem; }
 .channel-status-metrics > div + div { border-left: 1px solid var(--line); }
-.channel-status-metrics dt { color: var(--ink-soft); font-size: .57rem; white-space: nowrap; }
-.channel-status-metrics dd { overflow: hidden; font-size: .84rem; font-weight: 850; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-metrics dt { color: var(--ink-soft); font-size: .68rem; white-space: nowrap; }
+.channel-status-metrics dd { overflow: hidden; font-size: 1.18rem; font-weight: 850; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .channel-status-metrics dd.is-good { color: rgb(var(--dd-signal-green)); }
 .channel-status-metrics dd.is-warning { color: rgb(var(--dd-amber-dim)); }
 .channel-status-metrics dd.is-bad { color: rgb(var(--dd-signal-red)); }
 .channel-status-metrics dd.is-unknown { color: var(--ink-soft); }
-.channel-status-metrics small { overflow: hidden; color: var(--ink-soft); font-size: .53rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
-.channel-status-history { display: grid; min-width: 0; gap: .3rem; }
-.channel-status-history-head { display: flex; justify-content: space-between; gap: .5rem; color: var(--ink-soft); font-size: .54rem; }
-.channel-timeline-bars { display: grid; grid-template-columns: repeat(60, minmax(0, 1fr)); gap: 2px; height: .58rem; }
+.channel-status-metrics small { overflow: hidden; color: var(--ink-soft); font-size: .63rem; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-history { display: grid; min-width: 0; gap: .4rem; }
+.channel-status-history-head { display: flex; justify-content: space-between; gap: .6rem; color: var(--ink-soft); font-size: .64rem; }
+.channel-timeline-bars { display: grid; grid-template-columns: repeat(60, minmax(0, 1fr)); gap: 2px; height: .7rem; }
 .channel-timeline-bars i { min-width: 0; border-radius: 999px; background: var(--line); }
 .channel-timeline-bars i.is-healthy { background: rgb(var(--dd-signal-green)); }
 .channel-timeline-bars i.is-degraded { background: rgb(var(--dd-amber-dim)); }
 .channel-timeline-bars i.is-down,
 .channel-timeline-bars i.is-expired { background: rgb(var(--dd-signal-red)); }
-.channel-status-history > small { overflow: hidden; color: var(--ink-soft); font-size: .53rem; text-overflow: ellipsis; white-space: nowrap; }
+.channel-status-history > small { overflow: hidden; color: var(--ink-soft); font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
 .channel-error-state,
 .channel-empty-state { display: flex; min-height: 9rem; align-items: center; justify-content: center; gap: .7rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface); color: var(--ink-soft); font-size: .67rem; }
-.channel-loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); gap: .65rem; }
-.channel-loading-grid span { min-height: 11rem; border: 1px solid var(--line); border-radius: .72rem; background: var(--surface-muted); animation: channel-skeleton 1.1s ease-in-out infinite alternate; }
+.channel-loading-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 27rem), 1fr)); gap: 1rem; }
+.channel-loading-grid span { min-height: 15rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface-muted); animation: channel-skeleton 1.1s ease-in-out infinite alternate; }
 .channel-status-page :is(button, a):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @keyframes channel-skeleton { from { opacity: .55; } to { opacity: 1; } }
