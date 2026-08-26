@@ -69,11 +69,9 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// generation request, discovering models must not depend on an account being
 	// online (otherwise a fresh group can never be configured through an SDK).
 	r.GET("/v1/models", g.handleListModels)
-	r.GET("/models", g.handleListModels)
 	// CCSwitch and similar desktop clients use this authenticated endpoint to
 	// display the key's remaining balance and configured caps.
 	r.GET("/v1/usage", g.handleUsage)
-	r.GET("/usage", g.handleUsage)
 }
 
 func (g *Gateway) handleGrokMedia(c *gin.Context) {

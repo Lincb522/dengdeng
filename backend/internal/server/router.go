@@ -327,12 +327,31 @@ func mountFrontend(r *gin.Engine) {
 			p = "index.html"
 		}
 		if _, err := fs.Stat(dist, p); err == nil {
+			setFrontendCacheHeaders(c, p, p == "index.html")
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
 		}
+		setFrontendCacheHeaders(c, "index.html", true)
 		c.Request.URL.Path = "/"
 		fileServer.ServeHTTP(c.Writer, c.Request)
 	})
+}
+
+func setFrontendCacheHeaders(c *gin.Context, path string, spaDocument bool) {
+	if spaDocument {
+		// The HTML document contains content-hashed chunk names. It must be
+		// revalidated on every navigation so a browser never keeps an index that
+		// points at chunks removed by a later deployment.
+		c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		return
+	}
+	if strings.HasPrefix(path, "assets/") {
+		c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		return
+	}
+	c.Header("Cache-Control", "no-cache")
 }
 
 func isPublicAPIPath(path string) bool {
@@ -349,6 +368,5 @@ func isPublicAPIPath(path string) bool {
 			return true
 		}
 	}
-	return path == "/models" || strings.HasPrefix(path, "/models/") ||
-		path == "/usage" || strings.HasPrefix(path, "/usage/")
+	return false
 }

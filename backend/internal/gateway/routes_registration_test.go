@@ -24,8 +24,8 @@ func TestRegisterIncludesCompatiblePublicRoutes(t *testing.T) {
 		"POST /images/generations/async":    false,
 		"GET /images/tasks/:task_id":        false,
 		"POST /images/edits":                false,
-		"GET /models":                       false,
-		"GET /usage":                        false,
+		"GET /v1/models":                    false,
+		"GET /v1/usage":                     false,
 		"POST /v1/responses/compact":        false,
 		"POST /v1/responses/input_tokens":   false,
 		"GET /backend-api/codex/models":     false,
@@ -39,6 +39,11 @@ func TestRegisterIncludesCompatiblePublicRoutes(t *testing.T) {
 	for route, registered := range want {
 		if !registered {
 			t.Fatalf("route %s is not registered", route)
+		}
+	}
+	for _, route := range router.Routes() {
+		if route.Method == "GET" && (route.Path == "/models" || route.Path == "/usage") {
+			t.Fatalf("frontend route %s must not be occupied by a legacy API alias", route.Path)
 		}
 	}
 }

@@ -25,7 +25,13 @@ func Open(cfg *config.Config) (*gorm.DB, error) {
 	// Make automatic GORM timestamps match the UTC API/query contract. SQLite
 	// stores time values as text, so mixing host-local offsets with UTC filters
 	// otherwise creates invisible gaps in dashboards and exports.
-	gcfg := &gorm.Config{Logger: logger.Default.LogMode(logger.Warn), NowFunc: func() time.Time { return time.Now().UTC() }}
+	databaseLogger := logger.New(log.New(os.Stdout, "", log.LstdFlags), logger.Config{
+		SlowThreshold:             500 * time.Millisecond,
+		LogLevel:                  logger.Warn,
+		IgnoreRecordNotFoundError: true,
+		Colorful:                  false,
+	})
+	gcfg := &gorm.Config{Logger: databaseLogger, NowFunc: func() time.Time { return time.Now().UTC() }}
 
 	var (
 		db  *gorm.DB

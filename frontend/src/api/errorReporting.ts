@@ -4,6 +4,12 @@ type ClientErrorSource = 'vue' | 'promise' | 'window' | 'network'
 
 const recentlyReported = new Map<string, number>()
 const dedupeWindowMs = 10_000
+const networkDedupeWindowMs = 60_000
+
+export function isChunkLoadError(error: unknown) {
+	const message = error instanceof Error ? error.message : String(error || '')
+	return /(?:dynamically imported module|loading (?:css )?chunk|chunkloaderror|importing a module script failed)/i.test(message)
+}
 
 function safeText(value: string, limit: number) {
   return value
@@ -31,17 +37,24 @@ function errorParts(error: unknown) {
 export function reportClientError(error: unknown, source: ClientErrorSource, context = '') {
   const parts = errorParts(error)
   const message = context ? `${context}: ${parts.message}` : parts.message
-  const fingerprint = `${source}:${window.location.pathname}:${message}`
+  const errorCode = isAppError(error)
+		? error.code
+		: isChunkLoadError(error) ? 'client.chunk_load' : 'frontend.runtime_error'
+	if (errorCode === 'network.offline' && typeof navigator !== 'undefined' && !navigator.onLine) return
+	const fingerprint = errorCode === 'network.offline'
+		? `${source}:${window.location.pathname}:${errorCode}`
+		: `${source}:${window.location.pathname}:${message}`
   const now = Date.now()
-  if ((recentlyReported.get(fingerprint) || 0) > now - dedupeWindowMs) return
+  const windowMs = errorCode === 'network.offline' ? networkDedupeWindowMs : dedupeWindowMs
+  if ((recentlyReported.get(fingerprint) || 0) > now - windowMs) return
   recentlyReported.set(fingerprint, now)
   for (const [key, timestamp] of recentlyReported) {
-    if (timestamp < now - dedupeWindowMs) recentlyReported.delete(key)
+    if (timestamp < now - networkDedupeWindowMs) recentlyReported.delete(key)
   }
 
   const payload = JSON.stringify({
     source,
-    error_code: isAppError(error) ? error.code : 'frontend.runtime_error',
+    error_code: errorCode,
     message,
     stack: parts.stack,
     path: window.location.pathname,

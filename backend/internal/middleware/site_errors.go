@@ -34,6 +34,9 @@ func SiteErrorCapture(db *gorm.DB) gin.HandlerFunc {
 		message, _ := c.Get(ctxErrorMessage)
 		errorCode, _ := code.(string)
 		errorMessage, _ := message.(string)
+		if !shouldCaptureSiteError(status, errorCode) {
+			return
+		}
 		if strings.TrimSpace(errorMessage) == "" {
 			errorMessage = http.StatusText(status)
 		}
@@ -65,6 +68,26 @@ func SiteErrorCapture(db *gorm.DB) gin.HandlerFunc {
 			UserID:     userID,
 			CreatedAt:  time.Now().UTC(),
 		}).Error
+	}
+}
+
+func shouldCaptureSiteError(status int, errorCode string) bool {
+	errorCode = strings.ToLower(strings.TrimSpace(errorCode))
+	// A route miss without an application error code is normally an Internet
+	// scanner or an outdated bookmark, not a site malfunction. Keeping every
+	// one made the error center mostly consist of unactionable 404 noise.
+	if status == http.StatusNotFound && errorCode == "" {
+		return false
+	}
+	// These responses are expected authentication control flow. Login attempts
+	// and session invalidation remain available in audit/security records; they
+	// should not be presented as website runtime failures.
+	switch errorCode {
+	case "auth.required", "auth.session_expired", "auth.session_changed",
+		"auth.invalid_credentials", "auth.terms_required":
+		return false
+	default:
+		return true
 	}
 }
 

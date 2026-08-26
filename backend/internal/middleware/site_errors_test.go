@@ -57,3 +57,33 @@ func TestSiteErrorCaptureSeparatesConsoleFromRelayErrors(t *testing.T) {
 		t.Fatalf("relay error should not enter site errors, count = %d", count)
 	}
 }
+
+func TestSiteErrorCaptureSkipsRoutineAuthAndUnknownRouteNoise(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:site-errors-noise?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.OpsSystemLog{}); err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	router.Use(RequestID(), SiteErrorCapture(db))
+	router.GET("/api/session", func(c *gin.Context) {
+		util.FailCode(c, http.StatusUnauthorized, "auth.session_expired", "session expired")
+	})
+
+	for _, path := range []string{"/api/session", "/api/not-a-real-route"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	}
+
+	var count int64
+	if err := db.Model(&model.OpsSystemLog{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("routine control flow should not enter the error center, count = %d", count)
+	}
+}

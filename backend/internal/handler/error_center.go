@@ -54,7 +54,7 @@ func (h *siteErrorHandler) Report(c *gin.Context) {
 		path = "/"
 	}
 	item := model.OpsSystemLog{
-		Level:     "error",
+		Level:     clientErrorLevel(req.ErrorCode),
 		Category:  "frontend",
 		Component: "frontend." + source,
 		ErrorCode: trimErrorCenterText(req.ErrorCode, 96),
@@ -72,6 +72,15 @@ func (h *siteErrorHandler) Report(c *gin.Context) {
 		return
 	}
 	util.OK(c, gin.H{"recorded": true})
+}
+
+func clientErrorLevel(errorCode string) string {
+	switch strings.ToLower(strings.TrimSpace(errorCode)) {
+	case "network.offline", "client.chunk_load":
+		return "warning"
+	default:
+		return "error"
+	}
 }
 
 type errorCenterCategory struct {
