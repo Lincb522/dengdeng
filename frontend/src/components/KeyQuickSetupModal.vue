@@ -183,7 +183,7 @@ const activeDescription = computed(() => {
     codex: activePlatform.value === 'anthropic'
       ? 'Codex CLI 会通过兼容层使用当前 Claude 分组。'
       : 'Codex CLI 需要 config.toml 和 auth.json 两个文件，分别复制到 ~/.codex 目录。',
-    gemini: '使用环境变量启动 Gemini CLI；模型列表来自当前密钥所属分组。',
+    gemini: '使用环境变量启动 Gemini CLI；API Key 渠道从实际上游读取模型。',
     chatbox: '在 Chatbox 中新建「OpenAI API」提供方，依次填入下面三项。',
     cline: '在 VS Code 的 Cline 设置中选择 OpenAI Compatible，再填入下面三项。',
     opencode: '把 provider 段合并进现有的 opencode.json；不要覆盖已有配置。',
@@ -473,7 +473,7 @@ function nextStep() {
       </section>
 
       <section v-else-if="activeStep === 2 && configuredApiKey" class="key-setup-step">
-        <header><span>2</span><div><strong>验证并选择模型</strong><small>模型列表来自当前密钥所属分组。</small></div></header>
+        <header><span>2</span><div><strong>验证并选择模型</strong><small>API Key 渠道从实际上游读取模型。</small></div></header>
         <div class="key-setup-model-row">
           <label><span>模型</span><select v-model="selectedModel" class="input" :disabled="modelsState === 'loading' || !models.length"><option v-if="!models.length" value="">{{ modelsState === 'loading' ? '正在读取模型…' : '暂无模型' }}</option><option v-for="model in models" :key="model" :value="model">{{ model }}</option></select></label>
           <button class="btn-ghost" :disabled="modelsState === 'loading'" @click="loadModels">{{ modelsState === 'loading' ? '验证中…' : '验证并刷新' }}</button>

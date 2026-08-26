@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"time"
 
@@ -65,9 +66,9 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// Gemini (native v1beta path style)
 	r.POST("/v1beta/models/*action", g.handleGemini)
 
-	// Model listing is answered from the local enabled catalogue. Unlike a
-	// generation request, discovering models must not depend on an account being
-	// online (otherwise a fresh group can never be configured through an SDK).
+	// Static-key groups expose the model list returned by their real upstream.
+	// OAuth-only groups retain the configured catalogue because those providers
+	// do not consistently offer a credential-compatible discovery endpoint.
 	r.GET("/v1/models", g.handleListModels)
 	// CCSwitch and similar desktop clients use this authenticated endpoint to
 	// display the key's remaining balance and configured caps.
@@ -527,10 +528,9 @@ func (g *Gateway) handleOpenAIInputTokens(c *gin.Context) {
 	})
 }
 
-// handleCodexModelsManifest keeps the live ChatGPT/Codex model manifest
-// separate from /v1/models. The latter intentionally remains DengDeng's stable
-// public catalogue, while this route serves Codex clients that need the
-// selected upstream account's full capability metadata.
+// handleCodexModelsManifest keeps the ChatGPT/Codex capability manifest
+// separate from the standard model list because Codex clients consume its
+// provider-specific metadata.
 func (g *Gateway) handleCodexModelsManifest(c *gin.Context) {
 	ak, ok := g.authenticate(c)
 	if !ok {
@@ -960,33 +960,341 @@ func (g *Gateway) handleListModels(c *gin.Context) {
 	if !ok {
 		return
 	}
-	platformSet := make(map[string]struct{}, len(ak.Groups))
-	for _, group := range ak.Groups {
-		platformSet[group.Platform] = struct{}{}
+	groupSet := make(map[int64]model.Group, len(ak.Groups)+1)
+	if ak.Group.ID > 0 {
+		groupSet[ak.Group.ID] = ak.Group
 	}
-	platforms := make([]string, 0, len(platformSet))
+	for _, group := range ak.Groups {
+		groupSet[group.ID] = group
+	}
+	selectedGroups := make([]model.Group, 0, len(groupSet))
 	requestedPlatform := strings.TrimSpace(c.Query("platform"))
 	if requestedPlatform != "" {
-		if _, allowed := platformSet[requestedPlatform]; !allowed {
+		for _, group := range groupSet {
+			if group.Platform == requestedPlatform {
+				selectedGroups = append(selectedGroups, group)
+			}
+		}
+		if len(selectedGroups) == 0 {
 			util.Fail(c, http.StatusForbidden, "platform is not available to this key")
 			return
 		}
-		platforms = append(platforms, requestedPlatform)
 	} else {
-		for platform := range platformSet {
-			platforms = append(platforms, platform)
+		for _, group := range groupSet {
+			selectedGroups = append(selectedGroups, group)
 		}
 	}
-	var configs []model.ModelConfig
-	if err := g.db.Where("platform IN ? AND status = ?", platforms, model.StatusActive).Order("platform, name").Find(&configs).Error; err != nil {
-		util.Fail(c, http.StatusInternalServerError, "load model catalogue failed")
+	items, err := g.modelsForGroups(c, selectedGroups)
+	if err != nil {
+		util.Fail(c, http.StatusBadGateway, "upstream model list is unavailable")
 		return
 	}
-	items := make([]gin.H, 0, len(configs))
-	for _, cfg := range configs {
-		items = append(items, gin.H{"id": cfg.Name, "object": "model", "owned_by": cfg.Platform})
-	}
 	c.JSON(http.StatusOK, gin.H{"object": "list", "data": items})
+}
+
+type upstreamModelItem struct {
+	ID      string
+	Owner   string
+	Created int64
+}
+
+func (g *Gateway) modelsForGroups(c *gin.Context, groups []model.Group) ([]gin.H, error) {
+	if len(groups) == 0 {
+		return []gin.H{}, nil
+	}
+	groupIDs := make([]int64, 0, len(groups))
+	groupByID := make(map[int64]model.Group, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.ID)
+		groupByID[group.ID] = group
+	}
+
+	var accounts []model.UpstreamAccount
+	accountIDs := g.db.Model(&model.UpstreamAccountGroup{}).
+		Select("upstream_account_id").Where("group_id IN ?", groupIDs)
+	if err := g.db.Preload("Proxy").
+		Where("auth_type IN ? AND (group_id IN ? OR id IN (?))", []string{"", model.AuthAPIKey}, groupIDs, accountIDs).
+		Find(&accounts).Error; err != nil {
+		return nil, err
+	}
+
+	accountGroups := make(map[int64]map[int64]struct{}, len(accounts))
+	ids := make([]int64, 0, len(accounts))
+	for i := range accounts {
+		account := &accounts[i]
+		ids = append(ids, account.ID)
+		accountGroups[account.ID] = map[int64]struct{}{}
+		if _, selected := groupByID[account.GroupID]; selected {
+			accountGroups[account.ID][account.GroupID] = struct{}{}
+		}
+	}
+	if len(ids) > 0 {
+		var links []model.UpstreamAccountGroup
+		if err := g.db.Where("upstream_account_id IN ? AND group_id IN ?", ids, groupIDs).Find(&links).Error; err != nil {
+			return nil, err
+		}
+		for _, link := range links {
+			accountGroups[link.UpstreamAccountID][link.GroupID] = struct{}{}
+		}
+	}
+
+	accountsByGroup := make(map[int64][]*model.UpstreamAccount, len(groups))
+	for i := range accounts {
+		account := &accounts[i]
+		for groupID := range accountGroups[account.ID] {
+			group := groupByID[groupID]
+			if group.Platform == model.PlatformComposite || group.Platform == account.Platform {
+				accountsByGroup[groupID] = append(accountsByGroup[groupID], account)
+			}
+		}
+	}
+
+	discovered := make(map[string]upstreamModelItem)
+	localPlatforms := make(map[string]struct{})
+	fetched := make(map[int64][]upstreamModelItem, len(accounts))
+	fetchErrors := make(map[int64]error, len(accounts))
+	now := time.Now().UTC()
+	staticGroupCount := 0
+	staticGroupSuccesses := 0
+	for _, group := range groups {
+		groupAccounts := accountsByGroup[group.ID]
+		if len(groupAccounts) == 0 {
+			localPlatforms[group.Platform] = struct{}{}
+			continue
+		}
+		staticGroupCount++
+		groupSucceeded := false
+		for _, account := range groupAccounts {
+			if account.Status != model.StatusActive || (account.CooldownUntil != nil && account.CooldownUntil.After(now)) {
+				continue
+			}
+			models, fetchedBefore := fetched[account.ID]
+			fetchErr, failedBefore := fetchErrors[account.ID]
+			if !fetchedBefore && !failedBefore {
+				models, fetchErr = g.fetchUpstreamModels(c, account)
+				if fetchErr != nil {
+					fetchErrors[account.ID] = fetchErr
+				} else {
+					fetched[account.ID] = models
+				}
+			}
+			if fetchErr != nil {
+				continue
+			}
+			groupSucceeded = true
+			for _, item := range models {
+				discovered[item.ID] = item
+			}
+		}
+		if groupSucceeded {
+			staticGroupSuccesses++
+		}
+	}
+
+	if len(localPlatforms) > 0 {
+		platforms := make([]string, 0, len(localPlatforms))
+		for platform := range localPlatforms {
+			platforms = append(platforms, platform)
+		}
+		var configs []model.ModelConfig
+		if err := g.db.Where("platform IN ? AND status = ?", platforms, model.StatusActive).Find(&configs).Error; err != nil {
+			return nil, err
+		}
+		for _, config := range configs {
+			id := strings.TrimSpace(config.Name)
+			if id != "" {
+				discovered[id] = upstreamModelItem{ID: id, Owner: config.Platform}
+			}
+		}
+	}
+	if staticGroupCount > 0 && staticGroupSuccesses == 0 && len(discovered) == 0 {
+		return nil, fmt.Errorf("no upstream model catalogue is available")
+	}
+
+	modelItems := make([]upstreamModelItem, 0, len(discovered))
+	for _, item := range discovered {
+		modelItems = append(modelItems, item)
+	}
+	sort.Slice(modelItems, func(i, j int) bool {
+		if modelItems[i].ID == modelItems[j].ID {
+			return modelItems[i].Owner < modelItems[j].Owner
+		}
+		return modelItems[i].ID < modelItems[j].ID
+	})
+	result := make([]gin.H, 0, len(modelItems))
+	for _, item := range modelItems {
+		entry := gin.H{"id": item.ID, "object": "model", "owned_by": item.Owner}
+		if item.Created > 0 {
+			entry["created"] = item.Created
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
+func (g *Gateway) fetchUpstreamModels(c *gin.Context, account *model.UpstreamAccount) ([]upstreamModelItem, error) {
+	endpoint, err := upstreamModelsURL(account)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	if account.Platform == model.PlatformAnthropic {
+		request.Header.Set("anthropic-version", "2023-06-01")
+	}
+	if err := g.applyCredential(c, request, account, account.Platform); err != nil {
+		return nil, err
+	}
+	client, err := g.clientFor(account)
+	if err != nil {
+		return nil, err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32<<10))
+		return nil, fmt.Errorf("upstream models returned HTTP %d", response.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	items, err := parseUpstreamModels(body, account.Platform)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("upstream model list is empty")
+	}
+	return items, nil
+}
+
+func upstreamModelsURL(account *model.UpstreamAccount) (string, error) {
+	if account == nil {
+		return "", fmt.Errorf("upstream account is required")
+	}
+	base := strings.TrimSpace(account.BaseURL)
+	if base == "" {
+		switch account.Platform {
+		case model.PlatformAnthropic:
+			base = defaultAnthropic
+		case model.PlatformOpenAI:
+			base = defaultOpenAI
+		case model.PlatformGemini:
+			base = defaultGemini
+		case model.PlatformGrok:
+			base = defaultGrok
+		case model.PlatformKimi:
+			base = defaultKimiPayG
+			if account.AccountMode == model.AccountModeCoding {
+				base = defaultKimiCoding
+			}
+		case model.PlatformZhipu:
+			base = defaultZhipuPayG
+			if account.AccountMode == model.AccountModeCoding {
+				base = defaultZhipuCoding
+			}
+		case model.PlatformDeepSeek:
+			base = defaultDeepSeek
+		default:
+			return "", fmt.Errorf("unsupported upstream platform %q", account.Platform)
+		}
+	}
+	path := "/v1/models"
+	if account.Platform == model.PlatformGemini {
+		path = "/v1beta/models"
+	} else if account.Platform == model.PlatformZhipu {
+		path = "/models"
+	}
+	return util.JoinUpstreamURL(base, path)
+}
+
+func parseUpstreamModels(body []byte, platform string) ([]upstreamModelItem, error) {
+	var root map[string]json.RawMessage
+	if err := json.Unmarshal(body, &root); err != nil {
+		return nil, err
+	}
+	raw := root["data"]
+	if len(raw) == 0 {
+		raw = root["models"]
+	}
+	if len(raw) == 0 {
+		return nil, fmt.Errorf("model list is missing")
+	}
+	if len(raw) > 0 && raw[0] == '{' {
+		var envelope map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &envelope); err != nil {
+			return nil, err
+		}
+		raw = envelope["data"]
+		if len(raw) == 0 {
+			raw = envelope["models"]
+		}
+	}
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	items := make([]upstreamModelItem, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		var id string
+		var direct string
+		if err := json.Unmarshal(value, &direct); err == nil {
+			id = direct
+		} else {
+			var fields struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Model   string `json:"model"`
+				Slug    string `json:"slug"`
+				Created int64  `json:"created"`
+			}
+			if err := json.Unmarshal(value, &fields); err != nil {
+				continue
+			}
+			for _, candidate := range []string{fields.ID, fields.Name, fields.Model, fields.Slug} {
+				if strings.TrimSpace(candidate) != "" {
+					id = candidate
+					break
+				}
+			}
+			id = strings.TrimSpace(id)
+			if platform == model.PlatformGemini {
+				id = strings.TrimPrefix(id, "models/")
+			}
+			if id == "" {
+				continue
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			items = append(items, upstreamModelItem{ID: id, Owner: platform, Created: fields.Created})
+			continue
+		}
+		id = strings.TrimSpace(id)
+		if platform == model.PlatformGemini {
+			id = strings.TrimPrefix(id, "models/")
+		}
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		items = append(items, upstreamModelItem{ID: id, Owner: platform})
+	}
+	return items, nil
 }
 
 // handleUsage returns a compact, client-manager friendly view of the API key

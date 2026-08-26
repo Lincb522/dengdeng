@@ -19,11 +19,12 @@ import (
 
 func newChannelStatusTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open("file:channel-status-test?mode=memory&cache=shared"), &gorm.Config{})
+	databaseName := strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
+	db, err := gorm.Open(sqlite.Open("file:"+databaseName+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Group{}, &model.UpstreamAccount{}, &model.UpstreamAccountGroup{}, &model.AccountProbe{}, &model.UsageLog{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Group{}, &model.UpstreamAccount{}, &model.UpstreamAccountGroup{}, &model.AccountProbe{}, &model.UsageLog{}, &model.Setting{}); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -88,6 +89,7 @@ func TestChannelStatusFiltersPrivateGroupsAndAggregatesRealMetrics(t *testing.T)
 	logs := []model.UsageLog{
 		{GroupID: publicGroup.ID, AccountID: publicAccount.ID, Model: "gpt-test", FirstTokenMs: 100, DurationMs: 200, StatusCode: 200, CreatedAt: now.Add(-3 * time.Minute)},
 		{GroupID: publicGroup.ID, AccountID: publicAccount.ID, Model: "gpt-test", FirstTokenMs: 300, DurationMs: 500, StatusCode: 500, CreatedAt: now.Add(-2 * time.Minute)},
+		{GroupID: publicGroup.ID, AccountID: publicAccount.ID, Model: "bad-client-input", StatusCode: 402, CreatedAt: now.Add(-time.Minute)},
 		{GroupID: privateGroup.ID, AccountID: privateAccount.ID, Model: "private-model", FirstTokenMs: 900, DurationMs: 1000, StatusCode: 503, CreatedAt: now.Add(-time.Minute)},
 	}
 	if err := db.Create(&logs).Error; err != nil {
@@ -101,14 +103,17 @@ func TestChannelStatusFiltersPrivateGroupsAndAggregatesRealMetrics(t *testing.T)
 		t.Fatalf("unexpected public response: %#v", response)
 	}
 	group := response.Groups[0]
-	if group.Name != publicGroup.Name || group.State != "healthy" || group.AccountTotal != 1 || group.AccountAvailable != 1 {
+	if group.Name != publicGroup.Name || group.State != "degraded" || group.StateSource != "traffic" || group.AccountTotal != 1 || group.AccountEligible != 1 || group.AccountAvailable != 1 {
 		t.Fatalf("unexpected group state: %#v", group)
 	}
 	if group.ProbeTotal != 2 || group.ProbeSuccesses != 2 || group.ProbeSuccessRate != 100 || group.AverageProbeLatencyMs != 150 {
 		t.Fatalf("unexpected probe aggregate: %#v", group)
 	}
-	if group.RequestTotal != 2 || group.RequestSuccesses != 1 || group.RequestSuccessRate != 50 || group.AverageTTFTMs != 200 || group.TopModel != "gpt-test" {
+	if group.RequestTotal != 2 || group.RequestSuccesses != 1 || group.RequestSuccessRate != 50 || group.AverageTTFTMs != 100 || group.TopModel != "gpt-test" {
 		t.Fatalf("unexpected request aggregate: %#v", group)
+	}
+	if group.CurrentRequestTotal != 2 || group.CurrentRequestOK != 1 || group.CurrentRequestRate != 50 || group.LastRequestAt == nil {
+		t.Fatalf("unexpected current request aggregate: %#v", group)
 	}
 	if len(group.Timeline) != channelStatusBucketCount {
 		t.Fatalf("timeline buckets = %d", len(group.Timeline))
@@ -118,6 +123,69 @@ func TestChannelStatusFiltersPrivateGroupsAndAggregatesRealMetrics(t *testing.T)
 		if strings.Contains(body, secret) {
 			t.Fatalf("privacy-safe response leaked %q: %s", secret, body)
 		}
+	}
+}
+
+func TestChannelStatusCurrentTrafficOverridesSuccessfulTransportProbe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newChannelStatusTestDB(t)
+	now := time.Now().UTC()
+	group := model.Group{Name: "traffic-failing", Platform: model.PlatformAnthropic, IsPublic: true, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	account := model.UpstreamAccount{GroupID: group.ID, Name: "transport-ok", Platform: model.PlatformAnthropic, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AccountProbe{AccountID: account.ID, Mode: "transport", State: "healthy", StatusCode: 200, LatencyMs: 80, CheckedAt: now.Add(-time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		if err := db.Create(&model.UsageLog{GroupID: group.ID, AccountID: account.ID, Model: "claude-test", StatusCode: 503, CreatedAt: now.Add(-time.Duration(index+1) * time.Minute)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	handler := NewUserHandler(db, &config.Config{})
+	user := &model.User{ID: 101, Email: "user2@example.com", Role: model.RoleUser, Status: model.StatusActive}
+	_, response := requestChannelStatus(t, handler, user, "/api/user/channel-status?range=7d")
+	if len(response.Groups) != 1 {
+		t.Fatalf("groups = %#v", response.Groups)
+	}
+	status := response.Groups[0]
+	if status.State != "down" || status.StateSource != "traffic" || status.CurrentRequestTotal != 3 || status.CurrentRequestOK != 0 {
+		t.Fatalf("runtime failures did not determine channel state: %#v", status)
+	}
+}
+
+func TestChannelStatusHistoricalFailuresDoNotOverrideCurrentProbe(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newChannelStatusTestDB(t)
+	now := time.Now().UTC()
+	group := model.Group{Name: "recovered", Platform: model.PlatformOpenAI, IsPublic: true, Status: model.StatusActive, RateMultiplier: 1}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	account := model.UpstreamAccount{GroupID: group.ID, Name: "recovered-account", Platform: model.PlatformOpenAI, Status: model.StatusActive}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AccountProbe{AccountID: account.ID, Mode: "api", State: "healthy", StatusCode: 200, CheckedAt: now.Add(-time.Minute)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		if err := db.Create(&model.UsageLog{GroupID: group.ID, AccountID: account.ID, StatusCode: 503, CreatedAt: now.Add(-time.Duration(index+30) * time.Minute)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	handler := NewUserHandler(db, &config.Config{})
+	user := &model.User{ID: 102, Email: "user3@example.com", Role: model.RoleUser, Status: model.StatusActive}
+	_, response := requestChannelStatus(t, handler, user, "/api/user/channel-status?range=1h")
+	status := response.Groups[0]
+	if status.State != "healthy" || status.StateSource != "probe" || status.RequestTotal != 3 || status.RequestSuccessRate != 0 || status.CurrentRequestTotal != 0 {
+		t.Fatalf("historical failures changed current state: %#v", status)
 	}
 }
 

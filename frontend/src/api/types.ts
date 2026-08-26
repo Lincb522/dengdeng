@@ -1154,9 +1154,13 @@ export interface ChannelGroupStatus {
   platform: string
   is_public: boolean
   state: 'healthy' | 'degraded' | 'down' | 'expired' | 'disabled' | 'unknown'
+  state_source: 'traffic' | 'probe' | 'accounts' | 'group'
   account_total: number
+  account_eligible: number
+  account_checked: number
   account_available: number
   last_probe_at?: string | null
+  last_request_at?: string | null
   average_probe_latency_ms: number
   probe_success_rate: number
   probe_successes: number
@@ -1165,6 +1169,9 @@ export interface ChannelGroupStatus {
   request_success_rate: number
   request_successes: number
   request_total: number
+  current_request_success_rate: number
+  current_request_successes: number
+  current_request_total: number
   top_model: string
   timeline: ChannelStatusBucket[]
 }
@@ -1175,6 +1182,8 @@ export interface ChannelStatusResponse {
   generated_at: string
   last_probe_at?: string | null
   admin_view: boolean
+  probe_interval_seconds: number
+  current_window_minutes: number
   groups: ChannelGroupStatus[]
 }
 

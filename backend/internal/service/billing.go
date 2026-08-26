@@ -224,16 +224,21 @@ func (s *BillingService) Record(bc BillContext) error {
 
 func opsErrorFromUsage(entry model.UsageLog, platform string) model.OpsErrorLog {
 	phase, errorType, source := "response", "upstream", "provider"
+	message := strings.ToLower(entry.ErrorMessage)
 	businessLimited := entry.StatusCode == http.StatusTooManyRequests
 	retryable := businessLimited || entry.StatusCode == http.StatusBadGateway || entry.StatusCode == http.StatusServiceUnavailable || entry.StatusCode == 529
 	switch {
+	case strings.Contains(message, "upstream model is temporarily unavailable"):
+		phase, errorType, source = "routing", "model_cooldown", "scheduler"
+	case strings.Contains(message, "upstream rejected this model or endpoint"):
+		phase, errorType, source = "routing", "model_unsupported", "scheduler"
 	case entry.StatusCode == http.StatusUnauthorized || entry.StatusCode == http.StatusForbidden:
 		phase, errorType = "authentication", "authentication"
 	case entry.StatusCode == http.StatusBadRequest || entry.StatusCode == http.StatusRequestEntityTooLarge:
 		phase, errorType, source = "request", "invalid_request", "client"
 	case entry.StatusCode == http.StatusTooManyRequests:
 		phase, errorType = "routing", "rate_limit"
-	case entry.StatusCode == http.StatusServiceUnavailable && strings.Contains(strings.ToLower(entry.ErrorMessage), "no available upstream"):
+	case entry.StatusCode == http.StatusServiceUnavailable && strings.Contains(message, "no available upstream"):
 		phase, errorType, source = "routing", "no_available_account", "scheduler"
 	case entry.StatusCode >= http.StatusInternalServerError && entry.StatusCode < 600:
 		phase, errorType = "upstream", "upstream_error"

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"dengdeng/internal/crypto"
@@ -17,6 +18,78 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestRelayReturnsCachedUpstreamStatusDuringModelCooldown(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		errorCode string
+	}{
+		{name: "transient", status: http.StatusBadGateway, body: `{"error":{"message":"Upstream request failed"}}`, errorCode: "upstream.model_cooldown"},
+		{name: "unsupported", status: http.StatusNotFound, body: `{"error":{"message":"model is not supported"}}`, errorCode: "upstream.model_unsupported"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			if err := crypto.Init("", "gateway-model-cooldown-"+test.name); err != nil {
+				t.Fatal(err)
+			}
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer upstream.Close()
+
+			db := openMultiGroupGatewayDB(t, "gateway-model-cooldown-"+test.name)
+			user := model.User{Email: test.name + "@example.test", PasswordHash: "x", Role: model.RoleAdmin, Status: model.StatusActive, RateMultiplier: 1}
+			group := model.Group{Name: test.name, Platform: model.PlatformOpenAI, Status: model.StatusActive, RateMultiplier: 1}
+			if err := db.Create(&user).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Create(&group).Error; err != nil {
+				t.Fatal(err)
+			}
+			plain := "dd-model-cooldown-" + test.name
+			key := model.APIKey{UserID: user.ID, GroupID: group.ID, KeyHash: util.HashAPIKey(plain), KeyPreview: "dd-model", Name: test.name, Status: model.StatusActive}
+			if err := db.Create(&key).Error; err != nil {
+				t.Fatal(err)
+			}
+			account := model.UpstreamAccount{GroupID: group.ID, Name: test.name, Platform: model.PlatformOpenAI, BaseURL: upstream.URL, AuthType: model.AuthAPIKey, APIKey: "sk-upstream", Status: model.StatusActive}
+			if err := db.Create(&account).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			gw := New(db, service.NewScheduler(db), service.NewBillingService(db, service.NewPricingService(db)), service.NewUserGroupRateResolver(db), nil, service.NewRuntimeMetrics(), nil)
+			router := gin.New()
+			router.Use(middleware.RequestID())
+			gw.Register(router)
+			request := func() *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-test","messages":[{"role":"user","content":"hi"}]}`))
+				req.Header.Set("Authorization", "Bearer "+plain)
+				req.Header.Set("Content-Type", "application/json")
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, req)
+				return response
+			}
+
+			first := request()
+			second := request()
+			if first.Code != test.status || second.Code != test.status {
+				t.Fatalf("statuses = %d/%d, want %d", first.Code, second.Code, test.status)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("upstream calls = %d, want 1", calls.Load())
+			}
+			if second.Header().Get("Retry-After") == "" || !strings.Contains(second.Body.String(), `"error_code":"`+test.errorCode+`"`) {
+				t.Fatalf("cached response headers/body = %#v / %s", second.Header(), second.Body.String())
+			}
+		})
+	}
+}
 
 func TestRetryableUpstreamIncludesAccountSpecificPayloadFailures(t *testing.T) {
 	tests := []struct {

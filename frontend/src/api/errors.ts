@@ -161,6 +161,8 @@ const errorCopy: Record<string, ErrorCopy> = {
   'upstream.busy': { title: '上游账号繁忙', message: '可用账号当前并发已满。', action: '请稍后重试。', retryable: true },
   'upstream.authentication_failed': { title: '上游账号认证失败', message: '上游账号的登录状态、令牌或接口权限不可用。', action: '请刷新账号凭据、重新登录或更换账号。', retryable: true },
   'upstream.rate_limited': { title: '上游请求受限', message: '上游账号正在冷却。', action: '请等待额度窗口恢复或切换账号。', retryable: true },
+  'upstream.model_cooldown': { title: '模型暂时不可用', message: '上游刚刚未能完成该模型的请求。', action: '也可以切换分组。', retryable: true },
+  'upstream.model_unsupported': { title: '上游不支持该模型', message: '当前分组的上游拒绝了该模型或接口。', action: '请更换模型或分组。' },
   'upstream.failed': { title: '上游服务异常', message: '上游没有正常完成请求。', action: '请稍后重试；管理员可在用量明细查看错误链路。', retryable: true },
   'upstream.empty_response': { title: '上游返回了空响应', message: '请求已到达上游，但没有收到可用的回复内容。', action: '请重试；如果持续出现，请检查账号和协议转换配置。', retryable: true },
   'upstream.invalid_response': { title: '上游响应格式异常', message: '上游返回的内容无法正常解析。', action: '请检查代理、协议转换和上游服务状态。', retryable: true },
@@ -254,6 +256,7 @@ export function resolveApiError(status: number, payload: unknown, headers?: Head
   if (retryAfter > 0) {
     if (code === 'auth.too_many_attempts') message = `密码错误次数过多，请 ${formatWait(retryAfter)}后重试。`
     else if (code === 'auth.code_rate_limited') message = `验证码已发送，请 ${formatWait(retryAfter)}后再试。`
+    else if (code === 'upstream.model_cooldown') message = `上游刚刚未能完成该模型的请求，请 ${formatWait(retryAfter)}后重试。`
     else if (code.endsWith('rate_limited')) message = `当前请求已被限制，请 ${formatWait(retryAfter)}后重试。`
   }
 

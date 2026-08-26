@@ -1116,6 +1116,13 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 					break // fall through to lastStatus passthrough
 				}
 				g.setRelayTimingHeaders(c, trace)
+				if diagnostic, ok := g.scheduler.Diagnostic(routeGroup.ID); ok && diagnostic.ModelCooldownOnly() && diagnostic.UpstreamStatus >= 400 {
+					status, code, message := modelCooldownResponse(diagnostic.UpstreamStatus)
+					retryAfter := time.Duration(diagnostic.RetryAfterSeconds) * time.Second
+					g.recordRelayFailure(c, ak, routeGroup, req, start, trace, status, message)
+					util.FailRetry(c, status, code, message, retryAfter)
+					return
+				}
 				diagnosticMessage := g.schedulerFailureMessage(routeGroup.ID, "no available upstream account in the selected groups")
 				log.Printf("[scheduler] group=%d model=%s %s", routeGroup.ID, req.Model, diagnosticMessage)
 				g.recordRelayFailure(c, ak, routeGroup, req, start, trace, http.StatusServiceUnavailable, diagnosticMessage)
@@ -1253,6 +1260,18 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 	g.setRelayTimingHeaders(c, trace)
 	g.recordRelayFailure(c, ak, lastAttemptGroup, req, start, trace, lastStatus, truncate(string(lastBody), 500))
 	c.Data(lastStatus, "application/json", lastBody)
+}
+
+func modelCooldownResponse(upstreamStatus int) (int, string, string) {
+	if upstreamStatus < 400 || upstreamStatus > 599 {
+		upstreamStatus = http.StatusBadGateway
+	}
+	switch upstreamStatus {
+	case http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusUnprocessableEntity:
+		return upstreamStatus, "upstream.model_unsupported", "upstream rejected this model or endpoint"
+	default:
+		return upstreamStatus, "upstream.model_cooldown", "upstream model is temporarily unavailable"
+	}
 }
 
 func (g *Gateway) schedulerFailureMessage(groupID int64, fallback string) string {

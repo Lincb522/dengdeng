@@ -476,8 +476,20 @@ func TestSchedulerModelFailureDoesNotBlockOtherModels(t *testing.T) {
 	if _, err := scheduler.PickForSession(1, "gpt-a", "", nil); !errors.Is(err, ErrNoAccount) {
 		t.Fatalf("failed model error = %v", err)
 	}
+	diagnostic, ok := scheduler.Diagnostic(1)
+	if !ok || !diagnostic.ModelCooldownOnly() || diagnostic.UpstreamStatus != 500 || diagnostic.RetryAfterSeconds != 10 {
+		t.Fatalf("model cooldown diagnostic = %#v", diagnostic)
+	}
 	if got, err := scheduler.PickForSession(1, "gpt-b", "", nil); err != nil || got.ID != account.ID {
 		t.Fatalf("other model pick = %#v, %v", got, err)
+	}
+	now = now.Add(10 * time.Second)
+	probe, err := scheduler.PickForSession(1, "gpt-a", "", nil)
+	if err != nil || probe.ID != account.ID {
+		t.Fatalf("half-open probe = %#v, %v", probe, err)
+	}
+	if _, err := scheduler.PickForSession(1, "gpt-a", "", nil); !errors.Is(err, ErrNoAccount) {
+		t.Fatalf("parallel half-open pick error = %v", err)
 	}
 }
 

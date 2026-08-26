@@ -65,20 +65,23 @@ type schedulerAccountModelKey struct {
 
 type schedulerModelFailure struct {
 	streak      int
+	statusCode  int
 	lastFailure time.Time
+	lastProbe   time.Time
 	blockUntil  time.Time
 	lastTouched time.Time
 }
 
-// SchedulerDiagnostics is the safe, credential-free explanation for the most
-// recent account-pool exhaustion. Clients still receive the stable generic
-// 503, while operators can see exactly why every account was excluded.
+// SchedulerDiagnostics is the credential-free explanation for the most recent
+// account-pool exhaustion.
 type SchedulerDiagnostics struct {
-	GroupID   int64          `json:"group_id"`
-	Model     string         `json:"model,omitempty"`
-	Pool      int            `json:"pool"`
-	Reasons   map[string]int `json:"reasons"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	GroupID           int64          `json:"group_id"`
+	Model             string         `json:"model,omitempty"`
+	Pool              int            `json:"pool"`
+	Reasons           map[string]int `json:"reasons"`
+	UpstreamStatus    int            `json:"upstream_status,omitempty"`
+	RetryAfterSeconds int            `json:"retry_after_seconds,omitempty"`
+	UpdatedAt         time.Time      `json:"updated_at"`
 }
 
 func (d SchedulerDiagnostics) Summary() string {
@@ -96,6 +99,21 @@ func (d SchedulerDiagnostics) Summary() string {
 		parts = append(parts, fmt.Sprintf("%s=%d", key, d.Reasons[key]))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func (d SchedulerDiagnostics) ModelCooldownOnly() bool {
+	if d.Reasons["model_cooldown"] == 0 {
+		return false
+	}
+	for reason, count := range d.Reasons {
+		if count == 0 {
+			continue
+		}
+		if reason != "model_cooldown" && reason != "disabled" {
+			return false
+		}
+	}
+	return true
 }
 
 // Scheduler keeps a short, process-local account snapshot. DengDeng currently
@@ -279,6 +297,7 @@ func (s *Scheduler) pick(groupID int64, modelName, sessionID string, exclude []i
 	}
 	delete(s.diagnostics, groupID)
 	selected.lastSelected = now
+	s.markModelProbeLocked(selected.account.ID, modelName, now)
 	s.accountInFlight[selected.account.ID]++
 	selected.inFlight = s.accountInFlight[selected.account.ID]
 	for _, group := range s.groups {
@@ -338,6 +357,9 @@ func (s *Scheduler) entryExclusionReasonLocked(entry *schedulerAccountEntry, mod
 	if !exists {
 		return ""
 	}
+	if failure.statusCode >= 500 && !failure.lastProbe.IsZero() && now.Sub(failure.lastProbe) >= modelFailureShortCooldown {
+		return ""
+	}
 	if failure.blockUntil.IsZero() || !failure.blockUntil.After(now) {
 		if now.Sub(failure.lastTouched) > modelFailureWindow {
 			delete(s.modelFailures, key)
@@ -355,6 +377,9 @@ func (s *Scheduler) buildDiagnosticsLocked(groupID int64, modelName string, snap
 	diagnostic.Pool = len(snapshot.accounts)
 	for _, entry := range snapshot.accounts {
 		reason := s.entryExclusionReasonLocked(entry, modelName, excluded, now)
+		if reason == "model_cooldown" {
+			s.addModelFailureDiagnosticLocked(&diagnostic, entry.account.ID, modelName, now)
+		}
 		if reason == "" && !s.entryHasConcurrencySlot(entry) {
 			reason = "concurrency_full"
 		}
@@ -364,6 +389,49 @@ func (s *Scheduler) buildDiagnosticsLocked(groupID int64, modelName string, snap
 		diagnostic.Reasons[reason]++
 	}
 	return diagnostic
+}
+
+func (s *Scheduler) markModelProbeLocked(accountID int64, modelName string, now time.Time) {
+	key, ok := schedulerModelKey(accountID, modelName)
+	if !ok {
+		return
+	}
+	failure, exists := s.modelFailures[key]
+	if !exists || failure.statusCode < 500 || now.Sub(failure.lastProbe) < modelFailureShortCooldown {
+		return
+	}
+	failure.lastProbe = now
+	failure.lastTouched = now
+	if nextProbe := now.Add(modelFailureShortCooldown); failure.blockUntil.Before(nextProbe) {
+		failure.blockUntil = nextProbe
+	}
+	s.modelFailures[key] = failure
+}
+
+func (s *Scheduler) addModelFailureDiagnosticLocked(diagnostic *SchedulerDiagnostics, accountID int64, modelName string, now time.Time) {
+	key, ok := schedulerModelKey(accountID, modelName)
+	if !ok {
+		return
+	}
+	failure, exists := s.modelFailures[key]
+	if !exists {
+		return
+	}
+	nextAttempt := failure.blockUntil
+	if failure.statusCode >= 500 && !failure.lastProbe.IsZero() {
+		probeAt := failure.lastProbe.Add(modelFailureShortCooldown)
+		if nextAttempt.IsZero() || probeAt.Before(nextAttempt) {
+			nextAttempt = probeAt
+		}
+	}
+	seconds := int(math.Ceil(nextAttempt.Sub(now).Seconds()))
+	if seconds < 1 {
+		seconds = 1
+	}
+	if diagnostic.RetryAfterSeconds == 0 || seconds < diagnostic.RetryAfterSeconds {
+		diagnostic.RetryAfterSeconds = seconds
+		diagnostic.UpstreamStatus = failure.statusCode
+	}
 }
 
 func (s *Scheduler) Diagnostic(groupID int64) (SchedulerDiagnostics, bool) {
@@ -728,7 +796,9 @@ func (s *Scheduler) ReportFailureForModel(accountID int64, modelName string, sta
 		entry.streak = 0
 	}
 	entry.streak++
+	entry.statusCode = statusCode
 	entry.lastFailure = now
+	entry.lastProbe = now
 	entry.lastTouched = now
 	switch {
 	case statusCode == 403 || statusCode == 404:

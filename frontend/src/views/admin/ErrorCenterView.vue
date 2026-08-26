@@ -59,6 +59,8 @@ const categoryLabels: Record<string, string> = {
   invalid_request: '请求参数',
   rate_limit: '限流',
   no_available_account: '无可用账号',
+  model_cooldown: '模型冷却',
+  model_unsupported: '模型不兼容',
   upstream_error: '上游响应',
   upstream: '上游响应',
 }
@@ -140,6 +142,12 @@ function localizedSiteError(item: SiteErrorLog) {
 }
 
 function localizedAPIError(item: OpsErrorLog) {
+  if (item.error_type === 'model_cooldown' || item.error_type === 'model_unsupported') {
+    return resolveApiError(item.status_code || 0, {
+      message: item.error_message,
+      error_code: `upstream.${item.error_type}`,
+    })
+  }
   const resolved = resolveApiError(item.status_code || 0, { message: item.error_message })
   if (item.error_type === 'authentication' && resolved.code === 'auth.required') {
     return resolveApiError(item.status_code || 0, {

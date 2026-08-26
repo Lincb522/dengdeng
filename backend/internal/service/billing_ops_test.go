@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http"
 	"testing"
 
 	"dengdeng/internal/model"
@@ -8,6 +9,24 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestOpsErrorFromUsageClassifiesModelCircuitState(t *testing.T) {
+	tests := []struct {
+		status    int
+		message   string
+		errorType string
+		retryable bool
+	}{
+		{http.StatusBadGateway, "upstream model is temporarily unavailable", "model_cooldown", true},
+		{http.StatusNotFound, "upstream rejected this model or endpoint", "model_unsupported", false},
+	}
+	for _, test := range tests {
+		got := opsErrorFromUsage(model.UsageLog{StatusCode: test.status, ErrorMessage: test.message}, model.PlatformOpenAI)
+		if got.ErrorType != test.errorType || got.ErrorSource != "scheduler" || got.Retryable != test.retryable {
+			t.Fatalf("classified sidecar = %#v", got)
+		}
+	}
+}
 
 func TestBillingPersistsRequestMetadataAndErrorSidecar(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:billing-ops-test?mode=memory&cache=shared"), &gorm.Config{})
