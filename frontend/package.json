@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "dev:workbench": "pnpm --dir workbench dev",
+    "build": "vite build && pnpm --dir workbench build",
+    "typecheck:workbench": "pnpm --dir workbench typecheck",
     "preview": "vite preview"
   },
   "dependencies": {

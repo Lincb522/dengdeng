@@ -1,10 +1,13 @@
 package server
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"dengdeng/internal/web"
 
 	"github.com/gin-gonic/gin"
 )
@@ -66,23 +69,40 @@ func TestFrontendPageRoutesServeSPAWithNoStore(t *testing.T) {
 	}
 }
 
+func TestImageWorkbenchRoutesServeNestedSPA(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	mountFrontend(router)
+
+	for _, path := range []string{"/image-workbench", "/image-workbench/canvas", "/image-workbench/canvas/project-1"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		}
+		if !strings.Contains(recorder.Body.String(), `src="/image-workbench/`) {
+			t.Fatalf("%s did not serve the workbench document", path)
+		}
+		if cacheControl := recorder.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-store") {
+			t.Fatalf("%s cache control = %q", path, cacheControl)
+		}
+	}
+}
+
 func TestFrontendHashedAssetsAreImmutable(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	mountFrontend(router)
 
-	index := httptest.NewRecorder()
-	router.ServeHTTP(index, httptest.NewRequest(http.MethodGet, "/", nil))
-	start := strings.Index(index.Body.String(), `/assets/`)
-	if start < 0 {
-		t.Fatal("embedded index does not reference a hashed asset")
+	dist, err := web.Dist()
+	if err != nil {
+		t.Fatal(err)
 	}
-	remaining := index.Body.String()[start:]
-	end := strings.IndexAny(remaining, `"'`)
-	if end <= 0 {
-		t.Fatalf("could not parse asset path from %q", remaining)
+	assets, err := fs.Glob(dist, "assets/*.js")
+	if err != nil || len(assets) == 0 {
+		t.Fatal("embedded frontend has no JavaScript asset")
 	}
-	assetPath := remaining[:end]
+	assetPath := "/" + assets[0]
 
 	asset := httptest.NewRecorder()
 	router.ServeHTTP(asset, httptest.NewRequest(http.MethodGet, assetPath, nil))
@@ -91,5 +111,19 @@ func TestFrontendHashedAssetsAreImmutable(t *testing.T) {
 	}
 	if cacheControl := asset.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "immutable") {
 		t.Fatalf("asset cache control = %q", cacheControl)
+	}
+}
+
+func TestFrontendMissingAssetsDoNotServeSPADocument(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	mountFrontend(router)
+
+	for _, path := range []string{"/assets/missing.js", "/image-workbench/assets/missing.js"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want %d", path, recorder.Code, http.StatusNotFound)
+		}
 	}
 }

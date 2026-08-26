@@ -10,13 +10,15 @@ const router = createRouter({
 		{ path: '/auth/:provider/callback', name: 'oauth-callback', component: () => import('../views/LoginView.vue') },
     { path: '/models', name: 'models', component: () => import('../views/ModelPlazaView.vue') },
     { path: '/legal/:documentId', name: 'legal', component: () => import('../views/LegalView.vue') },
-    { path: '/studio', name: 'studio', component: () => import('../views/ImageStudioView.vue') },
+    { path: '/studio', name: 'studio', component: () => import('../views/ImageWorkbenchRedirectView.vue') },
+    { path: '/studio/legacy', name: 'studio-legacy', component: () => import('../views/ImageStudioView.vue') },
     {
       path: '/console',
       component: () => import('../layouts/ConsoleLayout.vue'),
       children: [
         { path: '', redirect: '/dashboard' },
         { path: '/dashboard', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
+		{ path: '/library', name: 'creation-library', component: () => import('../views/CreationLibraryView.vue') },
         { path: '/keys', name: 'keys', component: () => import('../views/KeysView.vue') },
         { path: '/usage', name: 'usage', component: () => import('../views/UsageView.vue') },
 		{ path: '/status', name: 'status', component: () => import('../views/ChannelStatusView.vue') },
@@ -33,6 +35,7 @@ const router = createRouter({
             { path: 'alerts', name: 'admin-alerts', component: () => import('../views/admin/AlertsView.vue') },
             { path: 'backups', name: 'admin-backups', component: () => import('../views/admin/BackupsView.vue') },
             { path: 'errors', name: 'admin-errors', component: () => import('../views/admin/ErrorCenterView.vue') },
+			{ path: 'library', name: 'admin-creation-library', component: () => import('../views/admin/CreationLibraryView.vue') },
             { path: 'updates', name: 'admin-updates', component: () => import('../views/admin/UpdatesView.vue') },
             { path: 'groups', name: 'admin-groups', component: () => import('../views/admin/GroupsView.vue') },
             { path: 'accounts', name: 'admin-accounts', component: () => import('../views/admin/AccountsView.vue') },
@@ -54,7 +57,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
-	if (to.name === 'home' || to.name === 'login' || to.name === 'oauth-callback' || to.name === 'models' || to.name === 'legal' || to.name === 'studio') return true
+	if (to.name === 'home' || to.name === 'login' || to.name === 'oauth-callback' || to.name === 'models' || to.name === 'legal' || to.name === 'studio' || to.name === 'studio-legacy') return true
   if (!getToken()) return { name: 'login' }
 
   const auth = useAuth()

@@ -137,6 +137,12 @@ function defaultSystemSettings(): SystemSettings {
 			github: { ...oauthProviderDefault('GitHub', '/auth/github/callback'), authorize_url: 'https://github.com/login/oauth/authorize', token_url: 'https://github.com/login/oauth/access_token', userinfo_url: 'https://api.github.com/user', scopes: 'read:user user:email', id_path: 'id', username_path: 'login' },
 				google: { ...oauthProviderDefault('Google', '/auth/google/callback'), issuer_url: 'https://accounts.google.com', discovery_url: 'https://accounts.google.com/.well-known/openid-configuration', authorize_url: 'https://accounts.google.com/o/oauth2/v2/auth', token_url: 'https://oauth2.googleapis.com/token', userinfo_url: 'https://openidconnect.googleapis.com/v1/userinfo', jwks_url: 'https://www.googleapis.com/oauth2/v3/certs', scopes: 'openid email profile', use_pkce: true, validate_id_token: true, require_verified_email: true, allowed_signing_algs: 'RS256', clock_skew_seconds: 60 },
 		},
+		creation_library: {
+			enabled: true,
+			catalog_version: 5,
+			capabilities: { prompts: true, rules: true, skills: true, chat: true, image: true, video: true, audio: true },
+			prompts: [], rules: [], skills: [],
+		},
 	}
 }
 
@@ -236,6 +242,12 @@ async function load() {
 				notifications: { ...defaults.notifications, ...(data.notifications || {}), account_quota_emails: data.notifications?.account_quota_emails || [] },
 				email: { ...defaults.email, ...(data.email || {}) },
 				auth_providers: Object.fromEntries(oauthProviderEntries.map((item) => [item.key, { ...defaults.auth_providers[item.key], ...(data.auth_providers?.[item.key] || {}) }])) as SystemSettings['auth_providers'],
+				creation_library: {
+					enabled: data.creation_library?.enabled ?? defaults.creation_library.enabled,
+					catalog_version: data.creation_library?.catalog_version || defaults.creation_library.catalog_version,
+					capabilities: data.creation_library?.capabilities || { ...defaults.creation_library.capabilities },
+					prompts: data.creation_library?.prompts || [], rules: data.creation_library?.rules || [], skills: data.creation_library?.skills || [],
+				},
 		}
 		secretConfigured.value = data.secret_configured || {}
 		secretValues.value = emptySecretValues()

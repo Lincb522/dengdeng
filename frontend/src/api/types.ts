@@ -173,6 +173,49 @@ export interface AuthProviderSettings {
 	google: OAuthProviderSettings
 }
 
+export type CreationLibraryScope = 'all' | 'chat' | 'image' | 'video' | 'audio'
+
+export interface CreationLibraryEntry {
+	id: string
+	name: string
+	name_en?: string
+	description: string
+	description_en?: string
+	content: string
+	content_en?: string
+	scope: CreationLibraryScope
+	enabled: boolean
+	auto_apply: boolean
+	version?: string
+	author?: string
+	category?: string
+	tags?: string[]
+	source_type?: 'builtin' | 'official' | 'community' | 'custom'
+	source_url?: string
+	license?: string
+}
+
+export interface CreationCapabilitySettings {
+	prompts: boolean
+	rules: boolean
+	skills: boolean
+	chat: boolean
+	image: boolean
+	video: boolean
+	audio: boolean
+}
+
+export interface CreationLibrarySettings {
+	enabled: boolean
+	catalog_version: number
+	capabilities: CreationCapabilitySettings
+	prompts: CreationLibraryEntry[]
+	rules: CreationLibraryEntry[]
+	skills: CreationLibraryEntry[]
+	selected_rule_ids?: string[]
+	selected_skill_ids?: string[]
+}
+
 export interface SystemSettings {
 	site_name: string
 	site_subtitle: string
@@ -191,6 +234,7 @@ export interface SystemSettings {
 	notifications: NotificationSettings
 	email: EmailRuntimeSettings
 	auth_providers: AuthProviderSettings
+	creation_library: CreationLibrarySettings
 	secret_configured?: Record<string, boolean>
 	site_public_url?: string
 	smtp_configured?: boolean

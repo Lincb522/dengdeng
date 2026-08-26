@@ -87,6 +87,32 @@ func (h *SystemSettingsHandler) Update(c *gin.Context) {
 	util.OK(c, view)
 }
 
+func (h *SystemSettingsHandler) GetCreationLibrary(c *gin.Context) {
+	settings, err := h.settings.Get()
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load creation library failed")
+		return
+	}
+	util.OK(c, settings.CreationLibrary)
+}
+
+func (h *SystemSettingsHandler) UpdateCreationLibrary(c *gin.Context) {
+	var next service.CreationLibrarySettings
+	if err := c.ShouldBindJSON(&next); err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid creation library")
+		return
+	}
+	updated, err := h.settings.UpdateCreationLibrary(next)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if h.audit != nil {
+		_ = h.audit.Record(middleware.CurrentUser(c), "creation_library.updated", "creation_library", "global", "updated built-in prompts, rules and skills", c.ClientIP())
+	}
+	util.OK(c, updated)
+}
+
 func (h *SystemSettingsHandler) TestEmail(c *gin.Context) {
 	var req struct {
 		To string `json:"to"`

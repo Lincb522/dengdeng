@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dengdeng/internal/model"
+	"dengdeng/internal/service"
 	"dengdeng/internal/util"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +71,7 @@ func (g *Gateway) Register(r *gin.Engine) {
 	// OAuth-only groups retain the configured catalogue because those providers
 	// do not consistently offer a credential-compatible discovery endpoint.
 	r.GET("/v1/models", g.handleListModels)
+	r.GET("/v1/creation-library", g.handleCreationLibrary)
 	// CCSwitch and similar desktop clients use this authenticated endpoint to
 	// display the key's remaining balance and configured caps.
 	r.GET("/v1/usage", g.handleUsage)
@@ -88,6 +90,20 @@ func (g *Gateway) handleGrokMedia(c *gin.Context) {
 	if err != nil {
 		writeReadBodyError(c, err)
 		return
+	}
+	scope, wire := "", creationWirePrompt
+	switch {
+	case strings.Contains(c.Request.URL.Path, "/videos/"):
+		scope = service.CreationScopeVideo
+	case strings.Contains(c.Request.URL.Path, "/audio/"):
+		scope, wire = service.CreationScopeAudio, creationWireInstructions
+	}
+	if scope != "" {
+		var ok bool
+		body, ok = g.applyCreationGuidance(c, body, scope, wire)
+		if !ok {
+			return
+		}
 	}
 	modelName := ""
 	if fields := peekJSON(body); fields != nil {
@@ -112,6 +128,10 @@ func (g *Gateway) handleOpenAIImageGenerationAsync(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeImage, creationWirePrompt)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -186,6 +206,7 @@ func (g *Gateway) runAsyncImageTask(taskID, authorization, userAgent, acceptLang
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Accept-Language", acceptLanguage)
 	c.Request = request
+	c.Set(creationAppliedKey, true)
 	g.handleOpenAIImageGeneration(c)
 	status := recorder.Code
 	if status == 0 {
@@ -212,6 +233,10 @@ func (g *Gateway) handleAnthropicMessages(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireAnthropic)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -249,6 +274,10 @@ func (g *Gateway) handleAnthropicCountTokens(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireAnthropic)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -313,6 +342,10 @@ func (g *Gateway) handleOpenAIChat(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireOpenAIChat)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -389,6 +422,10 @@ func (g *Gateway) handleOpenAIResponses(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireOpenAIResponses)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -498,6 +535,10 @@ func (g *Gateway) handleOpenAIInputTokens(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireOpenAIResponses)
+	if !ok {
 		return
 	}
 	fields := peekJSON(body)
@@ -772,6 +813,10 @@ func (g *Gateway) handleOpenAIImageGeneration(c *gin.Context) {
 		writeReadBodyError(c, err)
 		return
 	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeImage, creationWirePrompt)
+	if !ok {
+		return
+	}
 	fields := peekJSON(body)
 	if fields == nil {
 		util.Fail(c, http.StatusBadRequest, "invalid JSON body")
@@ -810,7 +855,16 @@ func (g *Gateway) handleOpenAIImageEdit(c *gin.Context) {
 		writeReadBodyError(c, err)
 		return
 	}
-	modelName, imageGroupID, rewritten, contentType, err := g.rewriteMultipartModel(c.GetHeader("Content-Type"), body, "gpt-image-2")
+	guidance, ok := g.creationGuidance(c, service.CreationScopeImage)
+	if !ok {
+		return
+	}
+	body, contentType, err := applyCreationGuidanceMultipart(c.GetHeader("Content-Type"), body, guidance)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	modelName, imageGroupID, rewritten, contentType, err := g.rewriteMultipartModel(contentType, body, "gpt-image-2")
 	if err != nil {
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return
@@ -920,6 +974,10 @@ func (g *Gateway) handleGemini(c *gin.Context) {
 	body, err := readBody(c)
 	if err != nil {
 		writeReadBodyError(c, err)
+		return
+	}
+	body, ok = g.applyCreationGuidance(c, body, service.CreationScopeChat, creationWireGemini)
+	if !ok {
 		return
 	}
 	action := strings.TrimPrefix(c.Param("action"), "/") // "gemini-2.5-pro:streamGenerateContent"

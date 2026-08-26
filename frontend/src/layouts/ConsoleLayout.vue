@@ -14,9 +14,17 @@ const route = useRoute()
 const railOpen = ref(false)
 const commandOpen = ref(false)
 
-const userNav = [
+type NavigationItem = {
+  to: string
+  label: string
+  icon: string
+  newTab?: boolean
+}
+
+const userNav: NavigationItem[] = [
   { to: '/dashboard', label: '总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
-  { to: '/studio', label: '图像创作', icon: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5L19 18H5l3.5-4.5zM8 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z' },
+	{ to: '/image-workbench/canvas?mode=recent', label: '图像创作', icon: 'M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5L19 18H5l3.5-4.5zM8 10a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z', newTab: true },
+	{ to: '/library', label: '技能商店', icon: 'M4 3h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V3zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V3zM6 7h4v2H6V7zm8 0h4v2h-4V7z' },
   { to: '/models', label: '模型广场', icon: 'M12 2 3.5 6.7v10.6L12 22l8.5-4.7V6.7L12 2zm0 2.3 5.9 3.2L12 10.8 6.1 7.5 12 4.3zm-6.5 5 5.5 3v7.9l-5.5-3V9.3zm7.5 10.9v-7.9l5.5-3v7.9l-5.5 3z' },
   { to: '/keys', label: 'API 密钥', icon: 'M12.65 10a6 6 0 1 0 0 4H17v4h4v-4h2v-4H12.65zM7 14a2 2 0 1 1 0-4 2 2 0 0 1 0 4z' },
   { to: '/usage', label: '我的用量', icon: 'M3 3v18h18v-2H5V3H3zm4 12h2v4H7v-4zm4-6h2v10h-2V9zm4 3h2v7h-2v-7zm4-6h2v13h-2V6z' },
@@ -26,7 +34,7 @@ const userNav = [
   { to: '/profile', label: '账户设置', icon: 'M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-3.33 0-10 1.67-10 5v3h20v-3c0-3.33-6.67-5-10-5z' },
 ]
 
-const adminNav = [
+const adminNav: NavigationItem[] = [
   { to: '/admin/overview', label: '运营总览', icon: 'M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z' },
   { to: '/admin/monitoring', label: '运行监控', icon: 'M3 13h2v-2H3v2zm4 0h2V7H7v6zm4 0h2V3h-2v10zm4 0h2V9h-2v4zm2 6H5v-2H3v4h18v-4h-2v2z' },
   { to: '/admin/alerts', label: '告警与巡检', icon: 'M12 2a8 8 0 0 0-8 8v4l-2 3v2h20v-2l-2-3v-4a8 8 0 0 0-8-8zm0 20a3 3 0 0 0 2.83-2H9.17A3 3 0 0 0 12 22z' },
@@ -44,11 +52,12 @@ const adminNav = [
   { to: '/admin/usage', label: '全站用量', icon: 'M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.5h-15V5H3v16h18v-1.5h-1.5z' },
   { to: '/admin/updates', label: '版本更新', icon: 'M12 3a9 9 0 0 0-8.6 6.35L1 7v6h6l-2.1-2.1A7 7 0 1 1 5 15H3a9 9 0 1 0 9-12zm1 4h-2v6l5 3 1-1.7-4-2.3V7z' },
   { to: '/admin/errors', label: '错误中心', icon: 'M11 2h2v11h-2V2zm0 14h2v2h-2v-2zM4.93 4.93l1.42 1.42A8 8 0 1 0 17.65 6.35l1.42-1.42A10 10 0 1 1 4.93 4.93z' },
+	{ to: '/admin/library', label: '技能管理', icon: 'M4 3h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V3zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V3z' },
 ]
 
 const adminNavGroups = [
   { label: '运行中心', items: [adminNav[0], adminNav[1], adminNav[14], adminNav[2]] },
-  { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[12], adminNav[7], adminNav[8]] },
+  { label: '接入与模型', items: [adminNav[4], adminNav[5], adminNav[12], adminNav[7], adminNav[8], adminNav[17]] },
   { label: '用户与交易', items: [adminNav[6], adminNav[9], adminNav[10], adminNav[11]] },
   { label: '系统维护', items: [adminNav[16], adminNav[3], adminNav[13], adminNav[15]] },
 ]
@@ -142,7 +151,17 @@ function isActive(to: string) {
         <nav class="rail-nav" aria-label="主导航">
           <section class="rail-nav-group">
             <p class="rail-section">工作区</p>
-			<RouterLink v-for="item in visibleUserNav" :key="item.to" :to="item.to" class="rail-link" :class="{ 'is-active': isActive(item.to) }" :title="item.label">
+			<RouterLink
+				v-for="item in visibleUserNav"
+				:key="item.to"
+				:to="item.to"
+				class="rail-link"
+				:class="{ 'is-active': isActive(item.to) }"
+				:title="item.label"
+				:target="item.newTab ? '_blank' : undefined"
+				:rel="item.newTab ? 'noopener' : undefined"
+				@click="item.newTab && closeRail()"
+			>
               <span class="rail-link-icon"><svg viewBox="0 0 24 24"><path :d="item.icon" /></svg></span>
               <span>{{ item.label }}</span>
               <i class="rail-link-mark"></i>
@@ -237,6 +256,9 @@ function isActive(to: string) {
           :class="{ 'is-active': isActive(item.to) }"
           :aria-label="item.label"
           :title="item.label"
+					:target="item.newTab ? '_blank' : undefined"
+					:rel="item.newTab ? 'noopener' : undefined"
+					@click="item.newTab && closeRail()"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg>
           <span>{{ item.label }}</span>
@@ -283,6 +305,9 @@ function isActive(to: string) {
               :key="item.to"
               :to="item.to"
               :class="{ 'is-active': isActive(item.to) }"
+						:target="item.newTab ? '_blank' : undefined"
+						:rel="item.newTab ? 'noopener' : undefined"
+						@click="item.newTab && closeRail()"
             >
               <span><svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon" /></svg></span>
               <strong>{{ item.label }}</strong>

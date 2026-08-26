@@ -24,7 +24,11 @@ backend/dengdeng-*
 *.csr
 *.log
 coverage/
+*.tsbuildinfo
 
 # 前端构建产物(embed 占位 index.html 除外)
 backend/internal/web/dist/**
 !backend/internal/web/dist/index.html
+!backend/internal/web/dist/image-workbench/
+backend/internal/web/dist/image-workbench/**
+!backend/internal/web/dist/image-workbench/index.html

@@ -38,3 +38,22 @@ func TestEmbeddedFrontendUsesExternalThemeInitializer(t *testing.T) {
 		t.Fatalf("same-origin script policy missing: %q", asset.Header().Get("Content-Security-Policy"))
 	}
 }
+
+func TestEmbeddedWorkbenchUsesExternalThemeInitializer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.SecurityHeaders())
+	mountFrontend(router)
+
+	page := httptest.NewRecorder()
+	router.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "/image-workbench/canvas/example", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("workbench status = %d", page.Code)
+	}
+	if !strings.Contains(page.Body.String(), `src="/image-workbench/theme-init.js"`) {
+		t.Fatal("workbench does not load the external theme initializer")
+	}
+	if strings.Contains(page.Body.String(), "localStorage.getItem") {
+		t.Fatal("workbench document contains an inline theme initializer")
+	}
+}

@@ -25,6 +25,7 @@ func TestRegisterIncludesCompatiblePublicRoutes(t *testing.T) {
 		"GET /images/tasks/:task_id":        false,
 		"POST /images/edits":                false,
 		"GET /v1/models":                    false,
+		"GET /v1/creation-library":          false,
 		"GET /v1/usage":                     false,
 		"POST /v1/responses/compact":        false,
 		"POST /v1/responses/input_tokens":   false,

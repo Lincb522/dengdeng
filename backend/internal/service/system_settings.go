@@ -71,6 +71,7 @@ type SystemSettings struct {
 	Notifications                    NotificationSettings      `json:"notifications"`
 	Email                            EmailRuntimeSettings      `json:"email"`
 	AuthProviders                    AuthProviderSettings      `json:"auth_providers"`
+	CreationLibrary                  CreationLibrarySettings   `json:"creation_library"`
 }
 
 type AdminSystemSettings struct {
@@ -423,6 +424,7 @@ func (s *SystemSettingsService) defaults() SystemSettings {
 		Notifications:            notifications,
 		Email:                    email,
 		AuthProviders:            authProviders,
+		CreationLibrary:          defaultCreationLibrarySettings(),
 		LoginAgreement: LoginAgreementSettings{
 			Enabled: true, Mode: "modal", UpdatedAt: defaultAgreementUpdatedAt, Documents: defaultLegalDocuments(),
 		},
@@ -542,6 +544,9 @@ func (s *SystemSettingsService) normalize(next SystemSettings) (SystemSettings, 
 	if err := normalizeExtendedSystemSettings(&next); err != nil {
 		return SystemSettings{}, err
 	}
+	if err := normalizeCreationLibrarySettings(&next.CreationLibrary); err != nil {
+		return SystemSettings{}, err
+	}
 
 	a := &next.LoginAgreement
 	if a.Mode != "checkbox" {
@@ -636,6 +641,18 @@ func (s *SystemSettingsService) Get() (SystemSettings, error) {
 	next := defaults
 	if err := json.Unmarshal([]byte(record.Value), &next); err != nil {
 		return SystemSettings{}, fmt.Errorf("decode system settings: %w", err)
+	}
+	var versionProbe struct {
+		CreationLibrary struct {
+			CatalogVersion *int `json:"catalog_version"`
+		} `json:"creation_library"`
+	}
+	if err := json.Unmarshal([]byte(record.Value), &versionProbe); err == nil {
+		fromVersion := 0
+		if versionProbe.CreationLibrary.CatalogVersion != nil {
+			fromVersion = *versionProbe.CreationLibrary.CatalogVersion
+		}
+		upgradeCreationLibrarySettings(&next.CreationLibrary, fromVersion)
 	}
 	upgradeLegacyDefaultAgreement(&next.LoginAgreement)
 	return s.normalize(next)

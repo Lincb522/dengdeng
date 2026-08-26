@@ -82,6 +82,30 @@ func (h *UserHandler) Me(c *gin.Context) {
 	util.OK(c, middleware.CurrentUser(c))
 }
 
+func (h *UserHandler) CreationLibrary(c *gin.Context) {
+	user := middleware.CurrentUser(c)
+	library, err := h.settings.UserCreationLibrary(user.ID)
+	if err != nil {
+		util.Fail(c, http.StatusInternalServerError, "load creation library failed")
+		return
+	}
+	util.OK(c, library)
+}
+
+func (h *UserHandler) UpdateCreationSelection(c *gin.Context) {
+	var requested service.UserCreationSelection
+	if err := c.ShouldBindJSON(&requested); err != nil {
+		util.Fail(c, http.StatusBadRequest, "invalid creation library selection")
+		return
+	}
+	selection, err := h.settings.UpdateUserCreationSelection(middleware.CurrentUser(c).ID, requested)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	util.OK(c, selection)
+}
+
 type changePasswordReq struct {
 	OldPassword string `json:"old_password" binding:"required"`
 	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`

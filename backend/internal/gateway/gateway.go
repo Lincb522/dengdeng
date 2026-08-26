@@ -390,6 +390,7 @@ func (g *Gateway) authenticateWithOptions(c *gin.Context, options authOptions) (
 	if options.touchLastUsed {
 		go g.db.Model(&model.APIKey{}).Where("id = ?", key.ID).Update("last_used_at", time.Now())
 	}
+	c.Set(creationUserIDKey, user.ID)
 	return &authedKey{Key: key, User: user, Group: activeGroups[0], Groups: activeGroups, AccessActive: accessActive}, true
 }
 
@@ -898,7 +899,7 @@ func (g *Gateway) relay(c *gin.Context, ak *authedKey, req relayRequest) {
 		return
 	}
 	if g.settings != nil && len(req.Body) > 0 {
-		if settings, err := g.settings.Get(); err == nil && settings.Features.RiskControlEnabled {
+		if settings, err := g.currentSystemSettings(c); err == nil && settings.Features.RiskControlEnabled {
 			lowerBody := strings.ToLower(string(req.Body))
 			for _, phrase := range settings.Features.RiskControlBlockedPhrases {
 				if phrase == "" || !strings.Contains(lowerBody, phrase) {

@@ -36,9 +36,30 @@ const agreementBackdropPointerStarted = ref(false)
 const turnstileToken = ref('')
 const turnstileNonce = ref(0)
 const pendingOAuthCode = ref(new URLSearchParams(window.location.search).get('oauth_code') || '')
+const requestedRedirect = new URLSearchParams(window.location.search).get('redirect') || ''
+const loginRedirectStorage = 'dengdeng.login.redirect'
 let cooldownTimer: number | undefined
 let agreementReturnFocus: HTMLElement | null = null
 let agreementPageLocked = false
+
+function safeLoginDestination(value: string) {
+  return value.startsWith('/') && !value.startsWith('//') ? value : '/dashboard'
+}
+
+function loginDestination() {
+  const stored = sessionStorage.getItem(loginRedirectStorage) || ''
+  sessionStorage.removeItem(loginRedirectStorage)
+  return safeLoginDestination(requestedRedirect || stored)
+}
+
+async function finishLogin() {
+  const destination = loginDestination()
+  if (destination.startsWith('/image-workbench')) {
+    window.location.assign(destination)
+    return
+  }
+  await router.push(destination)
+}
 
 const agreement = computed(() => auth.loginAgreement)
 const agreementRequired = computed(() => agreement.value.enabled && agreement.value.documents.length > 0)
@@ -226,6 +247,7 @@ async function startOAuth(provider: string) {
 	if (!requireAgreement() || !turnstileReady.value) return
 	busy.value = true
 	try {
+		if (requestedRedirect) sessionStorage.setItem(loginRedirectStorage, safeLoginDestination(requestedRedirect))
 		const result = await api.post<{ authorization_url: string }>(`/api/auth/oauth/${provider}/start`, { terms_revision: agreement.value.revision, turnstile_token: turnstileToken.value })
 		window.location.assign(result.authorization_url)
 	} catch (e) {
@@ -244,7 +266,7 @@ async function completeOAuth() {
 		setToken(result.token)
 		await auth.fetchMe()
 		pendingOAuthCode.value = ''
-		await router.push('/dashboard')
+		await finishLogin()
 	} catch (e) {
 		if (isAppError(e) && e.code === 'auth.totp_invalid') {
 			totpRequired.value = true
@@ -293,7 +315,7 @@ async function submit() {
 			toast.show('密码已重置，请重新登录', 'success')
 			return
     }
-    router.push('/dashboard')
+    await finishLogin()
   } catch (e) {
     if (mode.value === 'login' && isAppError(e) && e.code === 'auth.totp_invalid') {
       totpRequired.value = true

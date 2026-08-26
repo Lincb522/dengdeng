@@ -151,6 +151,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			// encrypted key directly in clients such as the image workbench.
 			recentMFA := middleware.RequireStepUp(systemSettings)
 			user.GET("/me", userH.Me)
+			user.GET("/creation-library", userH.CreationLibrary)
+			user.PUT("/creation-library/selection", userH.UpdateCreationSelection)
 			user.POST("/step-up", userH.StepUp)
 			user.POST("/password", userH.ChangePassword)
 			user.POST("/totp/setup", userH.SetupTOTP)
@@ -236,6 +238,8 @@ func NewRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 			admin.POST("/proxies/:id/test", adminH.TestProxy)
 			admin.GET("/settings", systemSettingsH.Get)
 			admin.PUT("/settings", systemSettingsH.Update)
+			admin.GET("/creation-library", systemSettingsH.GetCreationLibrary)
+			admin.PUT("/creation-library", systemSettingsH.UpdateCreationLibrary)
 			admin.POST("/settings/email/test", systemSettingsH.TestEmail)
 			admin.GET("/image-storage", adminH.GetImageStorage)
 			admin.PUT("/image-storage", adminH.UpdateImageStorage)
@@ -326,14 +330,26 @@ func mountFrontend(r *gin.Engine) {
 		if p == "" {
 			p = "index.html"
 		}
-		if _, err := fs.Stat(dist, p); err == nil {
+		if info, err := fs.Stat(dist, p); err == nil && !info.IsDir() {
 			setFrontendCacheHeaders(c, p, p == "index.html")
 			fileServer.ServeHTTP(c.Writer, c.Request)
 			return
 		}
-		setFrontendCacheHeaders(c, "index.html", true)
-		c.Request.URL.Path = "/"
-		fileServer.ServeHTTP(c.Writer, c.Request)
+		if strings.HasPrefix(p, "assets/") || strings.HasPrefix(p, "image-workbench/assets/") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		fallback := "index.html"
+		if strings.HasPrefix(c.Request.URL.Path, "/image-workbench") {
+			fallback = "image-workbench/index.html"
+		}
+		setFrontendCacheHeaders(c, fallback, true)
+		document, err := fs.ReadFile(dist, fallback)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		c.Data(http.StatusOK, "text/html; charset=utf-8", document)
 	})
 }
 
@@ -347,7 +363,7 @@ func setFrontendCacheHeaders(c *gin.Context, path string, spaDocument bool) {
 		c.Header("Expires", "0")
 		return
 	}
-	if strings.HasPrefix(path, "assets/") {
+	if strings.HasPrefix(path, "assets/") || strings.HasPrefix(path, "image-workbench/assets/") {
 		c.Header("Cache-Control", "public, max-age=31536000, immutable")
 		return
 	}

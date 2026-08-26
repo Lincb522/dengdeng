@@ -122,6 +122,17 @@ type User struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
+// UserCreationSelection is the account-level set of rules and skills chosen
+// from the published library. The gateway reads it for every API key owned by
+// the user, so the selection follows the account instead of one browser.
+type UserCreationSelection struct {
+	UserID    int64     `gorm:"primaryKey;autoIncrement:false" json:"user_id"`
+	RuleIDs   []string  `gorm:"serializer:json;type:text" json:"rule_ids"`
+	SkillIDs  []string  `gorm:"serializer:json;type:text" json:"skill_ids"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // UserPlatformQuota stores per-user spend ceilings copied from the active
 // registration policy. Zero means unlimited for that window.
 type UserPlatformQuota struct {
