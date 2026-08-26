@@ -1,137 +1,143 @@
-# Agent Identity
+# Codex Agent Identity
 
-Agent Identity 是 Codex Access Token 登录后生成的长期签名身份，不是普通 ChatGPT OAuth，也不是 API Key。
+Agent Identity 是 OpenAI Codex 使用的 Ed25519 长期签名身份。它不是普通 API Key，也不是通过 Access Token 和 Refresh Token 刷新的 ChatGPT OAuth 账号。
 
-## 与 CPA、OAuth 的区别
+实现入口：
 
-| 凭证 | 来源 | 请求认证 | 是否自动续期 |
-| --- | --- | --- | --- |
-| CPA Codex OAuth | 浏览器登录或 OAuth 文件 | `Bearer access_token` | 依赖 `refresh_token` |
-| Codex PAT | Codex Personal Access Token | `Bearer at-...` | 按 PAT 生命周期 |
-| Agent Identity | Codex Access Token 登录生成的 `auth.json` | 每次请求动态生成 `AgentAssertion` | 不依赖 OAuth Token |
+- [签名与 Task 生命周期](../backend/internal/service/openai_agent_identity.go)
+- [导入解析](../backend/internal/importer/importer.go)
+- [导入处理](../backend/internal/handler/admin.go)
 
-CPA 当前没有 Agent Identity 的 Runtime 注册、Task 注册或 Ed25519 请求签名实现。DengDeng 的 Agent Identity 行为以 Sub2API 当前实现为准，CPA 仅用于核对 Codex 请求头和 Responses 协议兼容。
+## 可导入结构
 
-## 凭证结构
+管理端接受包含以下字段的 `auth.json` 或兼容导出：
 
 ```json
 {
   "auth_mode": "agentIdentity",
   "agent_identity": {
-    "agent_runtime_id": "...",
-    "agent_private_key": "...",
-    "task_id": "...",
-    "account_id": "...",
-    "chatgpt_user_id": "...",
-    "email": "...",
-    "plan_type": "..."
+    "agent_runtime_id": "runtime-id",
+    "agent_private_key": "base64-pkcs8-ed25519-private-key",
+    "task_id": "optional-task-id",
+    "account_id": "chatgpt-account-id",
+    "chatgpt_user_id": "chatgpt-user-id",
+    "email": "optional@example.com",
+    "plan_type": "optional"
   }
 }
 ```
 
-- `agent_private_key` 是 PKCS#8 编码的 Ed25519 私钥。
-- `agent_runtime_id` 标识 Codex 已登记的 Runtime。
-- `task_id` 是可轮换的上游任务凭证，可以缺省。
-- `account_id` 是 ChatGPT Account / Team 标识，也是导入时的唯一更新键。
-- `chatgpt_user_id` 用于保留成员身份，但不参与去重；同一用户可以属于多个 Team。
+必需字段：
 
-导入后只保存以上 Agent Identity 字段。文件里同时存在的 Access Token、Refresh Token、ID Token、Web Session 和 OAuth 过期时间都会被丢弃。整个凭证 JSON 使用服务端加密字段落库，管理接口不会返回私钥。
+- `agent_runtime_id`；
+- `agent_private_key`，Base64 编码的 PKCS#8 Ed25519 私钥；
+- `account_id` 或兼容的 `chatgpt_account_id`；
+- `chatgpt_user_id`。
 
-## 请求流程
+`task_id` 可以缺省，服务会在第一次需要时注册。FedRAMP 身份还可以包含 `chatgpt_account_is_fedramp`。
 
-### 1. 确保 Task 可用
+导入器也能从 Sub2API 风格 `accounts[].credentials`、单对象、数组或 JSONL 中识别 Agent Identity。选择的目标分组必须是 OpenAI 平台；平台冲突会跳过并返回具体原因。
 
-当账号没有 `task_id` 时，服务端签名：
+## 落库内容
+
+导入后只保留 Agent Identity 的长期字段：
+
+```text
+agent_runtime_id
+agent_private_key
+task_id
+account_id
+chatgpt_user_id
+email
+plan_type
+chatgpt_account_is_fedramp
+```
+
+同一文件中并存的 Access Token、Refresh Token、ID Token、API Key、Web Session 和 OAuth 过期时间不会作为这个账号的凭证保存。Agent Identity 不继承 bootstrap OAuth Token 的到期时间。
+
+账号 `Extra` 整体使用服务端字段加密落库。管理接口不返回私钥；运行日志、错误中心和下游错误会清理私钥、Task、Token 与完整 `AgentAssertion`。
+
+同一 ChatGPT Account 再次导入时原位更新 Runtime，而不是创建重复账号。`chatgpt_user_id` 不能作为唯一键，因为同一用户可以属于多个 Account 或 Team。
+
+## Task 注册
+
+没有 `task_id` 时，服务使用私钥签名：
 
 ```text
 agent_runtime_id + ":" + RFC3339_UTC_TIMESTAMP
 ```
 
-随后请求：
+随后调用：
 
 ```http
 POST https://auth.openai.com/api/accounts/v1/agent/{agent_runtime_id}/task/register
 Content-Type: application/json
+```
 
+```json
 {
-  "timestamp": "...",
-  "signature": "BASE64_ED25519_SIGNATURE"
+  "timestamp": "RFC3339 UTC",
+  "signature": "base64-ed25519-signature"
 }
 ```
 
-上游可能直接返回 `task_id`，也可能返回 `encrypted_task_id`。加密结果使用从 Ed25519 私钥派生的 Curve25519 密钥解封，得到真实 `task_id`，再加密回写数据库。
+上游可以返回明文 `task_id`，也可以返回 `encrypted_task_id`。加密 Task 使用从 Ed25519 Seed 派生的 Curve25519 私钥解封。得到的 Task 会重新加密写入账号记录。
 
-Task 注册在网关、额度查询和账号探针之间共用账号级锁。锁内会重新读取数据库；如果另一个请求已经写入新 Task，当前请求直接复用，不会重复注册。
+网关请求、额度刷新和管理员账号探测共用账号级锁。锁内会重新读取数据库；另一个请求已经写入新 Task 时，当前请求直接复用，避免并发注册多个 Task。
 
-### 2. 每次请求动态签名
+## 每次请求签名
 
-每次上游请求都重新签名：
+有可用 Task 后，每个上游请求重新签名：
 
 ```text
 agent_runtime_id + ":" + task_id + ":" + RFC3339_UTC_TIMESTAMP
 ```
 
-签名和身份字段组成 JSON 信封，经 Base64URL 编码后写入请求头：
+请求头：
 
 ```http
 Authorization: AgentAssertion BASE64URL_JSON
 ```
 
-以下路径使用同一套签名流程：
+信封包含 Runtime ID、Task ID、时间戳和 Base64 Ed25519 签名。签名不会持久化或复用。
 
-- 普通 Responses、Chat Completions 转换和 Claude Code Messages 转 Responses
-- `POST /v1/responses/compact` 远程上下文压缩
-- `POST /v1/responses/input_tokens` 与 Claude Code `count_tokens`
-- `GET /backend-api/codex/models` 实时 Codex 模型清单
-- 生图、额度查询和账号认证探针
+当前签名路径覆盖：
 
-企业 FedRAMP 身份还会在这些 ChatGPT 后端请求中发送 `x-openai-fedramp: true`。普通 `/v1/models` 仍是 DengDeng 的本地稳定模型目录，不与上游 Codex 模型清单混用。
+- Responses 与由 Chat Completions、Anthropic Messages 转换的 Codex 请求；
+- `/v1/responses/compact`；
+- `/v1/responses/input_tokens` 与 Messages Token 计数；
+- `/backend-api/codex/models`；
+- 图像、额度刷新和账号认证探测。
 
-普通 Responses 请求会把字符串或单对象 `input` 统一转换为数组，避免 ChatGPT 后端返回 `Input must be a list`。Compact 只保留上游当前允许的字段，并删除 `stream`、`store` 和 `prompt_cache_key` 等请求级参数；GPT-5.6 的 compact 子请求会把暂不受支持的 `max` 降到 `xhigh`，普通 Responses 请求不受影响。
+FedRAMP 账号会在对应 ChatGPT 后端请求中附加 `x-openai-fedramp: true`。
 
-### 3. 精确恢复失效 Task
+## Task 失效恢复
 
-只有上游明确返回 Task 失效的 `401`，例如 `invalid_task_id`、`task_not_found` 或 `task_expired`，才会注册新 Task 并重放一次尚未下发内容的请求。
+只有上游返回 `401` 且错误明确包含 Task 失效标记时才重新注册，例如：
 
-恢复时会携带本次请求观察到的旧 `task_id`。如果锁内发现数据库已经是另一个新 Task，说明其他请求已完成恢复，当前请求直接复用。网络错误、`5xx` 或无法确认结果的注册失败不会盲目重试，避免生成多个并发 Task。
+```text
+invalid_task_id
+task_not_found
+task_expired
+```
 
-## 获取与导入
+恢复时携带本次请求观察到的旧 Task。锁内发现数据库已是另一个新 Task 时直接复用；否则注册、持久化，并且只重放尚未向客户端发送有效内容的请求。
 
-1. 在 `~/.codex/config.toml` 中设置：
+网络错误、普通 `5xx` 或结果不确定的注册失败不会被解释成 Task 失效。这样可以避免并发生成多个 Task 或在已经输出内容后拼接第二个上游响应。
 
-   ```toml
-   cli_auth_credentials_store = "file"
-   ```
+## 管理端操作
 
-2. 使用有权限的 Codex Access Token 登录：
+1. 创建或选择 OpenAI 分组。
+2. 在“上游账号”选择导入，目标凭证类型为 Agent Identity。
+3. 上传本机生成的 `auth.json`，不要把文件粘贴到聊天、Issue 或日志。
+4. 检查导入结果中的新增、更新与跳过原因。
+5. 执行额度刷新或账号探测；缺少 Task 时会在这里注册。
+6. 用绑定该分组的测试密钥调用 `/backend-api/codex/models` 和一次短 Responses 请求。
 
-   ```bash
-   printf '%s' "$CODEX_ACCESS_TOKEN" | codex login --with-access-token
-   ```
+普通 Codex OAuth 文件只有 Access/Refresh Token 时会作为 OAuth 导入，不能被自动推导成 Agent Identity。普通 OpenAI API Key 也不能转换为签名身份。
 
-3. 在 DengDeng 管理端打开“上游账号”，选择 OpenAI 分组和 `Agent Identity`。
-4. 导入 `~/.codex/auth.json`。
-5. 刷新账号额度或执行一次请求。缺少 `task_id` 时系统会在请求前完成注册。
+## 传输边界
 
-普通 `codex login` 生成的 OAuth 凭证、CPA OAuth 文件、ChatGPT Web Session 或普通 API Access Token 不能直接作为 Agent Identity 导入。
+当前支持 HTTP、SSE 和相关 unary JSON 路径。Responses WebSocket v2 尚未启用。WebSocket 需要独立处理连接限流、首包选模、账号黏性、逐帧用量、断线恢复和 Task 轮换，不能用简单 Upgrade 透传替代。
 
-## 安全边界
-
-- 不在管理端接收或交换 Web Session。
-- 不把 OAuth Token 转存为 Agent Identity。
-- 私钥和完整 `AgentAssertion` 不进入 API 响应、运行日志或监控错误详情。
-- 同一 ChatGPT Account 再次导入时原位轮换 Runtime；不同 Team 独立保存。
-- 账号探针会执行签名后的额度请求，不能只靠域名连通性把无效凭证标记为可用。
-
-## 当前传输边界
-
-DengDeng 当前对 Agent Identity 提供 HTTP、SSE 和上述 unary JSON 路径。Responses WebSocket v2 尚未启用，因此不会把 HTTP/SSE 支持标记成 WebSocket 支持。WebSocket v2 需要独立实现连接限流、首包选模、会话黏性、上下文续接、逐帧用量统计、断线恢复和 Task 失效重连，不能用简单的 HTTP Upgrade 透传替代。
-
-## 对照来源
-
-- [OpenAI Codex 身份认证](https://learn.chatgpt.com/docs/auth)
-- [OpenAI Codex Access Token](https://learn.chatgpt.com/docs/enterprise/access-tokens)
-- [Sub2API Agent Identity 实现](https://github.com/Wei-Shaw/sub2api/blob/6aeea70ee008825604ac3293ca0f216e951795d1/backend/internal/service/openai_agent_identity.go)
-- [CLIProxyAPI（CPA）](https://github.com/router-for-me/CLIProxyAPI/tree/f71ec0eb)
-
-本次对照基于 2026-07-23 拉取的 Sub2API `6aeea70ee008825604ac3293ca0f216e951795d1` 与 CPA `f71ec0eb`。CPA 用来核对 Codex OAuth/PAT、Responses compact 与 CLI 请求协议；Runtime 注册、Task 生命周期和 AgentAssertion 以 Sub2API 的 Agent Identity 实现为准。
+Agent Identity 的可用性最终由上游授权、Runtime、Task 和 Account 状态决定。导入成功只证明结构和私钥有效，账号探测成功也不保证任意模型与请求长期可用。

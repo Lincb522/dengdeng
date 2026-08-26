@@ -5,6 +5,9 @@ server:
   host: "0.0.0.0"
   port: 9100
   mode: "release" # debug | release
+  # 只信任实际反向代理，不要填写 0.0.0.0/0。
+  trusted_proxies: ["127.0.0.1", "::1"]
+  forwarded_client_ip_headers: ["X-Forwarded-For", "X-Real-IP"]
 
 database:
   driver: "sqlite" # sqlite | postgres
@@ -30,13 +33,23 @@ admin:
   password: "" # 留空则首次启动随机生成并打印到日志
 
 site:
-  name: "蹬蹬中转"
+  name: "DengDeng AI · 蹬蹬ai"
   # 在线支付回调和支付完成跳转使用的 HTTPS 公网地址。未设置时支付功能无法开启。
   public_url: "https://relay.example.com"
   allow_register: true
   init_balance_micro: 0 # 新用户注册赠送余额(1000000 = $1)
 
-# 上游模型 API 与 OAuth token 刷新共用此出站代理。仅支持 HTTP(S) CONNECT 代理；
+# SMTP 启动默认值。管理端保存运行时 SMTP 后以数据库设置为准。
+smtp:
+  host: "smtp.qq.com"
+  port: 465
+  secure: true
+  user: ""
+  pass: ""
+  from_name: "DengDeng AI"
+  from: ""
+
+# 上游模型 API 与 OAuth token 刷新共用此出站代理。支持 HTTP、HTTPS 和 SOCKS5；
 # no_proxy 支持逗号分隔的域名、IP、CIDR 或 *。也可用 PROXY_URL / NO_PROXY 覆盖。
 proxy:
   url: ""
@@ -71,3 +84,11 @@ oauth:
     client_id: ""
     client_secret: ""
     redirect_url: "https://relay.example.com/api/admin/oauth/anthropic/callback"
+  gemini:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "https://relay.example.com/api/admin/oauth/gemini/callback"
+  grok:
+    client_id: ""
+    client_secret: ""
+    redirect_url: "https://relay.example.com/api/admin/oauth/grok/callback"
