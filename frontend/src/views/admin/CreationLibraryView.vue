@@ -31,7 +31,7 @@ const filteredEntries = computed(() => {
 	const keyword = search.value.trim().toLowerCase()
 	if (!keyword) return currentEntries.value
 	return currentEntries.value
-		.filter((item) => [item.name, item.name_en || '', item.id, item.description, item.description_en || '', item.author || '', item.category || '', item.license || '', ...(item.tags || [])].some((value) => value.toLowerCase().includes(keyword)))
+		.filter((item) => [item.name, item.name_en || '', item.id, item.description, item.description_en || '', item.author || '', item.category || '', item.license || '', item.source_url || '', item.install_command || '', ...(item.tags || [])].some((value) => value.toLowerCase().includes(keyword)))
 })
 const publishedCount = computed(() => library.value.skills.filter((item) => item.enabled).length)
 const activePublishedCount = computed(() => currentEntries.value.filter((item) => item.enabled).length)
@@ -50,7 +50,7 @@ function addEntry() {
 		name: activeTab.value === 'prompts' ? '新提示词' : activeTab.value === 'rules' ? '新规则' : '新技能', name_en: '',
 		description: '', description_en: '', content: '', content_en: '', scope: activeTab.value === 'prompts' ? 'chat' : 'all', enabled: false, auto_apply: false,
 		version: activeTab.value === 'skills' ? '1.0.0' : '', author: 'DengDeng AI', category: activeTab.value === 'skills' ? '通用' : '', tags: [],
-		source_type: activeTab.value === 'skills' ? 'custom' : undefined, source_url: '', license: '',
+		source_type: activeTab.value === 'skills' ? 'custom' : undefined, source_url: '', install_command: '', license: '',
 	}
 	currentEntries.value.unshift(entry)
 	selectedEntry.value = entry
@@ -110,7 +110,7 @@ onMounted(load)
 <template>
 	<div class="skill-admin-page">
 		<header class="skill-admin-head">
-			<div><h1>技能管理</h1><p>{{ publishedCount }} 个技能已上架</p></div>
+			<div><h1>技能上架管理</h1><p>{{ publishedCount }} 个技能已上架</p></div>
 			<div class="skill-admin-actions">
 				<label><input v-model="library.enabled" type="checkbox" role="switch" /><span>{{ library.enabled ? '商店开放' : '商店关闭' }}</span></label>
 				<button type="button" :disabled="loading || saving" @click="save">{{ saving ? '保存中…' : '保存更改' }}</button>
@@ -134,12 +134,12 @@ onMounted(load)
 					<label class="skill-admin-search"><span class="sr-only">搜索</span><input v-model="search" type="search" placeholder="搜索名称、ID 或标签" /></label>
 					<button type="button" @click="addEntry">新建</button>
 				</div>
-				<div class="skill-index-summary"><span>{{ filteredEntries.length }} 项</span><span>{{ activePublishedCount }} 项已启用</span></div>
+				<div class="skill-index-summary"><span>{{ filteredEntries.length }} 项</span><span>{{ activePublishedCount }} 项已上架</span></div>
 				<div v-if="loading" class="skill-admin-empty">正在读取…</div>
 				<div v-else-if="!filteredEntries.length" class="skill-admin-empty">暂无内容</div>
 				<div v-else class="skill-admin-list">
 					<button v-for="item in filteredEntries" :key="item.id" type="button" class="skill-index-item" :class="{ 'is-selected': selectedEntry === item }" @click="selectedEntry = item">
-						<span class="skill-index-title"><strong>{{ item.name || '未命名' }}</strong><i :class="{ 'is-enabled': item.enabled }">{{ item.enabled ? '启用' : '停用' }}</i></span>
+						<span class="skill-index-title"><strong>{{ item.name || '未命名' }}</strong><i :class="{ 'is-enabled': item.enabled }">{{ item.enabled ? '上架' : '下架' }}</i></span>
 						<span class="skill-index-meta"><code>{{ item.id }}</code><span>{{ scopeLabel(item.scope) }}</span><span v-if="item.category">{{ item.category }}</span></span>
 					</button>
 				</div>
@@ -151,7 +151,7 @@ onMounted(load)
 					<header class="skill-editor-head">
 						<div><h2>{{ selectedEntry.name || '未命名' }}</h2><code>{{ selectedEntry.id }}</code></div>
 						<div class="skill-editor-state">
-							<label><input v-model="selectedEntry.enabled" type="checkbox" role="switch" /><span>{{ selectedEntry.enabled ? '已启用' : '已停用' }}</span></label>
+							<label><input v-model="selectedEntry.enabled" type="checkbox" role="switch" /><span>{{ selectedEntry.enabled ? '已上架' : '未上架' }}</span></label>
 							<label v-if="activeTab === 'rules'"><input v-model="selectedEntry.auto_apply" type="checkbox" role="switch" /><span>系统应用</span></label>
 							<button type="button" @click="removeEntry(selectedEntry)">删除</button>
 						</div>
@@ -180,12 +180,13 @@ onMounted(load)
 					</section>
 
 					<section v-if="activeTab === 'skills'" class="skill-editor-section">
-						<h3>来源</h3>
+						<h3>上架与安装</h3>
 						<div class="skill-editor-grid skill-editor-grid--source">
 							<label><span>来源类型</span><select v-model="selectedEntry.source_type" class="input"><option value="builtin">内置</option><option value="official">官方</option><option value="community">社区</option><option value="custom">自定义</option></select></label>
 							<label><span>许可证</span><input v-model.trim="selectedEntry.license" class="input" maxlength="40" /></label>
-							<label class="skill-editor-source-url"><span>来源地址</span><input v-model.trim="selectedEntry.source_url" class="input" maxlength="500" inputmode="url" /></label>
+							<label class="skill-editor-source-url"><span>开源地址</span><input v-model.trim="selectedEntry.source_url" class="input" maxlength="500" inputmode="url" placeholder="https://github.com/owner/repository" /></label>
 						</div>
+						<label class="skill-editor-install-command"><span>安装命令</span><textarea v-model="selectedEntry.install_command" class="input" rows="3" maxlength="2000" spellcheck="false" placeholder="输入用户需要执行的完整安装命令"></textarea></label>
 					</section>
 
 					<section class="skill-editor-section">
@@ -258,9 +259,11 @@ onMounted(load)
 .skill-editor-grid--source { grid-template-columns: 9rem 9rem minmax(0, 1fr); }
 .skill-editor-grid label,
 .skill-editor-content label { display: grid; min-width: 0; gap: .35rem; }
+.skill-editor-install-command { display: grid; min-width: 0; gap: .35rem; }
 .skill-editor-pane label > span { color: var(--ink-soft); font-size: .68rem; font-weight: 720; }
 .skill-editor-pane :is(input.input, select.input, textarea.input) { width: 100%; min-width: 0; border-color: var(--line); background: var(--surface-muted); color: var(--ink); font-size: .75rem; }
 .skill-editor-pane :is(input.input, select.input) { min-height: 2.65rem; }
+.skill-editor-install-command textarea { min-height: 5.5rem; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; line-height: 1.5; }
 .skill-editor-content { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .skill-editor-content textarea { min-height: 10rem; resize: vertical; line-height: 1.55; }
 .skill-admin-page :is(button, input, textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

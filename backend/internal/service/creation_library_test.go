@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -115,6 +116,32 @@ func TestCreationLibraryRejectsUnsafeSourceURL(t *testing.T) {
 	library.Skills[0].SourceURL = "javascript:alert(1)"
 	if err := normalizeCreationLibrarySettings(&library); err == nil {
 		t.Fatal("unsafe source URL was accepted")
+	}
+}
+
+func TestCreationLibraryPreservesSkillInstallCommand(t *testing.T) {
+	library := defaultCreationLibrarySettings()
+	library.Skills[0].InstallCommand = "  npx skills add example/review-skill  "
+	if err := normalizeCreationLibrarySettings(&library); err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	if library.Skills[0].InstallCommand != "npx skills add example/review-skill" {
+		t.Fatalf("install command = %q", library.Skills[0].InstallCommand)
+	}
+	library.Rules[0].InstallCommand = "should be removed"
+	if err := normalizeCreationLibrarySettings(&library); err != nil {
+		t.Fatalf("normalize rule: %v", err)
+	}
+	if library.Rules[0].InstallCommand != "" {
+		t.Fatalf("rule install command was preserved: %q", library.Rules[0].InstallCommand)
+	}
+}
+
+func TestCreationLibraryRejectsOversizedInstallCommand(t *testing.T) {
+	library := defaultCreationLibrarySettings()
+	library.Skills[0].InstallCommand = strings.Repeat("x", 2_001)
+	if err := normalizeCreationLibrarySettings(&library); err == nil {
+		t.Fatal("oversized install command was accepted")
 	}
 }
 

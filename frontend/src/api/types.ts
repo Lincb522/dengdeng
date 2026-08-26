@@ -192,6 +192,7 @@ export interface CreationLibraryEntry {
 	tags?: string[]
 	source_type?: 'builtin' | 'official' | 'community' | 'custom'
 	source_url?: string
+	install_command?: string
 	license?: string
 }
 

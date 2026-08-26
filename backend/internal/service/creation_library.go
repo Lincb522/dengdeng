@@ -34,23 +34,24 @@ type CreationCapabilitySettings struct {
 }
 
 type CreationLibraryEntry struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	NameEN        string   `json:"name_en,omitempty"`
-	Description   string   `json:"description"`
-	DescriptionEN string   `json:"description_en,omitempty"`
-	Content       string   `json:"content"`
-	ContentEN     string   `json:"content_en,omitempty"`
-	Scope         string   `json:"scope"`
-	Enabled       bool     `json:"enabled"`
-	AutoApply     bool     `json:"auto_apply"`
-	Version       string   `json:"version,omitempty"`
-	Author        string   `json:"author,omitempty"`
-	Category      string   `json:"category,omitempty"`
-	Tags          []string `json:"tags,omitempty"`
-	SourceType    string   `json:"source_type,omitempty"`
-	SourceURL     string   `json:"source_url,omitempty"`
-	License       string   `json:"license,omitempty"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	NameEN         string   `json:"name_en,omitempty"`
+	Description    string   `json:"description"`
+	DescriptionEN  string   `json:"description_en,omitempty"`
+	Content        string   `json:"content"`
+	ContentEN      string   `json:"content_en,omitempty"`
+	Scope          string   `json:"scope"`
+	Enabled        bool     `json:"enabled"`
+	AutoApply      bool     `json:"auto_apply"`
+	Version        string   `json:"version,omitempty"`
+	Author         string   `json:"author,omitempty"`
+	Category       string   `json:"category,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	SourceType     string   `json:"source_type,omitempty"`
+	SourceURL      string   `json:"source_url,omitempty"`
+	InstallCommand string   `json:"install_command,omitempty"`
+	License        string   `json:"license,omitempty"`
 }
 
 type CreationLibrarySettings struct {
@@ -189,6 +190,9 @@ func upgradeCreationLibrarySettings(library *CreationLibrarySettings, fromVersio
 			if entry.SourceURL == "" {
 				entry.SourceURL = addition.SourceURL
 			}
+			if entry.InstallCommand == "" {
+				entry.InstallCommand = addition.InstallCommand
+			}
 			if entry.License == "" {
 				entry.License = addition.License
 			}
@@ -233,6 +237,7 @@ func normalizeCreationLibrarySettings(library *CreationLibrarySettings) error {
 			entry.Category = strings.TrimSpace(entry.Category)
 			entry.SourceType = strings.ToLower(strings.TrimSpace(entry.SourceType))
 			entry.SourceURL = strings.TrimSpace(entry.SourceURL)
+			entry.InstallCommand = strings.TrimSpace(entry.InstallCommand)
 			entry.License = strings.TrimSpace(entry.License)
 			if entry.Scope == "" {
 				entry.Scope = CreationScopeAll
@@ -270,6 +275,12 @@ func normalizeCreationLibrarySettings(library *CreationLibrarySettings) error {
 			}
 			if len(entry.SourceURL) > 500 {
 				return nil, fmt.Errorf("%s %q source URL is too long", kind, entry.ID)
+			}
+			if len([]rune(entry.InstallCommand)) > 2_000 {
+				return nil, fmt.Errorf("%s %q install command is too long", kind, entry.ID)
+			}
+			if kind != "skill" {
+				entry.InstallCommand = ""
 			}
 			if entry.SourceURL != "" {
 				parsed, err := url.ParseRequestURI(entry.SourceURL)

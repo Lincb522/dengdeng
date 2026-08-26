@@ -108,6 +108,21 @@ async function toggleEntry(item: CreationLibraryEntry) {
 	}
 }
 
+async function copyInstallCommand(item: CreationLibraryEntry) {
+	const command = item.install_command?.trim()
+	if (!command) {
+		toast.show('该技能暂未配置安装命令', 'error')
+		return
+	}
+	try {
+		await copyText(command)
+	} catch (error) {
+		toast.show(error instanceof Error ? error.message : '复制失败', 'error')
+		return
+	}
+	toast.show('安装命令已复制，请在终端运行', 'success')
+}
+
 async function copy(value: string) {
 	try {
 		await copyText(value)
@@ -214,6 +229,9 @@ onMounted(load)
 						<button type="button" class="skill-market-detail" @click="openDetail(item)">查看详情</button>
 						<button v-if="activeTab === 'prompts'" type="button" class="skill-market-primary" @click="copy(item.content)">复制提示词</button>
 						<button v-else-if="item.auto_apply" type="button" class="skill-market-primary is-installed" disabled>系统应用</button>
+						<button v-else-if="activeTab === 'skills'" type="button" class="skill-market-primary" :disabled="!item.install_command?.trim()" @click="copyInstallCommand(item)">
+							{{ item.install_command?.trim() ? '复制命令' : '待配置' }}
+						</button>
 						<button v-else type="button" class="skill-market-primary" :class="{ 'is-installed': isSelected(item) }" :disabled="pendingIDs.includes(item.id)" :aria-pressed="isSelected(item)" @click="toggleEntry(item)">
 							{{ pendingIDs.includes(item.id) ? '保存中' : isSelected(item) ? '✓ 已添加' : '+ 添加' }}
 						</button>
@@ -229,9 +247,18 @@ onMounted(load)
 					<button type="button" aria-label="关闭详情" @click="closeDetail">×</button>
 				</header>
 				<div class="skill-detail-meta">
-					<a v-if="detailEntry.source_url" :href="detailEntry.source_url" target="_blank" rel="noreferrer noopener">{{ sourceLabels[detailEntry.source_type || 'custom'] }} ↗</a><span v-else>{{ sourceLabels[detailEntry.source_type || 'custom'] }}</span><span>{{ detailEntry.author || 'DengDeng AI' }}</span><span>{{ scopeLabels[detailEntry.scope] }}</span><span v-if="detailEntry.license">{{ detailEntry.license }}</span>
+					<span>{{ sourceLabels[detailEntry.source_type || 'custom'] }}</span><a v-if="detailEntry.source_url" :href="detailEntry.source_url" target="_blank" rel="noreferrer noopener">开源地址 ↗</a><span>{{ detailEntry.author || 'DengDeng AI' }}</span><span>{{ scopeLabels[detailEntry.scope] }}</span><span v-if="detailEntry.license">{{ detailEntry.license }}</span>
 				</div>
 				<div class="skill-detail-description"><p>{{ detailEntry.description }}</p><p v-if="detailEntry.description_en" lang="en">{{ detailEntry.description_en }}</p></div>
+				<section v-if="activeTab === 'skills'" class="skill-detail-install">
+					<h3>安装命令</h3>
+					<pre v-if="detailEntry.install_command?.trim()">{{ detailEntry.install_command }}</pre>
+					<p v-else>该技能暂未配置安装命令</p>
+					<div>
+						<button type="button" :disabled="!detailEntry.install_command?.trim()" @click="copyInstallCommand(detailEntry)">复制安装命令</button>
+						<button type="button" class="is-secondary" :disabled="pendingIDs.includes(detailEntry.id)" @click="toggleEntry(detailEntry)">{{ isSelected(detailEntry) ? '移出能力库' : '添加到能力库' }}</button>
+					</div>
+				</section>
 				<div class="skill-card-content"><section><span>中文</span><pre>{{ detailEntry.content }}</pre></section><section v-if="detailEntry.content_en" lang="en"><span>English</span><pre>{{ detailEntry.content_en }}</pre></section></div>
 			</template>
 		</dialog>
@@ -306,6 +333,14 @@ onMounted(load)
 .skill-detail-meta a:hover { color: var(--ink); }
 .skill-detail-description { display: grid; gap: .25rem; padding: .8rem 1rem 0; color: var(--ink-soft); font-size: .68rem; line-height: 1.5; }
 .skill-detail-description p[lang="en"] { color: var(--ink-faint); font-size: .63rem; }
+.skill-detail-install { display: grid; gap: .6rem; margin: .85rem 1rem 0; padding: .85rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface-muted); }
+.skill-detail-install h3 { font-size: .72rem; font-weight: 820; }
+.skill-detail-install > pre { overflow: auto; padding: .7rem; border-radius: .48rem; background: var(--surface); color: var(--ink); font-size: .66rem; line-height: 1.55; white-space: pre-wrap; word-break: break-all; }
+.skill-detail-install > p { color: var(--ink-soft); font-size: .68rem; }
+.skill-detail-install > div { display: flex; flex-wrap: wrap; gap: .45rem; }
+.skill-detail-install button { min-height: 2.2rem; padding: 0 .7rem; border: 1px solid var(--ink); border-radius: .46rem; background: var(--ink); color: var(--surface); font-size: .65rem; font-weight: 800; }
+.skill-detail-install button.is-secondary { border-color: var(--line); background: var(--surface); color: var(--ink-soft); }
+.skill-detail-install button:disabled { cursor: default; opacity: .48; }
 .skill-card-content { display: grid; gap: .8rem; padding: 1rem; }
 .skill-card-content section { display: grid; gap: .35rem; }
 .skill-card-content section > span { color: var(--ink-faint); font-size: .58rem; font-weight: 760; }

@@ -52,7 +52,7 @@ const adminNav: NavigationItem[] = [
   { to: '/admin/usage', label: '全站用量', icon: 'M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.5h-15V5H3v16h18v-1.5h-1.5z' },
   { to: '/admin/updates', label: '版本更新', icon: 'M12 3a9 9 0 0 0-8.6 6.35L1 7v6h6l-2.1-2.1A7 7 0 1 1 5 15H3a9 9 0 1 0 9-12zm1 4h-2v6l5 3 1-1.7-4-2.3V7z' },
   { to: '/admin/errors', label: '错误中心', icon: 'M11 2h2v11h-2V2zm0 14h2v2h-2v-2zM4.93 4.93l1.42 1.42A8 8 0 1 0 17.65 6.35l1.42-1.42A10 10 0 1 1 4.93 4.93z' },
-	{ to: '/admin/library', label: '技能管理', icon: 'M4 3h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V3zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V3z' },
+	{ to: '/admin/library', label: '技能上架', icon: 'M4 3h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4V3zm16 0h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6V3z' },
 ]
 
 const adminNavGroups = [

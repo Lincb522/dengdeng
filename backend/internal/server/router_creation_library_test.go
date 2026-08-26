@@ -69,7 +69,7 @@ func TestCreationLibraryAdminAndUserEndpoints(t *testing.T) {
 			ID: "verified-only", Name: "仅使用已验证信息", Content: "区分事实和假设。", Scope: service.CreationScopeChat, Enabled: true, AutoApply: true,
 		}},
 		Skills: []service.CreationLibraryEntry{{
-			ID: "review", Name: "审查", NameEN: "Review", Description: "检查问题", DescriptionEN: "Find issues", Content: "检查可复现问题。", ContentEN: "Find reproducible issues.", Scope: service.CreationScopeChat, Enabled: true, Version: "1.0.0",
+			ID: "review", Name: "审查", NameEN: "Review", Description: "检查问题", DescriptionEN: "Find issues", Content: "检查可复现问题。", ContentEN: "Find reproducible issues.", Scope: service.CreationScopeChat, Enabled: true, Version: "1.0.0", SourceURL: "https://github.com/example/review-skill", InstallCommand: "npx skills add example/review-skill",
 		}},
 	}
 	update := callJSON(t, router, http.MethodPut, "/api/admin/creation-library", next, loginBody.Data.Token)
@@ -87,7 +87,7 @@ func TestCreationLibraryAdminAndUserEndpoints(t *testing.T) {
 	if len(public.Data.Rules) != 1 || public.Data.Rules[0].ID != "verified-only" || !public.Data.Rules[0].AutoApply {
 		t.Fatalf("unexpected public library: %#v", public.Data)
 	}
-	if len(public.Data.Skills) != 1 || public.Data.Skills[0].NameEN != "Review" || public.Data.Skills[0].DescriptionEN != "Find issues" || public.Data.Skills[0].ContentEN != "Find reproducible issues." {
+	if len(public.Data.Skills) != 1 || public.Data.Skills[0].NameEN != "Review" || public.Data.Skills[0].DescriptionEN != "Find issues" || public.Data.Skills[0].ContentEN != "Find reproducible issues." || public.Data.Skills[0].SourceURL != "https://github.com/example/review-skill" || public.Data.Skills[0].InstallCommand != "npx skills add example/review-skill" {
 		t.Fatalf("bilingual skill fields were not preserved: %#v", public.Data.Skills)
 	}
 
