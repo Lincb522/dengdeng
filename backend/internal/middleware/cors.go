@@ -51,7 +51,7 @@ func PublicCORS() gin.HandlerFunc {
 		h.Set("Access-Control-Allow-Headers", allowHeaders)
 		// Let browser SDKs and web clients surface retry timing and support
 		// correlation IDs without exposing any credential-bearing header.
-		h.Set("Access-Control-Expose-Headers", "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID, X-DengDeng-Applied-Rules, X-DengDeng-Applied-Skills")
+		h.Set("Access-Control-Expose-Headers", "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID, X-DengDeng-Applied-Rules, X-DengDeng-Applied-Skills, X-DengDeng-Skill-Runs")
 		h.Set("Access-Control-Max-Age", "86400")
 
 		if c.Request.Method == http.MethodOptions {

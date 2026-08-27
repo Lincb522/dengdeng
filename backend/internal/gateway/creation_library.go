@@ -23,6 +23,7 @@ const (
 	creationSettingsKey  = "dengdeng.system-settings"
 	creationAppliedKey   = "dengdeng.creation-guidance-applied"
 	creationUserIDKey    = "dengdeng.creation-user-id"
+	creationRuntimeLimit = 256 << 10
 )
 
 type creationWire uint8
@@ -184,6 +185,39 @@ func availableStoredCreationIDs(library service.CreationLibrarySettings, kind st
 	return result
 }
 
+func resolveCreationSkillRuns(library service.CreationLibrarySettings, guidance, appliedRules, appliedSkills []string) ([]string, []service.CreationSkillRun, error) {
+	if len(appliedSkills) == 0 {
+		return guidance, nil, nil
+	}
+	if len(guidance) != len(appliedRules)+len(appliedSkills) {
+		return nil, nil, fmt.Errorf("built-in skill selection is inconsistent")
+	}
+	entries := make(map[string]service.CreationLibraryEntry, len(library.Skills))
+	for _, entry := range library.Skills {
+		entries[entry.ID] = entry
+	}
+	resolved := append([]string(nil), guidance...)
+	runs := make([]service.CreationSkillRun, 0, len(appliedSkills))
+	totalBytes := 0
+	for index, id := range appliedSkills {
+		entry, ok := entries[id]
+		if !ok {
+			return nil, nil, fmt.Errorf("skill %q is unavailable", id)
+		}
+		run, err := service.ResolveCreationSkillRun(entry)
+		if err != nil {
+			return nil, nil, err
+		}
+		totalBytes += len(run.Guidance)
+		if totalBytes > creationRuntimeLimit {
+			return nil, nil, fmt.Errorf("selected skill packages exceed the %d KiB runtime limit", creationRuntimeLimit>>10)
+		}
+		resolved[len(appliedRules)+index] = run.Guidance
+		runs = append(runs, run)
+	}
+	return resolved, runs, nil
+}
+
 func appendGuidance(current string, guidance []string) string {
 	parts := make([]string, 0, len(guidance)+1)
 	if current = strings.TrimSpace(current); current != "" {
@@ -289,6 +323,11 @@ func (g *Gateway) creationGuidance(c *gin.Context, scope string) ([]string, bool
 		util.Fail(c, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
+	guidance, skillRuns, err := resolveCreationSkillRuns(settings.CreationLibrary, guidance, appliedRules, appliedSkills)
+	if err != nil {
+		util.Fail(c, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
 	if len(appliedRules) > 0 {
 		sort.Strings(appliedRules)
 		c.Header("X-DengDeng-Applied-Rules", strings.Join(appliedRules, ","))
@@ -296,6 +335,18 @@ func (g *Gateway) creationGuidance(c *gin.Context, scope string) ([]string, bool
 	if len(appliedSkills) > 0 {
 		sort.Strings(appliedSkills)
 		c.Header("X-DengDeng-Applied-Skills", strings.Join(appliedSkills, ","))
+	}
+	if len(skillRuns) > 0 {
+		runtimeValues := make([]string, 0, len(skillRuns))
+		for _, run := range skillRuns {
+			revision := run.Revision
+			if len(revision) > 12 {
+				revision = revision[:12]
+			}
+			runtimeValues = append(runtimeValues, run.ID+"@"+revision+"/"+run.Mode)
+		}
+		sort.Strings(runtimeValues)
+		c.Header("X-DengDeng-Skill-Runs", strings.Join(runtimeValues, ","))
 	}
 	return guidance, true
 }

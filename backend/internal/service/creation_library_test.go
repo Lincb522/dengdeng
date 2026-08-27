@@ -205,3 +205,53 @@ func TestSanitizeCreationSelection(t *testing.T) {
 		t.Fatal("disabled skill capability was accepted")
 	}
 }
+
+func TestCreationSkillRuntimeLoadsCompleteBuiltinPackage(t *testing.T) {
+	ids, err := builtinCreationSkillPackageIDs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 14 {
+		t.Fatalf("bundled skill packages=%d", len(ids))
+	}
+	library := defaultCreationLibrarySettings()
+	var backend, analyst CreationLibraryEntry
+	for _, skill := range library.Skills {
+		switch skill.ID {
+		case "backend-engineer":
+			backend = skill
+		case "data-analyst":
+			analyst = skill
+		}
+	}
+	run, err := ResolveCreationSkillRun(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Mode != "package" || run.Revision == "" || run.ResourceCount != 1 {
+		t.Fatalf("backend run = %#v", run)
+	}
+	for _, marker := range []string{"# 后端工程", "<skill-reference path=\"references/service-contracts.md\">", "## 数据与事务"} {
+		if !strings.Contains(run.Guidance, marker) {
+			t.Fatalf("complete package is missing %q", marker)
+		}
+	}
+	analystRun, err := ResolveCreationSkillRun(analyst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analystRun.ResourceCount != 2 || !strings.Contains(analystRun.Guidance, "<skill-script path=\"scripts/profile_csv.py\">") || !strings.Contains(analystRun.Guidance, "def profile(") {
+		t.Fatalf("deterministic helper was not bundled: %#v", analystRun)
+	}
+}
+
+func TestCreationSkillRuntimeUsesInlineInstructionsForPublishedExternalSkill(t *testing.T) {
+	entry := CreationLibraryEntry{ID: "external-review", Content: "Run the published review workflow.", SourceType: creationSourceOfficial}
+	run, err := ResolveCreationSkillRun(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Mode != "inline" || run.Revision == "" || !strings.Contains(run.Guidance, entry.Content) {
+		t.Fatalf("inline run = %#v", run)
+	}
+}

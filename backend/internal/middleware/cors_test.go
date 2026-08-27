@@ -31,7 +31,7 @@ func TestPublicCORSPreflightForRelayOnly(t *testing.T) {
 	if got := recorder.Header().Get("Access-Control-Allow-Headers"); got != "authorization, content-type, x-stainless-lang" {
 		t.Fatalf("allow headers = %q", got)
 	}
-	if got := recorder.Header().Get("Access-Control-Expose-Headers"); got != "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID, X-DengDeng-Applied-Rules, X-DengDeng-Applied-Skills" {
+	if got := recorder.Header().Get("Access-Control-Expose-Headers"); got != "Content-Type, Retry-After, X-Request-ID, X-DengDeng-Trace-ID, X-DengDeng-Applied-Rules, X-DengDeng-Applied-Skills, X-DengDeng-Skill-Runs" {
 		t.Fatalf("expose headers = %q", got)
 	}
 

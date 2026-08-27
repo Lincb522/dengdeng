@@ -48,6 +48,8 @@ jobs:
       - name: Verify modules
         run: go mod verify
         working-directory: backend
+      - name: Verify built-in skill packages
+        run: python3 scripts/generate_creation_skill_packages.py --check
       - name: Run tests
         run: go test ./...
         working-directory: backend
