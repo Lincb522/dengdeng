@@ -142,3 +142,115 @@ func TestRegistrationRiskLimitSurvivesHandlerRestart(t *testing.T) {
 		t.Fatalf("active block after restart status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
+
+func TestRegistrationFingerprintLimitBlocksRotatingIPs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:auth-registration-fingerprint-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.RegistrationRiskEvent{}, &model.RegistrationBlock{}, &model.AuditLog{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret"}, Site: config.SiteConfig{AllowRegister: true}}
+	h := NewAuthHandlerWithMailer(db, cfg, &fakeRegistrationMailer{})
+	settings := service.NewSystemSettingsService(db, cfg).Defaults()
+	settings.Security.RegistrationFingerprintDayLimit = 2
+
+	const fingerprint = "e06f8c4fce759b0dca33f1fcee992e163232ab262f96eb0d83c1d57aeb482f79"
+	for _, sourceIP := range []string{"198.51.100.10", "203.0.113.11"} {
+		event := model.RegistrationRiskEvent{
+			SourceIP: sourceIP, SourceNetwork: registrationSourceNetwork(sourceIP), EmailDomain: "example.test",
+			ClientFingerprint: fingerprint, Action: registrationActionCreate,
+		}
+		if err := db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := model.RegistrationRiskEvent{
+		SourceIP: "192.0.2.12", SourceNetwork: registrationSourceNetwork("192.0.2.12"), EmailDomain: "other.test",
+		ClientFingerprint: fingerprint, Action: registrationActionCreate,
+	}
+	retryAfter, err := h.registrationRiskRemaining(settings, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retryAfter <= 0 {
+		t.Fatal("same registration client should be blocked after rotating IPs")
+	}
+	var block model.RegistrationBlock
+	if err := db.Where("kind = ? AND value = ?", "fingerprint", fingerprint).First(&block).Error; err != nil {
+		t.Fatal("fingerprint threshold should create a durable block:", err)
+	}
+	remaining, err := h.registrationAutoBlockRemaining(next)
+	if err != nil || remaining <= 0 {
+		t.Fatalf("fingerprint block remaining = %v, err = %v", remaining, err)
+	}
+}
+
+func TestRegistrationGrantIsNotRepeatedForSameClient(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:auth-registration-client-grant-test?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.EmailVerification{}, &model.RegistrationRiskEvent{}, &model.RegistrationBlock{}, &model.Setting{}, &model.AuditLog{}, &model.ReferralCode{}, &model.ReferralBinding{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret"}, Site: config.SiteConfig{AllowRegister: true}}
+	settingsService := service.NewSystemSettingsService(db, cfg)
+	settings := settingsService.Defaults()
+	settings.UserDefaults.BalanceMicro = 2_000_000
+	settings.Security.RegistrationFingerprintDayLimit = 3
+	settings.Security.RegistrationGrantOncePerFingerprintDays = 30
+	if _, err := settingsService.Update(settings); err != nil {
+		t.Fatal(err)
+	}
+	mailer := &fakeRegistrationMailer{}
+	h := NewAuthHandlerWithMailer(db, cfg, mailer)
+
+	request := func(path, body, remoteAddr string, cookie *http.Cookie, handle gin.HandlerFunc) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewBufferString(body))
+		c.Request.RemoteAddr = remoteAddr
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Request.Header.Set("User-Agent", "registration-client-test")
+		c.Request.Header.Set("Accept-Language", "zh-CN")
+		if cookie != nil {
+			c.Request.AddCookie(cookie)
+		}
+		handle(c)
+		return w
+	}
+
+	firstCode := request("/api/auth/register/code", `{"email":"first@example.test"}`, "198.51.100.20:1000", nil, h.SendRegistrationCode)
+	if firstCode.Code != http.StatusOK || len(firstCode.Result().Cookies()) == 0 {
+		t.Fatalf("first code status = %d, body = %s", firstCode.Code, firstCode.Body.String())
+	}
+	clientCookie := firstCode.Result().Cookies()[0]
+	terms := settings.LoginAgreement.Revision()
+	firstBody := `{"email":"first@example.test","password":"password123","code":"` + mailer.code + `","terms_revision":"` + terms + `"}`
+	if w := request("/api/auth/register", firstBody, "198.51.100.20:1001", clientCookie, h.Register); w.Code != http.StatusOK {
+		t.Fatalf("first registration status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	if w := request("/api/auth/register/code", `{"email":"second@example.test"}`, "203.0.113.21:2000", clientCookie, h.SendRegistrationCode); w.Code != http.StatusOK {
+		t.Fatalf("second code status = %d, body = %s", w.Code, w.Body.String())
+	}
+	secondBody := `{"email":"second@example.test","password":"password123","code":"` + mailer.code + `","terms_revision":"` + terms + `"}`
+	if w := request("/api/auth/register", secondBody, "203.0.113.21:2001", clientCookie, h.Register); w.Code != http.StatusOK {
+		t.Fatalf("second registration status = %d, body = %s", w.Code, w.Body.String())
+	}
+
+	var first, second model.User
+	if err := db.Where("email = ?", "first@example.test").First(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("email = ?", "second@example.test").First(&second).Error; err != nil {
+		t.Fatal(err)
+	}
+	if first.BalanceMicro != 2_000_000 || second.BalanceMicro != 0 {
+		t.Fatalf("balances = %d and %d, want 2000000 and 0", first.BalanceMicro, second.BalanceMicro)
+	}
+}

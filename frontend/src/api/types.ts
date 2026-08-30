@@ -81,7 +81,9 @@ export interface SecurityPolicySettings {
 	registration_ip_day_limit: number
 	registration_subnet_day_limit: number
 	registration_domain_hour_limit: number
+	registration_fingerprint_day_limit: number
 	registration_grant_once_per_ip_days: number
+	registration_grant_once_per_fingerprint_days: number
 	registration_blocked_networks: string[]
 	registration_auto_block_enabled: boolean
 	registration_auto_block_minutes: number

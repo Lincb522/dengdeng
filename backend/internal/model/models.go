@@ -1140,10 +1140,10 @@ type RegistrationRiskEvent struct {
 	SourceIP            string    `gorm:"size:64;index:idx_registration_risk_ip_created,priority:1" json:"source_ip"`
 	SourceNetwork       string    `gorm:"size:96;index:idx_registration_risk_network_created,priority:1" json:"source_network"`
 	EmailDomain         string    `gorm:"size:253;index:idx_registration_risk_domain_created,priority:1" json:"email_domain"`
-	ClientFingerprint   string    `gorm:"size:64;index" json:"client_fingerprint"`
+	ClientFingerprint   string    `gorm:"size:64;index:idx_registration_risk_fingerprint_created,priority:1" json:"client_fingerprint"`
 	Action              string    `gorm:"size:24;index:idx_registration_risk_action_created,priority:1;not null" json:"action"`
 	GrantedBalanceMicro int64     `gorm:"not null;default:0" json:"granted_balance_micro"`
-	CreatedAt           time.Time `gorm:"index:idx_registration_risk_ip_created,priority:2;index:idx_registration_risk_network_created,priority:2;index:idx_registration_risk_domain_created,priority:2;index:idx_registration_risk_action_created,priority:2" json:"created_at"`
+	CreatedAt           time.Time `gorm:"index:idx_registration_risk_ip_created,priority:2;index:idx_registration_risk_network_created,priority:2;index:idx_registration_risk_domain_created,priority:2;index:idx_registration_risk_fingerprint_created,priority:2;index:idx_registration_risk_action_created,priority:2" json:"created_at"`
 }
 
 // RegistrationBlock stores an automatically expiring registration ban. A

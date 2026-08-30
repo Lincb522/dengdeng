@@ -118,7 +118,8 @@ function defaultSystemSettings(): SystemSettings {
 			email_verification_enabled: true, password_reset_enabled: true, totp_enabled: true, session_binding_enabled: false,
 			step_up_enabled: false, audit_log_retention_days: 180, turnstile_enabled: false, turnstile_site_key: '',
 			registration_protection_enabled: true, registration_code_ip_hour_limit: 3, registration_ip_day_limit: 3,
-			registration_subnet_day_limit: 12, registration_domain_hour_limit: 20, registration_grant_once_per_ip_days: 30,
+			registration_subnet_day_limit: 12, registration_domain_hour_limit: 20, registration_fingerprint_day_limit: 3,
+			registration_grant_once_per_ip_days: 30, registration_grant_once_per_fingerprint_days: 30,
 			registration_blocked_networks: [],
 			registration_auto_block_enabled: true, registration_auto_block_minutes: 1440, registration_auto_block_max_minutes: 43200,
 			trust_forwarded_ip: true, forwarded_ip_headers: ['X-Forwarded-For', 'X-Real-IP'],
@@ -585,13 +586,15 @@ onMounted(load)
 			</section>
 			<section class="settings-section settings-section--quiet">
 				<header><h2>注册风控</h2><p>计数保存在数据库中，服务重启后不会清空。</p></header>
-				<label class="settings-toggle-row"><span><strong>启用持久化注册保护</strong><small>限制单 IP、同网段和同邮箱域名的批量注册。</small></span><input v-model="form.security.registration_protection_enabled" type="checkbox" role="switch" /></label>
+				<label class="settings-toggle-row"><span><strong>启用持久化注册保护</strong><small>限制单 IP、同网段、同邮箱域名和同一注册客户端的批量注册。</small></span><input v-model="form.security.registration_protection_enabled" type="checkbox" role="switch" /></label>
 				<div class="settings-form-grid settings-form-grid--three settings-fields-spaced">
 					<label class="settings-field"><span>单 IP 每小时验证码</span><input v-model.number="form.security.registration_code_ip_hour_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="1000" class="input" /></label>
 					<label class="settings-field"><span>单 IP 每日注册</span><input v-model.number="form.security.registration_ip_day_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="1000" class="input" /></label>
 					<label class="settings-field"><span>同网段每日注册</span><input v-model.number="form.security.registration_subnet_day_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="10000" class="input" /></label>
 					<label class="settings-field"><span>同域名每小时注册</span><input v-model.number="form.security.registration_domain_hour_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="10000" class="input" /></label>
+					<label class="settings-field"><span>同一客户端每日注册</span><input v-model.number="form.security.registration_fingerprint_day_limit" :disabled="!form.security.registration_protection_enabled" type="number" min="1" max="1000" class="input" /></label>
 					<label class="settings-field"><span>同 IP 赠送冷却（天）</span><input v-model.number="form.security.registration_grant_once_per_ip_days" :disabled="!form.security.registration_protection_enabled" type="number" min="0" max="3650" class="input" /><small>只限制赠送余额，不阻止正常注册；0 表示关闭。</small></label>
+					<label class="settings-field"><span>同一客户端赠送冷却（天）</span><input v-model.number="form.security.registration_grant_once_per_fingerprint_days" :disabled="!form.security.registration_protection_enabled" type="number" min="0" max="3650" class="input" /><small>更换 IP 后仍只赠送一次；0 表示关闭。</small></label>
 					<label class="settings-field"><span>首次自动封禁（分钟）</span><input v-model.number="form.security.registration_auto_block_minutes" :disabled="!form.security.registration_protection_enabled || !form.security.registration_auto_block_enabled" type="number" min="1" max="525600" class="input" /></label>
 					<label class="settings-field"><span>最长自动封禁（分钟）</span><input v-model.number="form.security.registration_auto_block_max_minutes" :disabled="!form.security.registration_protection_enabled || !form.security.registration_auto_block_enabled" type="number" min="1" max="525600" class="input" /></label>
 				</div>

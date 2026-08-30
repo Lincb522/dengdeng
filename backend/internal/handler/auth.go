@@ -36,6 +36,8 @@ const (
 	passwordResetCodePurpose = "password_reset"
 	registrationActionCode   = "code_sent"
 	registrationActionCreate = "registered"
+	registrationClientCookie = "dd_registration_client"
+	registrationClientMaxAge = 180 * 24 * time.Hour
 )
 
 type loginAttempt struct {
@@ -213,7 +215,20 @@ func registrationSourceNetwork(raw string) string {
 }
 
 func registrationClientFingerprint(c *gin.Context) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(c.GetHeader("User-Agent")) + "\x00" + strings.TrimSpace(c.GetHeader("Accept-Language"))))
+	clientID, err := c.Cookie(registrationClientCookie)
+	decodedClientID, decodeErr := hex.DecodeString(clientID)
+	if err != nil || decodeErr != nil || len(decodedClientID) != 32 {
+		random := make([]byte, 32)
+		if _, err := rand.Read(random); err == nil {
+			clientID = hex.EncodeToString(random)
+			secure := c.Request.TLS != nil || strings.EqualFold(strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")), "https")
+			c.SetSameSite(http.SameSiteLaxMode)
+			c.SetCookie(registrationClientCookie, clientID, int(registrationClientMaxAge.Seconds()), "/", "", secure, true)
+		} else {
+			clientID = ""
+		}
+	}
+	sum := sha256.Sum256([]byte(clientID + "\x00" + strings.TrimSpace(c.GetHeader("User-Agent")) + "\x00" + strings.TrimSpace(c.GetHeader("Accept-Language"))))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -229,22 +244,27 @@ func registrationRiskEvent(c *gin.Context, email, action string) model.Registrat
 }
 
 func (h *AuthHandler) registrationAutoBlockRemaining(event model.RegistrationRiskEvent) (time.Duration, error) {
-	if event.SourceIP == "" {
-		return 0, nil
+	var longest time.Duration
+	for _, source := range []struct{ kind, value string }{
+		{kind: "ip", value: event.SourceIP},
+		{kind: "fingerprint", value: event.ClientFingerprint},
+	} {
+		if source.value == "" {
+			continue
+		}
+		var block model.RegistrationBlock
+		err := h.db.Where("kind = ? AND value = ?", source.kind, source.value).First(&block).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if remaining := time.Until(block.ExpiresAt); remaining > longest {
+			longest = remaining
+		}
 	}
-	var block model.RegistrationBlock
-	err := h.db.Where("kind = ? AND value = ?", "ip", event.SourceIP).First(&block).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, nil
-	}
-	if err != nil {
-		return 0, err
-	}
-	remaining := time.Until(block.ExpiresAt)
-	if remaining <= 0 {
-		return 0, nil
-	}
-	return remaining, nil
+	return longest, nil
 }
 
 func registrationBlockDuration(policy service.SecurityPolicySettings, strike int) time.Duration {
@@ -269,18 +289,18 @@ func registrationBlockDuration(policy service.SecurityPolicySettings, strike int
 	return time.Duration(minutes) * time.Minute
 }
 
-func (h *AuthHandler) autoBlockRegistrationSource(settings service.SystemSettings, event model.RegistrationRiskEvent, reason string) (time.Duration, error) {
-	if !settings.Security.RegistrationAutoBlockEnabled || event.SourceIP == "" {
+func (h *AuthHandler) autoBlockRegistrationSource(settings service.SystemSettings, event model.RegistrationRiskEvent, kind, value, reason string) (time.Duration, error) {
+	if !settings.Security.RegistrationAutoBlockEnabled || value == "" {
 		return 0, nil
 	}
 	now := time.Now()
 	var duration time.Duration
 	err := h.db.Transaction(func(tx *gorm.DB) error {
 		var block model.RegistrationBlock
-		err := tx.Where("kind = ? AND value = ?", "ip", event.SourceIP).First(&block).Error
+		err := tx.Where("kind = ? AND value = ?", kind, value).First(&block).Error
 		switch {
 		case errors.Is(err, gorm.ErrRecordNotFound):
-			block = model.RegistrationBlock{Kind: "ip", Value: event.SourceIP, StrikeCount: 1, CreatedAt: now}
+			block = model.RegistrationBlock{Kind: kind, Value: value, StrikeCount: 1, CreatedAt: now}
 		case err != nil:
 			return err
 		case block.ExpiresAt.After(now):
@@ -302,8 +322,8 @@ func (h *AuthHandler) autoBlockRegistrationSource(settings service.SystemSetting
 		}
 		return tx.Create(&model.AuditLog{
 			Action:     "auth.registration_auto_blocked",
-			TargetType: "registration_ip",
-			TargetID:   event.SourceIP,
+			TargetType: "registration_" + kind,
+			TargetID:   value,
 			Detail:     fmt.Sprintf("%s; strike=%d; expires_at=%s", reason, block.StrikeCount, block.ExpiresAt.UTC().Format(time.RFC3339)),
 			SourceIP:   event.SourceIP,
 		}).Error
@@ -318,25 +338,28 @@ func (h *AuthHandler) registrationRiskRemaining(settings service.SystemSettings,
 	}
 	now := time.Now()
 	type counter struct {
-		field  string
-		value  string
-		since  time.Time
-		limit  int
-		window time.Duration
+		field      string
+		value      string
+		since      time.Time
+		limit      int
+		window     time.Duration
+		blockKind  string
+		blockValue string
 	}
 	var checks []counter
 	switch event.Action {
 	case registrationActionCode:
 		checks = []counter{
-			{field: "source_ip", value: event.SourceIP, since: now.Add(-time.Hour), limit: policy.RegistrationCodeIPHourLimit, window: time.Hour},
-			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour},
-			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour},
+			{field: "source_ip", value: event.SourceIP, since: now.Add(-time.Hour), limit: policy.RegistrationCodeIPHourLimit, window: time.Hour, blockKind: "ip", blockValue: event.SourceIP},
+			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour, blockKind: "ip", blockValue: event.SourceIP},
+			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour, blockKind: "ip", blockValue: event.SourceIP},
 		}
 	case registrationActionCreate:
 		checks = []counter{
-			{field: "source_ip", value: event.SourceIP, since: now.Add(-24 * time.Hour), limit: policy.RegistrationIPDayLimit, window: 24 * time.Hour},
-			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour},
-			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour},
+			{field: "source_ip", value: event.SourceIP, since: now.Add(-24 * time.Hour), limit: policy.RegistrationIPDayLimit, window: 24 * time.Hour, blockKind: "ip", blockValue: event.SourceIP},
+			{field: "source_network", value: event.SourceNetwork, since: now.Add(-24 * time.Hour), limit: policy.RegistrationSubnetDayLimit, window: 24 * time.Hour, blockKind: "ip", blockValue: event.SourceIP},
+			{field: "email_domain", value: event.EmailDomain, since: now.Add(-time.Hour), limit: policy.RegistrationDomainHourLimit, window: time.Hour, blockKind: "ip", blockValue: event.SourceIP},
+			{field: "client_fingerprint", value: event.ClientFingerprint, since: now.Add(-24 * time.Hour), limit: policy.RegistrationFingerprintDayLimit, window: 24 * time.Hour, blockKind: "fingerprint", blockValue: event.ClientFingerprint},
 		}
 	default:
 		return 0, errors.New("unknown registration risk action")
@@ -354,7 +377,7 @@ func (h *AuthHandler) registrationRiskRemaining(settings service.SystemSettings,
 		if count >= int64(check.limit) {
 			if policy.RegistrationAutoBlockEnabled {
 				reason := fmt.Sprintf("%s %s limit reached (%d/%d)", event.Action, check.field, count, check.limit)
-				return h.autoBlockRegistrationSource(settings, event, reason)
+				return h.autoBlockRegistrationSource(settings, event, check.blockKind, check.blockValue, reason)
 			}
 			return check.window, nil
 		}
@@ -689,6 +712,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 			var previousGrants int64
 			if err := tx.Model(&model.RegistrationRiskEvent{}).
 				Where("action = ? AND source_ip = ? AND granted_balance_micro > 0 AND created_at >= ?", registrationActionCreate, riskEvent.SourceIP, now.AddDate(0, 0, -settings.Security.RegistrationGrantOncePerIPDays)).
+				Count(&previousGrants).Error; err != nil {
+				return err
+			}
+			if previousGrants > 0 {
+				balance = 0
+			}
+		}
+		if balance > 0 && settings.Security.RegistrationProtectionEnabled && settings.Security.RegistrationGrantOncePerFingerprintDays > 0 && riskEvent.ClientFingerprint != "" {
+			var previousGrants int64
+			if err := tx.Model(&model.RegistrationRiskEvent{}).
+				Where("action = ? AND client_fingerprint = ? AND granted_balance_micro > 0 AND created_at >= ?", registrationActionCreate, riskEvent.ClientFingerprint, now.AddDate(0, 0, -settings.Security.RegistrationGrantOncePerFingerprintDays)).
 				Count(&previousGrants).Error; err != nil {
 				return err
 			}
