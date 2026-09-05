@@ -12,7 +12,7 @@ RUN pnpm build
 # 产物输出到 /app/backend/internal/web/dist (vite outDir 配置为 ../backend/...)
 
 # ---- 后端构建 ----
-FROM --platform=$BUILDPLATFORM golang:1.26.5-alpine AS backend
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS backend
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
