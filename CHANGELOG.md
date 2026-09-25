@@ -4,6 +4,14 @@
 
 ## 未发布
 
+### 模型目录与定价
+
+- 上新 GPT-6 Astra、GPT-6 Sol、GPT-6 Luna、Claude Fable 5.1、Claude Opus 5.5、受邀 Claude Mythos 5.1、Grok 4.7、DeepSeek Flash，以及 Gemini 3.8/3.7/3.6/3.5 Flash 系列。
+- 补齐 GPT Image 2.5 Sunburst 与 Flare，按官方现行文本与图像 Token 价格计费。
+- 补齐 Gemini 3.1 Flash Image 与 Flash-Lite Image，模型广场同步展示上下文、最大输出、视觉、工具和推理能力。
+- 按官方现行价格更新 GPT-5.6 系列与 DeepSeek Flash；升级只迁移未改动的旧默认规则，管理员自定义价格保持不变。
+- 公共模型目录与实际可调用模型继续分离：模型广场展示完整目录，`/v1/models` 仍以账号上游实时发现结果为准。
+
 ### 渠道状态
 
 - 渠道状态以桌面双列、移动端单列的状态卡片展示，当前证据、请求成功率、可用账号、首字耗时与巡检记录集中在同一卡片内。

@@ -442,19 +442,27 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 	// operator edits. New rows are added on upgrade; existing rules stay under
 	// administrator control.
 	prices := []model.ModelPrice{
-		{Match: "gpt-5.6", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: 0.5, CacheWritePrice: 6.25},
-		{Match: "gpt-5.6-sol", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: 0.5, CacheWritePrice: 6.25},
-		{Match: "gpt-5.6-terra", Platform: model.PlatformOpenAI, InputPrice: 2.5, OutputPrice: 15, CacheReadPrice: 0.25, CacheWritePrice: 3.125},
-		{Match: "gpt-5.6-luna", Platform: model.PlatformOpenAI, InputPrice: 1, OutputPrice: 6, CacheReadPrice: 0.1, CacheWritePrice: 1.25},
+		{Match: "gpt-6-astra", Platform: model.PlatformOpenAI, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
+		{Match: "gpt-6-sol", Platform: model.PlatformOpenAI, InputPrice: 2, OutputPrice: 10, CacheReadPrice: 0.2, CacheWritePrice: 2.5},
+		{Match: "gpt-6-luna", Platform: model.PlatformOpenAI, InputPrice: 0.1, OutputPrice: 0.5, CacheReadPrice: 0.01, CacheWritePrice: 0.125},
+		{Match: "gpt-5.6", Platform: model.PlatformOpenAI, InputPrice: 4, OutputPrice: 20, CacheReadPrice: 0.4, CacheWritePrice: 5},
+		{Match: "gpt-5.6-sol", Platform: model.PlatformOpenAI, InputPrice: 4, OutputPrice: 20, CacheReadPrice: 0.4, CacheWritePrice: 5},
+		{Match: "gpt-5.6-terra", Platform: model.PlatformOpenAI, InputPrice: 2, OutputPrice: 12, CacheReadPrice: 0.2, CacheWritePrice: 2.5},
+		{Match: "gpt-5.6-luna", Platform: model.PlatformOpenAI, InputPrice: 0.2, OutputPrice: 1.2, CacheReadPrice: 0.02, CacheWritePrice: 0.25},
 		{Match: "gpt-5.5", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: 0.5},
 		{Match: "gpt-5.5-pro", Platform: model.PlatformOpenAI, InputPrice: 30, OutputPrice: 180},
 		{Match: "gpt-5.4", Platform: model.PlatformOpenAI, InputPrice: 2.5, OutputPrice: 15, CacheReadPrice: 0.25},
 		{Match: "gpt-5.4-mini", Platform: model.PlatformOpenAI, InputPrice: 0.75, OutputPrice: 4.5, CacheReadPrice: 0.075},
 		{Match: "gpt-5.4-nano", Platform: model.PlatformOpenAI, InputPrice: 0.2, OutputPrice: 1.25, CacheReadPrice: 0.02},
+		{Match: "gpt-image-2.5-sunburst", Platform: model.PlatformOpenAI, InputPrice: 5, CacheReadPrice: 1.25, ImageInputPrice: 8, ImageCacheReadPrice: 2, ImageOutputPrice: 30},
+		{Match: "gpt-image-2.5-flare", Platform: model.PlatformOpenAI, InputPrice: 5, CacheReadPrice: 1.25, ImageInputPrice: 8, ImageCacheReadPrice: 2, ImageOutputPrice: 30},
 		{Match: "gpt-image-2", Platform: model.PlatformOpenAI, InputPrice: 5, CacheReadPrice: 1.25, ImageInputPrice: 8, ImageCacheReadPrice: 2, ImageOutputPrice: 30},
 		{Match: "gpt-image-1.5", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 10, CacheReadPrice: 1.25, ImageInputPrice: 8, ImageCacheReadPrice: 2, ImageOutputPrice: 32},
-		// Anthropic first-party pricing, USD per MTok, checked July 2026.
+		// Anthropic first-party pricing, USD per MTok, checked September 2026.
 		// Model-specific rules intentionally beat the legacy family wildcards below.
+		{Match: "claude-fable-5-1", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 0.25, CacheWritePrice: 12.5, CacheWrite5mPrice: 12.5, CacheWrite1hPrice: 20},
+		{Match: "claude-opus-5-5", Platform: model.PlatformAnthropic, InputPrice: 4, OutputPrice: 20, CacheReadPrice: 0.2, CacheWritePrice: 5, CacheWrite5mPrice: 5, CacheWrite1hPrice: 8},
+		{Match: "claude-mythos-5-1", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 0.25, CacheWritePrice: 12.5, CacheWrite5mPrice: 12.5, CacheWrite1hPrice: 20},
 		{Match: "claude-fable-5", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
 		{Match: "claude-opus-5", Platform: model.PlatformAnthropic, InputPrice: 5, OutputPrice: 25, CacheReadPrice: 0.5, CacheWritePrice: 6.25},
 		{Match: "claude-mythos-5", Platform: model.PlatformAnthropic, InputPrice: 10, OutputPrice: 50, CacheReadPrice: 1, CacheWritePrice: 12.5},
@@ -471,6 +479,12 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 		{Match: "claude-sonnet-*", Platform: model.PlatformAnthropic, InputPrice: 3, OutputPrice: 15, CacheReadPrice: 0.3, CacheWritePrice: 3.75},
 		{Match: "claude-haiku-*", Platform: model.PlatformAnthropic, InputPrice: 0.8, OutputPrice: 4, CacheReadPrice: 0.08, CacheWritePrice: 1},
 		{Match: "gemini-2.5-pro", Platform: model.PlatformGemini, InputPrice: 1.25, OutputPrice: 10, CacheReadPrice: 0.125},
+		{Match: "gemini-3.8-flash", Platform: model.PlatformGemini, InputPrice: 0.75, OutputPrice: 3.75, CacheReadPrice: 0.075},
+		{Match: "gemini-3.7-flash", Platform: model.PlatformGemini, InputPrice: 0.75, OutputPrice: 3.75, CacheReadPrice: 0.075},
+		{Match: "gemini-3.6-flash", Platform: model.PlatformGemini, InputPrice: 0.75, OutputPrice: 3.75, CacheReadPrice: 0.075},
+		{Match: "gemini-3.5-flash", Platform: model.PlatformGemini, InputPrice: 1.5, OutputPrice: 9, CacheReadPrice: 0.15},
+		{Match: "gemini-3.5-flash-lite", Platform: model.PlatformGemini, InputPrice: 0.3, OutputPrice: 2.5, CacheReadPrice: 0.03},
+		{Match: "gemini-3.1-flash-lite", Platform: model.PlatformGemini, InputPrice: 0.25, OutputPrice: 1.5, CacheReadPrice: 0.025},
 		// Gemini reports generated image tokens as candidate/output tokens, so
 		// their image models use OutputPrice directly instead of OpenAI's
 		// separately reported image-token fields.
@@ -479,6 +493,7 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 		{Match: "gemini-3.1-flash-lite-image", Platform: model.PlatformGemini, InputPrice: 0.25, OutputPrice: 30},
 		{Match: "gemini-3-pro-image", Platform: model.PlatformGemini, InputPrice: 2, OutputPrice: 120},
 		// xAI / Grok. Model-specific rows beat the grok-* family wildcard.
+		{Match: "grok-4.7", Platform: model.PlatformGrok, InputPrice: 2, OutputPrice: 6, CacheReadPrice: 0.5},
 		{Match: "grok-4.5", Platform: model.PlatformGrok, InputPrice: 3, OutputPrice: 15, CacheReadPrice: 0.75},
 		{Match: "grok-4.3", Platform: model.PlatformGrok, InputPrice: 3, OutputPrice: 15, CacheReadPrice: 0.75},
 		{Match: "grok-build-0.1", Platform: model.PlatformGrok, InputPrice: 1, OutputPrice: 5, CacheReadPrice: 0.25},
@@ -501,6 +516,9 @@ func Seed(db *gorm.DB, cfg *config.Config) error {
 				return err
 			}
 		}
+	}
+	if err := migrateOfficialModelPrices20260925(db); err != nil {
+		return err
 	}
 	if err := seedDefaultModelConfigs(db); err != nil {
 		return err
@@ -532,10 +550,62 @@ func defaultDomesticModelPrices() []model.ModelPrice {
 		{Match: "glm-image", Platform: model.PlatformZhipu, ImagePricePerImage: 0.015},
 
 		// DeepSeek official peak rates, USD per MTok. Off-peak rates are lower.
-		{Match: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014},
+		{Match: "deepseek-flash", Platform: model.PlatformDeepSeek, InputPrice: 0.3, OutputPrice: 1.2, CacheReadPrice: 0.006},
+		{Match: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, InputPrice: 0.3, OutputPrice: 1.2, CacheReadPrice: 0.006},
 		{Match: "deepseek-v4-pro", Platform: model.PlatformDeepSeek, InputPrice: 1.32, OutputPrice: 3.96, CacheReadPrice: 0.044},
-		{Match: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014},
+		{Match: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, InputPrice: 0.3, OutputPrice: 1.2, CacheReadPrice: 0.006},
 	}
+}
+
+const officialModelPrices20260925MigrationKey = "migration.official_model_prices_20260925_v1"
+
+type modelPriceRevision struct {
+	Old model.ModelPrice
+	New model.ModelPrice
+}
+
+// migrateOfficialModelPrices20260925 updates only untouched bootstrap rows.
+// Every billable field participates in the comparison, so an administrator's
+// custom rule is preserved even when just one cache or image rate was changed.
+func migrateOfficialModelPrices20260925(db *gorm.DB) error {
+	var marker model.Setting
+	if err := db.Where("key = ?", officialModelPrices20260925MigrationKey).First(&marker).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	revisions := []modelPriceRevision{
+		{Old: model.ModelPrice{Match: "gpt-5.6", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: 0.5, CacheWritePrice: 6.25}, New: model.ModelPrice{InputPrice: 4, OutputPrice: 20, CacheReadPrice: 0.4, CacheWritePrice: 5}},
+		{Old: model.ModelPrice{Match: "gpt-5.6-sol", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: 0.5, CacheWritePrice: 6.25}, New: model.ModelPrice{InputPrice: 4, OutputPrice: 20, CacheReadPrice: 0.4, CacheWritePrice: 5}},
+		{Old: model.ModelPrice{Match: "gpt-5.6-terra", Platform: model.PlatformOpenAI, InputPrice: 2.5, OutputPrice: 15, CacheReadPrice: 0.25, CacheWritePrice: 3.125}, New: model.ModelPrice{InputPrice: 2, OutputPrice: 12, CacheReadPrice: 0.2, CacheWritePrice: 2.5}},
+		{Old: model.ModelPrice{Match: "gpt-5.6-luna", Platform: model.PlatformOpenAI, InputPrice: 1, OutputPrice: 6, CacheReadPrice: 0.1, CacheWritePrice: 1.25}, New: model.ModelPrice{InputPrice: 0.2, OutputPrice: 1.2, CacheReadPrice: 0.02, CacheWritePrice: 0.25}},
+		{Old: model.ModelPrice{Match: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014}, New: model.ModelPrice{InputPrice: 0.3, OutputPrice: 1.2, CacheReadPrice: 0.006}},
+		{Old: model.ModelPrice{Match: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, InputPrice: 0.44, OutputPrice: 1.32, CacheReadPrice: 0.014}, New: model.ModelPrice{InputPrice: 0.3, OutputPrice: 1.2, CacheReadPrice: 0.006}},
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, revision := range revisions {
+			old := revision.Old
+			where := map[string]any{
+				"match": old.Match, "platform": old.Platform,
+				"input_price": old.InputPrice, "output_price": old.OutputPrice,
+				"cache_read_price": old.CacheReadPrice, "cache_write_price": old.CacheWritePrice,
+				"cache_write5m_price": old.CacheWrite5mPrice, "cache_write1h_price": old.CacheWrite1hPrice,
+				"image_input_price": old.ImageInputPrice, "image_output_price": old.ImageOutputPrice,
+				"image_cache_read_price": old.ImageCacheReadPrice, "image_price_per_image": old.ImagePricePerImage,
+			}
+			if err := tx.Model(&model.ModelPrice{}).Where(where).Updates(map[string]any{
+				"input_price": revision.New.InputPrice, "output_price": revision.New.OutputPrice,
+				"cache_read_price": revision.New.CacheReadPrice, "cache_write_price": revision.New.CacheWritePrice,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.Setting{
+			Key: officialModelPrices20260925MigrationKey, Value: time.Now().UTC().Format(time.RFC3339),
+		}).Error
+	})
 }
 
 // defaultModelConfigs is the public catalogue shipped with DengDeng. Token
@@ -544,13 +614,20 @@ func defaultDomesticModelPrices() []model.ModelPrice {
 // example, pure image output or current xAI models).
 func defaultModelConfigs() []model.ModelConfig {
 	return []model.ModelConfig{
+		{Name: "gpt-6-astra", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "OpenAI GPT-6 Astra，复杂推理、编码与智能体旗舰模型"},
+		{Name: "gpt-6-sol", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "OpenAI GPT-6 Sol，编码与智能体工作流均衡模型"},
+		{Name: "gpt-6-luna", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "OpenAI GPT-6 Luna，高吞吐低成本模型"},
 		{Name: "gpt-5.6", Platform: model.PlatformOpenAI, Kind: "chat", UpstreamModel: "gpt-5.6-sol", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 默认旗舰推理模型"},
 		{Name: "gpt-5.6-sol", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 旗舰推理与编码模型"},
 		{Name: "gpt-5.6-terra", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 均衡型模型"},
 		{Name: "gpt-5.6-luna", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 高吞吐低成本模型"},
 		{Name: "gpt-5.5", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 当前专业推理模型"},
 		{Name: "gpt-5.5-pro", Platform: model.PlatformOpenAI, Kind: "chat", ContextWindow: 1_050_000, MaxOutputTokens: 128_000, Description: "OpenAI 高精度专业模型"},
-		{Name: "gpt-image-2", Platform: model.PlatformOpenAI, Kind: "image", Description: "OpenAI 最新图像生成与编辑模型"},
+		{Name: "gpt-image-2.5-sunburst", Platform: model.PlatformOpenAI, Kind: "image", SupportsVision: true, Description: "OpenAI GPT Image 2.5 Sunburst，高精度图像生成与编辑"},
+		{Name: "gpt-image-2.5-flare", Platform: model.PlatformOpenAI, Kind: "image", SupportsVision: true, Description: "OpenAI GPT Image 2.5 Flare，高速日常图像生成"},
+		{Name: "gpt-image-2", Platform: model.PlatformOpenAI, Kind: "image", SupportsVision: true, Description: "OpenAI GPT Image 2 图像生成与编辑模型"},
+		{Name: "claude-fable-5-1", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Claude Fable 5.1，长周期智能体与高难推理"},
+		{Name: "claude-opus-5-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Claude Opus 5.5，智能体编码与知识工作"},
 		{Name: "claude-fable-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude 最新旗舰智能体模型"},
 		{Name: "claude-opus-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 5"},
 		{Name: "claude-opus-4-8", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Opus 4.8，高级推理与代码"},
@@ -564,10 +641,20 @@ func defaultModelConfigs() []model.ModelConfig {
 		// These models require explicit Anthropic approval. Keeping them disabled
 		// makes the catalogue complete without sending ordinary traffic to a
 		// model the account cannot access.
+		{Name: "claude-mythos-5-1", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Claude Mythos 5.1，受邀可用", Status: model.StatusDisabled},
 		{Name: "claude-mythos-5", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Mythos 5，受邀可用", Status: model.StatusDisabled},
 		{Name: "claude-mythos-preview", Platform: model.PlatformAnthropic, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 128_000, Description: "Claude Mythos Preview，受邀预览", Status: model.StatusDisabled},
+		{Name: "gemini-3.8-flash", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.8 Flash，长周期编码与智能体模型"},
+		{Name: "gemini-3.7-flash", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.7 Flash，多步工具调用模型"},
+		{Name: "gemini-3.6-flash", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.6 Flash，通用多模态模型"},
+		{Name: "gemini-3.5-flash", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.5 Flash，高吞吐智能体模型"},
+		{Name: "gemini-3.5-flash-lite", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.5 Flash-Lite，低延迟低成本模型"},
+		{Name: "gemini-3.1-flash-lite", Platform: model.PlatformGemini, Kind: "chat", ContextWindow: 1_048_576, MaxOutputTokens: 65_536, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "Gemini 3.1 Flash-Lite，高吞吐轻量模型"},
 		{Name: "gemini-2.5-flash-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, Description: "Gemini Nano Banana 图像模型"},
+		{Name: "gemini-3.1-flash-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, SupportsVision: true, Description: "Gemini 3.1 Flash Image 图像生成与编辑模型"},
+		{Name: "gemini-3.1-flash-lite-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, SupportsVision: true, Description: "Gemini 3.1 Flash-Lite Image 轻量图像模型"},
 		{Name: "gemini-3-pro-image", Platform: model.PlatformGemini, Kind: "image", ContextWindow: 65_536, MaxOutputTokens: 32_768, Description: "Gemini 高质量图像模型"},
+		{Name: "grok-4.7", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 500_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "xAI Grok 4.7 旗舰推理模型"},
 		{Name: "grok-4.5", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 500_000, Description: "xAI Grok 4.5 旗舰模型"},
 		{Name: "grok-4.3", Platform: model.PlatformGrok, Kind: "chat", ContextWindow: 1_000_000, Description: "xAI Grok 4.3"},
 		// grok-composer-2.5-fast is the public relay alias for grok-build-0.1.
@@ -591,7 +678,9 @@ func defaultModelConfigs() []model.ModelConfig {
 		{Name: "glm-5v-turbo", Platform: model.PlatformZhipu, Kind: "chat", ContextWindow: 200_000, MaxOutputTokens: 128_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "智谱 GLM-5V Turbo 多模态模型"},
 		{Name: "glm-image", Platform: model.PlatformZhipu, Kind: "image", Description: "智谱 GLM-Image 图像生成模型"},
 
-		// DeepSeek V4 current API models. Vision is opt-in via its dedicated ID.
+		// DeepSeek V4 current API models. The canonical Flash ID replaces the
+		// temporary V4 aliases, which remain in the catalogue for compatibility.
+		{Name: "deepseek-flash", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4.1 Flash 当前稳定模型"},
 		{Name: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Flash"},
 		{Name: "deepseek-v4-pro", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Pro"},
 		{Name: "deepseek-v4-flash-vision-exp", Platform: model.PlatformDeepSeek, Kind: "chat", ContextWindow: 1_000_000, MaxOutputTokens: 384_000, SupportsVision: true, SupportsTools: true, SupportsReasoning: true, Description: "DeepSeek V4 Flash Vision 实验版"},

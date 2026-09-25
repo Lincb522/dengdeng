@@ -1,6 +1,6 @@
-// GPT-5.6 reasoning.effort values, plus DengDeng's "auto" option. Auto does
-// not inject a value and therefore follows an explicit client value or the
-// model default.
+// Current OpenAI reasoning.effort vocabulary, plus DengDeng's "auto" option.
+// Individual models may expose only a subset. Auto does not inject a value and
+// therefore follows an explicit client value or the model default.
 export const OFFICIAL_REASONING_EFFORTS = ['none', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 export interface ReasoningOption {
@@ -29,7 +29,7 @@ export function defaultReasoningMultipliers(): Record<string, number> {
   }
 }
 
-// Legacy releases exposed fast/minimal; GPT-5.6 uses low instead.
+// Legacy releases exposed fast/minimal; current OpenAI models use low instead.
 export function normalizeReasoningEffort(value: string | null | undefined): string {
   const normalized = (value || '').trim().toLowerCase()
   if (normalized === 'fast' || normalized === 'minimal') return 'low'

@@ -14,9 +14,10 @@ const (
 	openAIReasoningChatCompletions
 )
 
-// upstreamReasoningEffort returns a GPT-5.6-supported effort. Earlier
-// DengDeng releases stored fast/minimal, so both remain accepted as aliases
-// for low during migration.
+// upstreamReasoningEffort returns a current OpenAI-wire effort. Individual
+// models can support a subset; upstream validation remains authoritative for
+// that model. Earlier DengDeng releases stored fast/minimal, so both remain
+// accepted as aliases for low during migration.
 func upstreamReasoningEffort(value string) string {
 	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
 	case "fast", "minimal":

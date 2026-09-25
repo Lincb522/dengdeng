@@ -14,8 +14,8 @@ import (
 
 const runtimePolicyKey = "runtime.gateway_policy.v1"
 
-// OfficialReasoningEfforts follows GPT-5.6's documented reasoning.effort
-// values. "auto" is a DengDeng UI option and intentionally stays out of this
+// OfficialReasoningEfforts is the union used by current OpenAI reasoning
+// models. "auto" is a DengDeng UI option and intentionally stays out of this
 // list because it means "do not inject a value; follow the client/model".
 var OfficialReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 

@@ -705,9 +705,11 @@ type keyPolicy struct {
 	expiresAt              *time.Time
 }
 
-// normalizeReasoningEffort stores GPT-5.6's supported effort values plus
-// "auto" (= follow the client/model). Legacy fast/minimal values migrate to
-// low so saved keys, pricing rules and usage logs share one vocabulary.
+// normalizeReasoningEffort stores the current OpenAI reasoning vocabulary plus
+// "auto" (= follow the client/model). Individual models can support a subset;
+// upstream validation remains authoritative for that model. Legacy
+// fast/minimal values migrate to low so saved keys, pricing rules and usage
+// logs share one vocabulary.
 func normalizeReasoningEffort(value string) (string, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(value)); normalized {
 	case "", "auto":

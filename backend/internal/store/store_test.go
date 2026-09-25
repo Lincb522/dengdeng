@@ -240,13 +240,20 @@ func TestSeedDefaultModelConfigsBackfillsMissingLimits(t *testing.T) {
 
 func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 	expected := map[string][2]int64{
+		"gpt-6-astra":                  {1_050_000, 128_000},
+		"gpt-6-sol":                    {1_050_000, 128_000},
+		"gpt-6-luna":                   {1_050_000, 128_000},
 		"gpt-5.6":                      {1_050_000, 128_000},
 		"gpt-5.6-sol":                  {1_050_000, 128_000},
 		"gpt-5.6-terra":                {1_050_000, 128_000},
 		"gpt-5.6-luna":                 {1_050_000, 128_000},
 		"gpt-5.5":                      {1_050_000, 128_000},
 		"gpt-5.5-pro":                  {1_050_000, 128_000},
+		"gpt-image-2.5-sunburst":       {0, 0},
+		"gpt-image-2.5-flare":          {0, 0},
 		"gpt-image-2":                  {0, 0},
+		"claude-fable-5-1":             {1_000_000, 128_000},
+		"claude-opus-5-5":              {1_000_000, 128_000},
 		"claude-fable-5":               {1_000_000, 128_000},
 		"claude-opus-5":                {1_000_000, 128_000},
 		"claude-opus-4-8":              {1_000_000, 128_000},
@@ -257,10 +264,20 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 		"claude-sonnet-4-6":            {1_000_000, 64_000},
 		"claude-sonnet-4-5-20250929":   {200_000, 64_000},
 		"claude-haiku-4-5-20251001":    {200_000, 64_000},
+		"claude-mythos-5-1":            {1_000_000, 128_000},
 		"claude-mythos-5":              {1_000_000, 128_000},
 		"claude-mythos-preview":        {1_000_000, 128_000},
+		"gemini-3.8-flash":             {1_048_576, 65_536},
+		"gemini-3.7-flash":             {1_048_576, 65_536},
+		"gemini-3.6-flash":             {1_048_576, 65_536},
+		"gemini-3.5-flash":             {1_048_576, 65_536},
+		"gemini-3.5-flash-lite":        {1_048_576, 65_536},
+		"gemini-3.1-flash-lite":        {1_048_576, 65_536},
 		"gemini-2.5-flash-image":       {65_536, 32_768},
+		"gemini-3.1-flash-image":       {65_536, 32_768},
+		"gemini-3.1-flash-lite-image":  {65_536, 32_768},
 		"gemini-3-pro-image":           {65_536, 32_768},
+		"grok-4.7":                     {500_000, 0},
 		"grok-4.5":                     {500_000, 0},
 		"grok-4.3":                     {1_000_000, 0},
 		"grok-composer-2.5-fast":       {256_000, 0},
@@ -277,6 +294,7 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 		"glm-4.7-flash":                {200_000, 128_000},
 		"glm-5v-turbo":                 {200_000, 128_000},
 		"glm-image":                    {0, 0},
+		"deepseek-flash":               {1_000_000, 384_000},
 		"deepseek-v4-flash":            {1_000_000, 384_000},
 		"deepseek-v4-pro":              {1_000_000, 384_000},
 		"deepseek-v4-flash-vision-exp": {1_000_000, 384_000},
@@ -295,13 +313,16 @@ func TestDefaultModelConfigsHaveCompletePublishedLimits(t *testing.T) {
 		if cfg.ContextWindow != want[0] || cfg.MaxOutputTokens != want[1] {
 			t.Errorf("%s limits = %d/%d, want %d/%d", cfg.Name, cfg.ContextWindow, cfg.MaxOutputTokens, want[0], want[1])
 		}
+		if strings.HasPrefix(cfg.Name, "gpt-6-") && (!cfg.SupportsVision || !cfg.SupportsTools || !cfg.SupportsReasoning) {
+			t.Errorf("%s capability flags = vision:%t tools:%t reasoning:%t, want all enabled", cfg.Name, cfg.SupportsVision, cfg.SupportsTools, cfg.SupportsReasoning)
+		}
 	}
 }
 
 func TestDefaultDomesticModelPricesAreCompleteAndUnique(t *testing.T) {
 	prices := defaultDomesticModelPrices()
 	wantPlatforms := map[string]int{
-		model.PlatformKimi: 4, model.PlatformZhipu: 8, model.PlatformDeepSeek: 3,
+		model.PlatformKimi: 4, model.PlatformZhipu: 8, model.PlatformDeepSeek: 4,
 	}
 	seen := make(map[string]bool, len(prices))
 	for _, price := range prices {
@@ -327,6 +348,104 @@ func TestDefaultDomesticModelPricesAreCompleteAndUnique(t *testing.T) {
 	}
 	if got := findDefaultPrice(prices, "deepseek-v4-pro"); got == nil || got.InputPrice != 1.32 || got.OutputPrice != 3.96 || got.CacheReadPrice != .044 {
 		t.Fatalf("unexpected DeepSeek V4 Pro price: %#v", got)
+	}
+	if got := findDefaultPrice(prices, "deepseek-flash"); got == nil || got.InputPrice != .3 || got.OutputPrice != 1.2 || got.CacheReadPrice != .006 {
+		t.Fatalf("unexpected DeepSeek Flash price: %#v", got)
+	}
+}
+
+func TestSeedAddsLatestOfficialModelPrices(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.ModelPrice{}, &model.ModelConfig{}, &model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Admin.Password = "seed-test-password"
+	if err := Seed(db, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	checks := map[string][6]float64{
+		"gpt-6-astra":      {10, 50, 1, 12.5, 0, 0},
+		"gpt-6-sol":        {2, 10, .2, 2.5, 0, 0},
+		"gpt-6-luna":       {.1, .5, .01, .125, 0, 0},
+		"gpt-5.6-sol":      {4, 20, .4, 5, 0, 0},
+		"claude-fable-5-1": {10, 50, .25, 12.5, 12.5, 20},
+		"claude-opus-5-5":  {4, 20, .2, 5, 5, 8},
+		"gemini-3.8-flash": {.75, 3.75, .075, 0, 0, 0},
+		"grok-4.7":         {2, 6, .5, 0, 0, 0},
+		"deepseek-flash":   {.3, 1.2, .006, 0, 0, 0},
+	}
+	for match, want := range checks {
+		var got model.ModelPrice
+		if err := db.Where("match = ?", match).First(&got).Error; err != nil {
+			t.Fatalf("load %s: %v", match, err)
+		}
+		actual := [6]float64{got.InputPrice, got.OutputPrice, got.CacheReadPrice, got.CacheWritePrice, got.CacheWrite5mPrice, got.CacheWrite1hPrice}
+		if actual != want {
+			t.Errorf("%s price = %v, want %v", match, actual, want)
+		}
+	}
+
+	for _, match := range []string{"gpt-image-2.5-sunburst", "gpt-image-2.5-flare"} {
+		var got model.ModelPrice
+		if err := db.Where("match = ?", match).First(&got).Error; err != nil {
+			t.Fatalf("load %s: %v", match, err)
+		}
+		if got.InputPrice != 5 || got.CacheReadPrice != 1.25 || got.ImageInputPrice != 8 || got.ImageCacheReadPrice != 2 || got.ImageOutputPrice != 30 {
+			t.Errorf("%s image price is incomplete: %#v", match, got)
+		}
+	}
+}
+
+func TestMigrateOfficialModelPricesPreservesOperatorEdits(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&model.ModelPrice{}, &model.Setting{}); err != nil {
+		t.Fatal(err)
+	}
+	rows := []model.ModelPrice{
+		{Match: "gpt-5.6", Platform: model.PlatformOpenAI, InputPrice: 5, OutputPrice: 30, CacheReadPrice: .5, CacheWritePrice: 6.25},
+		{Match: "gpt-5.6-terra", Platform: model.PlatformOpenAI, InputPrice: 9, OutputPrice: 15, CacheReadPrice: .25, CacheWritePrice: 3.125},
+		{Match: "deepseek-v4-flash", Platform: model.PlatformDeepSeek, InputPrice: .44, OutputPrice: 1.32, CacheReadPrice: .014},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateOfficialModelPrices20260925(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateOfficialModelPrices20260925(db); err != nil {
+		t.Fatalf("idempotent second migration failed: %v", err)
+	}
+
+	var flagship, customized, deepseek model.ModelPrice
+	if err := db.Where("match = ?", "gpt-5.6").First(&flagship).Error; err != nil {
+		t.Fatal(err)
+	}
+	if flagship.InputPrice != 4 || flagship.OutputPrice != 20 || flagship.CacheReadPrice != .4 || flagship.CacheWritePrice != 5 {
+		t.Fatalf("official price was not migrated: %#v", flagship)
+	}
+	if err := db.Where("match = ?", "gpt-5.6-terra").First(&customized).Error; err != nil {
+		t.Fatal(err)
+	}
+	if customized.InputPrice != 9 || customized.OutputPrice != 15 || customized.CacheReadPrice != .25 || customized.CacheWritePrice != 3.125 {
+		t.Fatalf("operator price was overwritten: %#v", customized)
+	}
+	if err := db.Where("match = ?", "deepseek-v4-flash").First(&deepseek).Error; err != nil {
+		t.Fatal(err)
+	}
+	if deepseek.InputPrice != .3 || deepseek.OutputPrice != 1.2 || deepseek.CacheReadPrice != .006 {
+		t.Fatalf("DeepSeek alias price was not migrated: %#v", deepseek)
+	}
+	var marker model.Setting
+	if err := db.Where("key = ?", officialModelPrices20260925MigrationKey).First(&marker).Error; err != nil {
+		t.Fatal(err)
 	}
 }
 
