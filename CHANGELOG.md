@@ -4,6 +4,11 @@
 
 ## 未发布
 
+### 依赖与构建
+
+- 修复图像工作台间接依赖中的 Browserslist 与 js-yaml 高危漏洞，统一锁定到已修复版本。
+- CI 与项目 Go 工具链升级至 1.26.6，修复标准库中可达的 URL、TLS、HTTP、XML 与 ASN.1 漏洞。
+
 ### 模型目录与定价
 
 - 上新 GPT-6 Astra、GPT-6 Sol、GPT-6 Luna、Claude Fable 5.1、Claude Opus 5.5、受邀 Claude Mythos 5.1、Grok 4.7、DeepSeek Flash，以及 Gemini 3.8/3.7/3.6/3.5 Flash 系列。

@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://github.com/Lincb522/dengdeng/actions/workflows/quality.yml"><img src="https://img.shields.io/github/actions/workflow/status/Lincb522/dengdeng/quality.yml?branch=main&label=quality" alt="质量检查"></a>
   <a href="https://github.com/Lincb522/dengdeng/pkgs/container/dengdeng"><img src="https://img.shields.io/badge/GHCR-amd64%20%7C%20arm64-2f6feb" alt="容器镜像"></a>
-  <img src="https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white" alt="Go 1.26.5">
+  <img src="https://img.shields.io/badge/Go-1.26.6-00ADD8?logo=go&logoColor=white" alt="Go 1.26.6">
   <img src="https://img.shields.io/badge/Node.js-26-5FA04E?logo=nodedotjs&logoColor=white" alt="Node.js 26">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-LGPL--3.0--or--later-c98a20" alt="LGPL-3.0-or-later"></a>
 </p>
@@ -112,7 +112,7 @@ Compose 默认把服务映射到宿主机 `127.0.0.1:9100`，数据库位于 `de
 
 ### 本地开发
 
-版本以仓库和 CI 为准：Go 1.26.5、Node.js 26、pnpm 11.14.0。
+版本以仓库和 CI 为准：Go 1.26.6、Node.js 26、pnpm 11.14.0。
 
 ```bash
 corepack enable

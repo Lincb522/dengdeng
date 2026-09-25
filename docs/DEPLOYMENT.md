@@ -14,7 +14,7 @@
 
 ### 源码构建
 
-- Go 1.26.5
+- Go 1.26.6
 - Node.js 26
 - pnpm 11.14.0
 - Git
@@ -291,7 +291,7 @@ systemctl list-timers dengdeng-github-backup.timer
 
 管理端版本更新依赖独立 root systemd 单元。网页只创建更新请求并启动固定服务；仓库、分支、源码目录、发布目录和运行二进制路径由 root 独占的 `/etc/dengdeng/update.conf` 决定。
 
-安装前先确认主机实际提供 Go 1.26.5、Node.js 26、pnpm 11.14.0、Git 和 Python 3。随后从已审核的仓库工作树执行：
+安装前先确认主机实际提供 Go 1.26.6、Node.js 26、pnpm 11.14.0、Git 和 Python 3。随后从已审核的仓库工作树执行：
 
 ```bash
 sudo bash deploy/update/install.sh
