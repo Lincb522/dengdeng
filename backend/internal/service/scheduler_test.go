@@ -115,6 +115,14 @@ func newSchedulerTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A bare SQLite :memory: database exists per connection. Keep this test
+	// database on one connection so migrations and scheduler queries share the
+	// same schema while asynchronous last-used persistence is still running.
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.AutoMigrate(&model.UpstreamAccount{}, &model.Proxy{}, &model.AccountQuotaSnapshot{}, &model.CodexQuotaSnapshot{}); err != nil {
 		t.Fatal(err)
 	}
